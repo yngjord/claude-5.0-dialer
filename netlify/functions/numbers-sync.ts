@@ -2,7 +2,7 @@ import type { Config } from '@netlify/functions';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
 import { db, must } from './_lib/db';
 import { handler, json } from './_lib/http';
-import { callbackUrl, twilioClient } from './_lib/twilio';
+import { callbackUrl, requireTwilioConfigured, twilioClient } from './_lib/twilio';
 
 /**
  * POST /api/admin/numbers-sync: imports every number on the Twilio account into phone_numbers and points its
@@ -10,6 +10,7 @@ import { callbackUrl, twilioClient } from './_lib/twilio';
  */
 export default handler(async (req) => {
   requireAdmin(await requireDialerUser(req));
+  requireTwilioConfigured();
   const client = twilioClient();
   const numbers = await client.incomingPhoneNumbers.list({ limit: 200 });
   const voiceUrl = callbackUrl(req, '/api/twilio/inbound-voice');

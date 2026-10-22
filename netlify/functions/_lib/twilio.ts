@@ -3,6 +3,12 @@ import { env, HttpError } from './http';
 
 let client: ReturnType<typeof twilio> | null = null;
 
+/** Refuses with a clear message (rather than a generic 500) while Twilio's keys aren't in Netlify yet. */
+export function requireTwilioConfigured(): void {
+  const missing = ['TWILIO_ACCOUNT_SID', 'TWILIO_API_KEY_SID', 'TWILIO_API_KEY_SECRET'].filter((k) => !process.env[k]);
+  if (missing.length) throw new HttpError(503, `Twilio isn't connected yet. Add ${missing.join(', ')} to Netlify's environment variables.`);
+}
+
 /** Twilio REST client, authenticated with the API key (not the account's auth token). */
 export function twilioClient() {
   client ??= twilio(env('TWILIO_API_KEY_SID'), env('TWILIO_API_KEY_SECRET'), { accountSid: env('TWILIO_ACCOUNT_SID') });

@@ -74,7 +74,10 @@ Then for each person:
 1. Create the account and upgrade it. Trial accounts can only call verified numbers.
 2. **Regulatory compliance → Bundles:** create an Australian business bundle (ABN, business address). AU mobile
    numbers need an approved bundle, and approval can take a few business days.
-3. **Buy AU mobile numbers (+61 4…)**, one per client. They support voice and SMS. AU local (02/03)
+3. **Numbers:** once the bundle is approved and the keys are in Netlify (steps 5–6), buy AU mobile numbers (+61 4…), one per client, from the dialer itself:
+   **Phone numbers → Buy number** (admins). It searches Twilio's stock, shows the monthly price, buys the number
+   with your approved bundle and address, sets its voicemail/SMS webhooks and links it to the client. (Numbers
+   bought in Twilio directly can be pulled in with **Sync from Twilio**.) They support voice and SMS. AU local (02/03)
    numbers can't send texts.
 4. **Voice → Settings → Geo permissions:** allow only Australia and New Zealand. Do the same under
    **Messaging → Settings → Geo permissions**.

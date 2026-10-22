@@ -189,3 +189,26 @@ export interface SmsSendRequest {
   body: string;
   contactId?: string | null;
 }
+
+export interface AvailableNumber {
+  phoneNumber: string;
+  locality: string | null;
+  region: string | null;
+  sms: boolean;
+  voice: boolean;
+}
+
+export interface AvailableNumbersResponse {
+  numbers: AvailableNumber[];
+  /** Monthly cost per number, as Twilio bills it. */
+  price: { amount: number; currency: string } | null;
+  /** Whether the AU regulatory bundle is approved, which Twilio requires before selling AU mobiles. */
+  bundleReady: boolean;
+  bundleStatus: string | null;
+}
+
+export interface BuyNumberRequest {
+  phoneNumber: string;
+  clientName: string;
+  label?: string | null;
+}

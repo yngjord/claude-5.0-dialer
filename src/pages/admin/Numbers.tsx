@@ -1,4 +1,4 @@
-import { RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { formatPhone } from '../../../shared/phone';
 import type { AirtableClient, PhoneNumber } from '../../../shared/types';
@@ -8,6 +8,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/ui/States';
 import { api, must, useLoad } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
+import { BuyNumberModal } from './BuyNumberModal';
 
 /**
  * Twilio numbers: which client each number belongs to, the default, and custom voicemail greetings.
@@ -17,6 +18,7 @@ export default function Numbers() {
   const list = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
   const clients = useLoad(() => api<AirtableClient[]>('clients'), []);
   const [syncing, setSyncing] = useState(false);
+  const [buying, setBuying] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,11 +73,16 @@ export default function Numbers() {
     <>
       <PageHeader
         title="Phone numbers"
-        subtitle="Each client has their own number. Their campaigns call and text from it, whichever rep is dialing. The default is used for clients without one."
+        subtitle="Each client has their own number, shared by every rep on their campaigns."
         actions={
-          <Button onClick={sync} disabled={syncing}>
-            {syncing ? <Spinner /> : <RefreshCw size={16} />} Sync from Twilio
-          </Button>
+          <>
+            <Button variant="outline" onClick={sync} disabled={syncing}>
+              {syncing ? <Spinner /> : <RefreshCw size={16} />} Sync from Twilio
+            </Button>
+            <Button onClick={() => setBuying(true)}>
+              <Plus size={16} /> Buy number
+            </Button>
+          </>
         }
       />
 
@@ -105,7 +112,7 @@ export default function Numbers() {
               </thead>
               <tbody className="divide-y divide-line">
                 {!list.data?.length ? (
-                  <EmptyRow colSpan={5}>No numbers yet. Buy AU mobile numbers in Twilio, then press Sync from Twilio.</EmptyRow>
+                  <EmptyRow colSpan={5}>No numbers yet. Use Buy number, or Sync from Twilio if you bought them in Twilio directly.</EmptyRow>
                 ) : (
                   list.data.map((n) => (
                     <tr key={n.id}>
@@ -172,6 +179,16 @@ export default function Numbers() {
           </div>
         )}
       </section>
+      {buying && (
+        <BuyNumberModal
+          onClose={() => setBuying(false)}
+          onBought={(n) => {
+            setBuying(false);
+            setMessage(`Bought ${formatPhone(n.e164)} for ${n.client_name}. It's ready for their campaigns.`);
+            list.reload({ quiet: true });
+          }}
+        />
+      )}
     </>
   );
 }
