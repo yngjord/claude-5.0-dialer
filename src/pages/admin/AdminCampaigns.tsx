@@ -274,7 +274,7 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
 }
 
 /**
- * Deleting is two steps: open this from Edit campaign, then type the campaign's name. Contacts and team assignments
+ * Deleting is two clicks: Delete campaign in Edit campaign, then Delete for good here. Contacts and team assignments
  * go with the campaign (cascade); call logs stay, keeping the campaign and client name, recordings and transcripts.
  */
 function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Campaign; onCancel: () => void; onDeleted: () => void }) {
@@ -282,13 +282,10 @@ function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Camp
     async () => must(await supabase.from('dialer_campaign_stats').select('contacts_total, dials_total').eq('campaign_id', campaign.id).maybeSingle()) as Pick<CampaignStats, 'contacts_total' | 'dials_total'> | null,
     [campaign.id],
   );
-  const [typed, setTyped] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const matches = typed.trim() === campaign.name.trim();
 
   const remove = async () => {
-    if (!matches) return;
     setDeleting(true);
     setError(null);
     const { data, error } = await supabase.from('dialer_campaigns').delete().eq('id', campaign.id).select('id');
@@ -310,7 +307,7 @@ function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Camp
           <Button variant="ghost" onClick={onCancel} disabled={deleting}>
             Cancel
           </Button>
-          <Button className="!border-red-600 !bg-red-600 hover:!bg-red-700 hover:!shadow-none" onClick={remove} disabled={!matches || deleting}>
+          <Button className="!border-red-600 !bg-red-600 hover:!bg-red-700 hover:!shadow-none" onClick={remove} disabled={deleting}>
             {deleting ? <Spinner /> : <Trash2 size={15} />} Delete for good
           </Button>
         </>
@@ -326,20 +323,6 @@ function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Camp
           {dials > 0 ? `Its ${dials.toLocaleString()} logged call${dials === 1 ? '' : 's'} are kept` : 'Any calls made are kept'}, with their recordings and transcripts, so the
           client's Cold Call Logs and your stats don't change. To just stop dialing it, set the status to Paused or Archived instead.
         </p>
-        <div>
-          <label htmlFor="confirm-name" className="mb-2 block text-sm font-medium text-ink-soft">
-            Type <span className="font-semibold text-ink">{campaign.name}</span> to confirm
-          </label>
-          <input
-            id="confirm-name"
-            className="field"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && remove()}
-            autoComplete="off"
-            autoFocus
-          />
-        </div>
         {error && (
           <p role="alert" className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
