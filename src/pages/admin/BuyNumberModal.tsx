@@ -1,10 +1,12 @@
 import { AlertTriangle, Search } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
+import { numberSearchPattern, type NumberMatch } from '../../../shared/numberSearch';
 import { formatPhone } from '../../../shared/phone';
 import type { AirtableClient, AvailableNumbersResponse, BuyNumberRequest, PhoneNumber } from '../../../shared/types';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Spinner } from '../../components/ui/Spinner';
+import { Tabs } from '../../components/ui/Tabs';
 import { api, useLoad } from '../../lib/api';
 
 const BUNDLE_STATUS: Record<string, string> = {
@@ -21,9 +23,11 @@ const money = (p: { amount: number; currency: string }) => new Intl.NumberFormat
  * monthly cost. The number's voicemail/SMS webhooks are set up and it's added to the list.
  */
 export function BuyNumberModal({ onClose, onBought }: { onClose: () => void; onBought: (n: PhoneNumber) => void }) {
-  const [contains, setContains] = useState('');
+  const [digits, setDigits] = useState('');
+  const [match, setMatch] = useState<NumberMatch>('anywhere');
   const [query, setQuery] = useState('');
-  const results = useLoad(() => api<AvailableNumbersResponse>(`admin/numbers/available${query ? `?contains=${encodeURIComponent(query)}` : ''}`), [query]);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const results = useLoad(() => api<AvailableNumbersResponse>(`admin/numbers/available${query}`), [query]);
   const clients = useLoad(() => api<AirtableClient[]>('clients'), []);
   const [selected, setSelected] = useState<string | null>(null);
   const [clientName, setClientName] = useState('');
@@ -37,8 +41,12 @@ export function BuyNumberModal({ onClose, onBought }: { onClose: () => void; onB
 
   const search = (e: FormEvent) => {
     e.preventDefault();
+    // Checked here too so a search that can't match says why straight away.
+    const pattern = numberSearchPattern(digits, match);
+    if (!pattern.ok) return setSearchError(pattern.reason);
+    setSearchError(null);
     setSelected(null);
-    setQuery(contains.replace(/\D/g, ''));
+    setQuery(pattern.contains ? `?${new URLSearchParams({ digits, match })}` : '');
   };
 
   const buy = async () => {
@@ -117,14 +125,34 @@ export function BuyNumberModal({ onClose, onBought }: { onClose: () => void; onB
           </p>
         )}
 
-        <form onSubmit={search} className="flex gap-2">
-          <label htmlFor="contains" className="sr-only">
-            Digits to search for
-          </label>
-          <input id="contains" className="field" inputMode="numeric" placeholder="Digits to look for, e.g. 0400 or 888 (optional)" value={contains} onChange={(e) => setContains(e.target.value)} />
-          <Button type="submit" variant="outline" className="!h-auto">
-            <Search size={16} /> Search
-          </Button>
+        <form onSubmit={search} className="space-y-3">
+          <Tabs
+            label="Where the digits appear"
+            value={match}
+            onChange={setMatch}
+            tabs={[
+              { value: 'anywhere', label: 'Anywhere' },
+              { value: 'start', label: 'Starts with' },
+              { value: 'end', label: 'Ends with' },
+            ]}
+          />
+          <div className="flex gap-2">
+            <label htmlFor="digits" className="sr-only">
+              Digits to search for
+            </label>
+            <input
+              id="digits"
+              className="field"
+              inputMode="numeric"
+              placeholder={match === 'start' ? 'e.g. 0488' : match === 'end' ? 'e.g. 888' : 'e.g. 2024 (optional)'}
+              value={digits}
+              onChange={(e) => setDigits(e.target.value)}
+            />
+            <Button type="submit" variant="outline" className="!h-auto">
+              <Search size={16} /> Search
+            </Button>
+          </div>
+          {searchError && <p className="text-sm text-red-600">{searchError}</p>}
         </form>
 
         {results.error ? (
@@ -136,7 +164,7 @@ export function BuyNumberModal({ onClose, onBought }: { onClose: () => void; onB
             <Spinner className="text-brand" /> Looking up numbers…
           </div>
         ) : !data?.numbers.length ? (
-          <p className="py-6 text-center text-sm text-ink-faint">No numbers found{query ? ' with those digits' : ''}. Try different digits.</p>
+          <p className="py-6 text-center text-sm text-ink-faint">No numbers found{query ? ' with those digits' : ''}. Try fewer or different digits, or Anywhere.</p>
         ) : (
           <fieldset className="max-h-[260px] space-y-1.5 overflow-y-auto pr-1">
             <legend className="sr-only">Available numbers</legend>

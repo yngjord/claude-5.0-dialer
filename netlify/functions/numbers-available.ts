@@ -1,23 +1,28 @@
 import type { Config } from '@netlify/functions';
+import { NUMBER_MATCHES, numberSearchPattern, type NumberMatch } from '../../shared/numberSearch';
 import type { AvailableNumbersResponse } from '../../shared/types';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
-import { handler, json } from './_lib/http';
+import { handler, HttpError, json } from './_lib/http';
 import { COUNTRY, findBundle, mobileMonthlyPrice } from './_lib/numbers';
 import { requireTwilioConfigured, twilioClient } from './_lib/twilio';
 
 /**
- * GET /api/admin/numbers/available?contains=412: AU mobile numbers (voice + SMS) Twilio has for sale, the monthly
- * price, and whether the account's regulatory bundle is approved (needed before buying). Admins only.
+ * GET /api/admin/numbers/available?digits=888&match=end: AU mobile numbers (voice + SMS) Twilio has for sale, the monthly
+ * price, and whether the account's regulatory bundle is approved (needed before buying). `match` is anywhere (default),
+ * start or end. Admins only.
  */
 export default handler(async (req) => {
   requireAdmin(await requireDialerUser(req));
   requireTwilioConfigured();
-  const contains = new URL(req.url).searchParams.get('contains')?.replace(/\D/g, '') ?? '';
+  const params = new URL(req.url).searchParams;
+  const match = (NUMBER_MATCHES as readonly string[]).includes(params.get('match') ?? '') ? (params.get('match') as NumberMatch) : 'anywhere';
+  const pattern = numberSearchPattern(params.get('digits') ?? '', match);
+  if (!pattern.ok) throw new HttpError(400, pattern.reason);
 
   const [found, price, bundle] = await Promise.all([
     twilioClient()
       .availablePhoneNumbers(COUNTRY)
-      .mobile.list({ voiceEnabled: true, smsEnabled: true, limit: 20, ...(contains ? { contains: contains.replace(/^0/, '') } : {}) }),
+      .mobile.list({ voiceEnabled: true, smsEnabled: true, limit: 20, ...(pattern.contains ? { contains: pattern.contains } : {}) }),
     mobileMonthlyPrice(),
     findBundle(),
   ]);

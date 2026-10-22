@@ -3,6 +3,7 @@ import { buildImport, guessMapping, parseCsv } from './csv';
 import { buildLeadFields, todayInSydney, validateLead, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
+import { numberSearchPattern } from './numberSearch';
 import { shouldTranscribe } from './pickup';
 
 describe('normalizePhone', () => {
@@ -135,5 +136,21 @@ describe('shouldTranscribe', () => {
     expect(shouldTranscribe({ kind: 'call', answeredBy: 'machine_end_beep', durationS: 40 })).toBe(false);
     expect(shouldTranscribe({ kind: 'call', answeredBy: null, durationS: 3 })).toBe(false);
     expect(shouldTranscribe({ kind: 'voicemail', answeredBy: null, durationS: 10 })).toBe(true);
+  });
+});
+
+describe('numberSearchPattern', () => {
+  it('builds Twilio contains patterns', () => {
+    expect(numberSearchPattern('888', 'anywhere')).toEqual({ ok: true, contains: '888' });
+    expect(numberSearchPattern('0488', 'start')).toEqual({ ok: true, contains: '488******' });
+    expect(numberSearchPattern('+61 488', 'start')).toEqual({ ok: true, contains: '488******' });
+    expect(numberSearchPattern('488', 'start')).toEqual({ ok: true, contains: '488******' });
+    expect(numberSearchPattern('8 888', 'end')).toEqual({ ok: true, contains: '*****8888' });
+    expect(numberSearchPattern('', 'end')).toEqual({ ok: true, contains: null });
+  });
+
+  it('rejects searches that cannot match a mobile', () => {
+    expect(numberSearchPattern('02', 'start').ok).toBe(false);
+    expect(numberSearchPattern('1234567890', 'anywhere').ok).toBe(false);
   });
 });
