@@ -35,9 +35,10 @@ create table if not exists public.dialer_phone_numbers (
   e164 text not null unique,
   twilio_sid text unique,
   label text,
-  -- Calls and texts from this rep go out from this number.
-  assigned_user_id uuid references auth.users(id) on delete set null,
-  -- Used when neither the rep nor the campaign has a number.
+  -- The client this number belongs to (Airtable Client Company). Their campaigns call and text from it; several
+  -- reps can share it.
+  client_name text,
+  -- Used when the campaign's client has no number of its own.
   is_default boolean not null default false,
   -- Storage path in the 'dialer-greetings' bucket; null = the standard spoken greeting.
   voicemail_greeting_path text,

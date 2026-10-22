@@ -8,10 +8,11 @@ import Brand from './Brand';
 import { ClickToCallBar } from './ClickToCall';
 import LoadingBar from './LoadingBar';
 
-const NAV: { to: string; label: string; icon: LucideIcon }[] = [
+// Team members only get Campaigns and Stats; the rest is for admins.
+const NAV: { to: string; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
   { to: '/campaigns', label: 'Campaigns', icon: LayoutList },
-  { to: '/calls', label: 'Calls', icon: PhoneCall },
-  { to: '/inbox', label: 'Inbox', icon: InboxIcon },
+  { to: '/calls', label: 'Calls', icon: PhoneCall, adminOnly: true },
+  { to: '/inbox', label: 'Inbox', icon: InboxIcon, adminOnly: true },
   { to: '/stats', label: 'Stats', icon: BarChart3 },
 ];
 const ADMIN_NAV: { to: string; label: string; icon: LucideIcon }[] = [
@@ -44,7 +45,7 @@ function PhoneStatus() {
 export default function AppShell() {
   const { me, error, signOut, isAdmin } = useAuth();
   const [open, setOpen] = useState(false);
-  const unread = useInboxCount(me?.userId);
+  const unread = useInboxCount(isAdmin ? me?.userId : undefined);
   const location = useLocation();
 
   useEffect(() => setOpen(false), [location.pathname]);
@@ -85,7 +86,7 @@ export default function AppShell() {
         <p className="-mt-3 mb-2 px-6 text-xs font-medium uppercase tracking-[0.18em] text-white/60">Dialer</p>
 
         <nav aria-label="Main" className="mt-2 flex-1 space-y-1.5 overflow-y-auto px-3">
-          {NAV.map(({ to, label, icon: Icon }) => (
+          {NAV.filter((n) => isAdmin || !n.adminOnly).map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} className={navClass}>
               <Icon size={20} strokeWidth={1.75} />
               {label}

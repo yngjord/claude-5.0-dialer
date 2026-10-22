@@ -2,7 +2,6 @@ import { ArrowLeft, Voicemail } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { formatPhone } from '../../shared/phone';
 import type { CallRow, SmsMessage } from '../../shared/types';
-import { useAuth } from '../auth/AuthProvider';
 import { CallDetailModal } from '../components/CallDetail';
 import { SmsThread } from '../components/SmsThread';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/States';
@@ -25,7 +24,7 @@ export default function Inbox() {
   const [tab, setTab] = useState<'texts' | 'voicemails'>('texts');
   return (
     <>
-      <PageHeader title="Inbox" subtitle="Texts and voicemails from prospects. You're notified about people you last called or texted." />
+      <PageHeader title="Inbox" subtitle="Texts and voicemails from prospects, across every campaign." />
       <div className="mb-5 animate-appear">
         <Tabs
           label="Inbox"
@@ -43,7 +42,6 @@ export default function Inbox() {
 }
 
 function Texts() {
-  const { me } = useAuth();
   const [selected, setSelected] = useState<string | null>(null);
   const { data, error, loading, reload } = useLoad(
     async () =>
@@ -73,11 +71,11 @@ function Texts() {
       t.name ??= m.contact?.full_name ?? null;
       t.company ??= m.contact?.company ?? null;
       t.contactId ??= m.contact_id;
-      if (m.direction === 'inbound' && !m.read_at && m.user_id === me?.userId) t.unread++;
+      if (m.direction === 'inbound' && !m.read_at) t.unread++;
       byPhone.set(m.phone_e164, t);
     }
     return [...byPhone.values()];
-  }, [data, me?.userId]);
+  }, [data]);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
   const thread = threads.find((t) => t.phone === selected);
@@ -139,7 +137,6 @@ function Texts() {
 }
 
 function Voicemails() {
-  const { me } = useAuth();
   const [open, setOpen] = useState<string | null>(null);
   const { data, error, loading, reload } = useLoad(
     async () => must(await supabase.from('dialer_calls').select('*').eq('kind', 'voicemail').order('started_at', { ascending: false }).limit(200)) as CallRow[],
@@ -164,7 +161,7 @@ function Voicemails() {
               <EmptyRow colSpan={4}>No voicemails yet.</EmptyRow>
             ) : (
               data.map((v) => {
-                const unread = !v.read_at && v.user_id === me?.userId;
+                const unread = !v.read_at;
                 return (
                   <tr key={v.id} className="cursor-pointer transition-colors hover:bg-neutral-50" onClick={() => setOpen(v.id)}>
                     <td className="td w-8">

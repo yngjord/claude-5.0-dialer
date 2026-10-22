@@ -1,7 +1,7 @@
 import { RefreshCw, Trash2, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { formatPhone } from '../../../shared/phone';
-import type { DialerUser, PhoneNumber } from '../../../shared/types';
+import type { AirtableClient, PhoneNumber } from '../../../shared/types';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
@@ -10,12 +10,12 @@ import { api, must, useLoad } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 
 /**
- * Twilio numbers: who calls from which number, the default, and custom voicemail greetings.
+ * Twilio numbers: which client each number belongs to, the default, and custom voicemail greetings.
  * "Sync from Twilio" imports bought numbers and points their voicemail/SMS webhooks at this site.
  */
 export default function Numbers() {
   const list = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
-  const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
+  const clients = useLoad(() => api<AirtableClient[]>('clients'), []);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export default function Numbers() {
     <>
       <PageHeader
         title="Phone numbers"
-        subtitle="Calls and texts go out from the rep's own number, else the campaign's, else the default."
+        subtitle="Each client has their own number. Their campaigns call and text from it, whichever rep is dialing. The default is used for clients without one."
         actions={
           <Button onClick={sync} disabled={syncing}>
             {syncing ? <Spinner /> : <RefreshCw size={16} />} Sync from Twilio
@@ -98,7 +98,7 @@ export default function Numbers() {
                 <tr>
                   <th className="th">Number</th>
                   <th className="th">Label</th>
-                  <th className="th">Assigned to</th>
+                  <th className="th">Client</th>
                   <th className="th">Default</th>
                   <th className="th">Voicemail greeting</th>
                 </tr>
@@ -120,15 +120,17 @@ export default function Numbers() {
                       </td>
                       <td className="td">
                         <select
-                          aria-label={`Rep for ${n.e164}`}
+                          aria-label={`Client for ${n.e164}`}
                           className="field !w-52 !py-2 text-sm"
-                          value={n.assigned_user_id ?? ''}
-                          onChange={(e) => update(n.id, { assigned_user_id: e.target.value || null })}
+                          value={n.client_name ?? ''}
+                          onChange={(e) => update(n.id, { client_name: e.target.value || null })}
                         >
-                          <option value="">Nobody</option>
-                          {users.data?.map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.display_name || u.email}
+                          <option value="">{clients.loading ? 'Loading…' : 'No client'}</option>
+                          {/* Keep a saved name selectable even if it's no longer in Airtable. */}
+                          {n.client_name && !clients.data?.some((c) => c.name === n.client_name) && <option value={n.client_name}>{n.client_name}</option>}
+                          {clients.data?.map((c) => (
+                            <option key={c.id} value={c.name}>
+                              {c.name}
                             </option>
                           ))}
                         </select>

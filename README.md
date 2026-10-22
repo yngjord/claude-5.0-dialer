@@ -18,8 +18,9 @@ Browser (React + Vite)
 ## How it works
 
 - **Who can use it.** Anyone whose `profiles.role` is `team` or `admin`. Portal clients get "This app is for the
-  Maronly team". Admins see every campaign. Team members only see the campaigns they're ticked for in
-  **Manage campaigns**. RLS enforces this in the database, not just in the UI.
+  Maronly team" and can't see or do anything. Admins see every campaign and every page. Team members only get
+  **Campaigns** and **Stats**, and only for the campaigns they're ticked for in **Manage campaigns**. RLS enforces
+  this in the database, not just in the UI.
 - **Campaigns and contacts.** Each campaign belongs to one Airtable client: calls show in that client's Cold Call
   Logs, and Leads are linked to them. Contacts come from a CSV upload. Only AU (+614) and NZ (+642) mobiles are
   accepted, and duplicate numbers within a campaign are skipped. A local number written like `02 9876 5432` is
@@ -47,9 +48,11 @@ Browser (React + Vite)
   voicemails are transcribed with Twilio Voice Intelligence, with rep and prospect on separate channels.
   `sweep` (every 10 minutes) finishes anything a webhook didn't.
 - **Inbound.** There are no live inbound calls. Callers hear the number's greeting (the standard spoken one, or an
-  upload in **Phone numbers**) and can leave a voicemail. Voicemails and texts go to the Inbox of the rep who last
-  called or texted that number.
-- **Caller ID.** Calls go out from the rep's own number, else the campaign's number, else the default number.
+  upload in **Phone numbers**, so each client's number can have its own) and can leave a voicemail. Voicemails and
+  texts go to the admin **Inbox**, tagged with the rep who last called or texted that person.
+- **Caller ID.** Each number belongs to a client (set in **Phone numbers**), and several reps share it. A campaign
+  calls and texts from the number picked on the campaign, else its client's number, else the default number. Text
+  replies stay on whichever number the conversation is already on.
 
 Everything the dialer adds to the shared Supabase project is prefixed `dialer_` (tables, views, functions, triggers, indexes) or `dialer-` (storage buckets), so it's easy to tell apart from the portal's and other projects' objects. Every table, policy and function is in [`supabase/migrations/20261022000000_dialer.sql`](supabase/migrations/20261022000000_dialer.sql).
 
@@ -71,7 +74,7 @@ Then for each person:
 1. Create the account and upgrade it. Trial accounts can only call verified numbers.
 2. **Regulatory compliance → Bundles:** create an Australian business bundle (ABN, business address). AU mobile
    numbers need an approved bundle, and approval can take a few business days.
-3. **Buy AU mobile numbers (+61 4…)**, ideally one per rep. They support voice and SMS. AU local (02/03)
+3. **Buy AU mobile numbers (+61 4…)**, one per client. They support voice and SMS. AU local (02/03)
    numbers can't send texts.
 4. **Voice → Settings → Geo permissions:** allow only Australia and New Zealand. Do the same under
    **Messaging → Settings → Geo permissions**.
@@ -82,7 +85,7 @@ Then for each person:
    TWILIO_ACCOUNT_SID=AC… TWILIO_API_KEY_SID=SK… TWILIO_API_KEY_SECRET=… \
    PUBLIC_BASE_URL=https://dialer.maronly.com.au npm run setup:twilio
    ```
-7. In the app, sign in as an admin, open **Phone numbers → Sync from Twilio**, and assign numbers to reps.
+7. In the app, sign in as an admin, open **Phone numbers → Sync from Twilio**, and set which client each number belongs to.
 
 ### 3. Netlify
 

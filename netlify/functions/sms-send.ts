@@ -7,7 +7,7 @@ import { handler, HttpError, json, readJson } from './_lib/http';
 import { callbackUrl, pickCallerNumber, twilioClient } from './_lib/twilio';
 
 /**
- * POST /api/sms: sends a text from the rep's number. Reps can text contacts in their campaigns, and anyone who
+ * POST /api/sms: sends a text from the client's number (or the number the conversation is already on). Reps can text contacts in their campaigns, and anyone who
  * has texted or been texted by them; admins can text any AU/NZ mobile.
  */
 export default handler(async (req) => {
@@ -34,11 +34,19 @@ export default handler(async (req) => {
   if (!allowed) throw new HttpError(403, "You can only text contacts in your campaigns.");
 
   const contact = contacts.find((c) => c.id === body.contactId) ?? contacts.find((c) => campaignIds.includes(c.campaign_id)) ?? null;
+  // Keep a conversation on one number: reply from whichever of our numbers last texted with this person.
+  const last = must(
+    await db().from('dialer_sms_messages').select('our_number').eq('phone_e164', phone.e164).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+  ) as { our_number: string } | null;
+  const ours = last && must(await db().from('dialer_phone_numbers').select('e164').eq('e164', last.our_number).maybeSingle());
   const campaign = contact
-    ? ((await db().from('dialer_campaigns').select('caller_number_id').eq('id', contact.campaign_id).maybeSingle()).data as { caller_number_id: string | null } | null)
+    ? ((await db().from('dialer_campaigns').select('caller_number_id, client_name').eq('id', contact.campaign_id).maybeSingle()).data as {
+        caller_number_id: string | null;
+        client_name: string;
+      } | null)
     : null;
-  const from = await pickCallerNumber(db(), me.userId, campaign?.caller_number_id ?? null);
-  if (!from) throw new HttpError(400, 'No number is set up to send from. Ask an admin to assign you a number.');
+  const from = ours ? last.our_number : await pickCallerNumber(db(), campaign);
+  if (!from) throw new HttpError(400, "No number is set up for this client. Ask an admin to add one.");
 
   const msg = await twilioClient().messages.create({ to: phone.e164, from, body: text, statusCallback: callbackUrl(req, '/api/twilio/sms-status') });
   const row = must(

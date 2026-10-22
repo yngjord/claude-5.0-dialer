@@ -20,6 +20,15 @@ export default function AdminCampaigns() {
   const list = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false })) as Row[], []);
   const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
   const numbers = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
+  // Same order as pickCallerNumber on the server: campaign's own pick, else the client's number, else the default.
+  const callerLabel = (c: Campaign) => {
+    const picked = numbers.data?.find((n) => n.id === c.caller_number_id);
+    if (picked) return formatPhone(picked.e164);
+    const client = numbers.data?.find((n) => n.client_name === c.client_name);
+    if (client) return `${formatPhone(client.e164)} (client's)`;
+    const fallback = numbers.data?.find((n) => n.is_default);
+    return fallback ? `${formatPhone(fallback.e164)} (default)` : 'None set up';
+  };
   const nameOf = (id: string) => {
     const u = users.data?.find((x) => x.id === id);
     return u?.display_name || u?.email || 'Unknown';
@@ -72,7 +81,7 @@ export default function AdminCampaigns() {
                         <Badge tone={c.status === 'active' ? 'green' : c.status === 'paused' ? 'amber' : 'grey'}>{c.status}</Badge>
                       </td>
                       <td className="td tabular-nums text-ink-muted">
-                        {c.caller_number_id ? formatPhone(numbers.data?.find((n) => n.id === c.caller_number_id)?.e164) : "Each rep's own"}
+                        {callerLabel(c)}
                       </td>
                       <td className="td max-w-[240px]">
                         <button onClick={() => setMembers(c)} className="inline-flex max-w-full items-center gap-1.5 truncate text-brand hover:underline">
@@ -207,14 +216,14 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
             Caller number
           </label>
           <select id="c-number" className="field" value={numberId} onChange={(e) => setNumberId(e.target.value)}>
-            <option value="">Each rep's own number</option>
+            <option value="">The client's number</option>
             {numbers.map((n) => (
               <option key={n.id} value={n.id}>
                 {formatPhone(n.e164)} {n.label ? `· ${n.label}` : ''}
               </option>
             ))}
           </select>
-          <p className="mt-1.5 text-xs text-ink-faint">Used when the rep has no number of their own.</p>
+          <p className="mt-1.5 text-xs text-ink-faint">Leave as the client's number unless this campaign needs a different one. Set client numbers in Phone numbers.</p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>

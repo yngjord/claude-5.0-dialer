@@ -24,7 +24,7 @@ export interface PhoneNumber {
   e164: string;
   twilio_sid: string | null;
   label: string | null;
-  assigned_user_id: string | null;
+  client_name: string | null;
   is_default: boolean;
   voicemail_greeting_path: string | null;
   created_at: string;

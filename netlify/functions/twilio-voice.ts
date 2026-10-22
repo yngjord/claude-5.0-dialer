@@ -41,7 +41,7 @@ export default handler(async (req) => {
   }
 
   const phone = normalizePhone(contact.phone_e164);
-  const from = await pickCallerNumber(db(), me.userId, campaign.caller_number_id);
+  const from = await pickCallerNumber(db(), campaign);
 
   must(
     await db().from('dialer_calls').insert({
@@ -67,7 +67,7 @@ export default handler(async (req) => {
   );
 
   if (!phone.ok) return say('Sorry, this number is not an Australian or New Zealand mobile.');
-  if (!from) return say('No caller number is set up. Ask an admin to assign you a number.');
+  if (!from) return say("No caller number is set up for this client. Ask an admin to add one.");
 
   const q = { callId };
   return twiml(

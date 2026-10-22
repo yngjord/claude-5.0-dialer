@@ -14,16 +14,16 @@ import { ErrorState } from './ui/States';
 
 /** One call or voicemail: details, recording and transcript. Opening a voicemail marks it as heard. */
 export function CallDetail({ callId }: { callId: string }) {
-  const { me } = useAuth();
+  const { isAdmin } = useAuth();
   const call = useLoad(async () => must(await supabase.from('dialer_calls').select('*').eq('id', callId).maybeSingle()) as CallRow | null, [callId]);
   const media = useLoad(() => api<CallMediaResponse>(`call-media?id=${encodeURIComponent(callId)}`), [callId]);
 
   const row = call.data;
   useEffect(() => {
-    if (row?.kind === 'voicemail' && !row.read_at && row.user_id === me?.userId) {
+    if (row?.kind === 'voicemail' && !row.read_at && isAdmin) {
       supabase.from('dialer_calls').update({ read_at: new Date().toISOString() }).eq('id', row.id).then(() => window.dispatchEvent(new Event('inbox:changed')));
     }
-  }, [row, me?.userId]);
+  }, [row, isAdmin]);
 
   if (call.error) return <ErrorState message={call.error} onRetry={call.reload} />;
   if (call.loading) return <Spinner className="text-brand" />;
