@@ -7,7 +7,7 @@ export default function CallDetailPage() {
   return (
     <>
       <Link to="/calls" className="mb-4 inline-flex items-center gap-1 text-sm text-ink-muted hover:text-brand">
-        <ArrowLeft size={15} /> Calls
+        <ArrowLeft size={15} /> Call logs
       </Link>
       <div className="card max-w-3xl animate-appear p-6 sm:p-8">
         <CallDetail callId={id} />

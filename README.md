@@ -18,9 +18,10 @@ Browser (React + Vite)
 ## How it works
 
 - **Who can use it.** Anyone whose `profiles.role` is `team` or `admin`. Portal clients get "This app is for the
-  Maronly team" and can't see or do anything. Admins see every campaign and every page. Team members only get
-  **Campaigns** and **Stats**, and only for the campaigns they're ticked for in **Manage campaigns**. RLS enforces
-  this in the database, not just in the UI.
+  Maronly team" and can't see or do anything. Everyone gets **Campaigns** (their numbers for a date range and
+  campaign, then their campaign list) and **Call logs**. Admins also get **Manage campaigns** and **Phone numbers**,
+  and see every campaign and call. Team members only see the campaigns they're ticked for in **Manage campaigns**,
+  and only calls they made themselves. RLS enforces this in the database, not just in the UI.
 - **Campaigns and contacts.** Each campaign belongs to one Airtable client: calls show in that client's Cold Call
   Logs, and Leads are linked to them. Contacts come from a CSV upload. Only AU (+614) and NZ (+642) mobiles are
   accepted, and duplicate numbers within a campaign are skipped. A local number written like `02 9876 5432` is

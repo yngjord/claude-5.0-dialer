@@ -1,6 +1,6 @@
 import type { Config } from '@netlify/functions';
 import type { CallMediaResponse, CallRow } from '../../shared/types';
-import { requireDialerUser, requireCampaignAccess } from './_lib/auth';
+import { requireDialerUser } from './_lib/auth';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json } from './_lib/http';
 import { loadMediaCall, processRecording, signedRecordingUrl, storeTranscript } from './_lib/media';
@@ -14,12 +14,10 @@ export default handler(async (req) => {
   const id = new URL(req.url).searchParams.get('id');
   if (!id) throw new HttpError(400, 'Missing call id.');
 
-  const access = must(await db().from('dialer_calls').select('user_id, campaign_id').eq('id', id).maybeSingle()) as Pick<CallRow, 'user_id' | 'campaign_id'> | null;
+  const access = must(await db().from('dialer_calls').select('user_id').eq('id', id).maybeSingle()) as Pick<CallRow, 'user_id'> | null;
   if (!access) throw new HttpError(404, 'Call not found.');
-  if (me.role !== 'admin' && access.user_id !== me.userId) {
-    if (!access.campaign_id) throw new HttpError(403, "You don't have access to this call.");
-    await requireCampaignAccess(me, access.campaign_id);
-  }
+  // Same rule as the dialer_calls RLS policy: reps only ever get their own calls.
+  if (me.role !== 'admin' && access.user_id !== me.userId) throw new HttpError(403, "You don't have access to this call.");
 
   const call = await loadMediaCall(id);
   if (call?.recording_sid && (!call.recording_path || !call.transcript_status)) {

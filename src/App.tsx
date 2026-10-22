@@ -12,7 +12,6 @@ import CampaignPage from './pages/Campaign';
 import Campaigns from './pages/Campaigns';
 import Dialer from './pages/Dialer';
 import Login from './pages/Login';
-import Stats from './pages/Stats';
 import { VoiceProvider } from './voice/VoiceProvider';
 
 export default function App() {
@@ -51,9 +50,8 @@ export default function App() {
           <Route path="/campaigns/:id/dial" element={<Dialer />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/campaigns/:id" element={<CampaignPage />} />
-          <Route path="/stats" element={<Stats />} />
-          {isAdmin && <Route path="/calls" element={<Calls />} />}
-          {isAdmin && <Route path="/calls/:id" element={<CallDetailPage />} />}
+          <Route path="/calls" element={<Calls />} />
+          <Route path="/calls/:id" element={<CallDetailPage />} />
           {isAdmin && <Route path="/admin/campaigns" element={<AdminCampaigns />} />}
           {isAdmin && <Route path="/admin/numbers" element={<Numbers />} />}
         </Route>

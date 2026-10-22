@@ -1,4 +1,4 @@
-import { BarChart3, LayoutList, LogOut, Menu, PhoneCall, Settings2, Smartphone, X, type LucideIcon } from 'lucide-react';
+import { LayoutList, LogOut, Menu, PhoneCall, Settings2, Smartphone, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
@@ -7,11 +7,10 @@ import Brand from './Brand';
 import { ClickToCallBar } from './ClickToCall';
 import LoadingBar from './LoadingBar';
 
-// Team members only get Campaigns and Stats; the rest is for admins.
-const NAV: { to: string; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
+// Everyone gets Campaigns (with their numbers) and Call logs; admins also get ADMIN_NAV.
+const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/campaigns', label: 'Campaigns', icon: LayoutList },
-  { to: '/calls', label: 'Calls', icon: PhoneCall, adminOnly: true },
-  { to: '/stats', label: 'Stats', icon: BarChart3 },
+  { to: '/calls', label: 'Call logs', icon: PhoneCall },
 ];
 const ADMIN_NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/admin/campaigns', label: 'Manage campaigns', icon: Settings2 },
@@ -76,7 +75,7 @@ export default function AppShell() {
         <p className="-mt-3 mb-2 px-6 text-xs font-medium uppercase tracking-[0.18em] text-white/60">Dialer</p>
 
         <nav aria-label="Main" className="mt-2 flex-1 space-y-1.5 overflow-y-auto px-3">
-          {NAV.filter((n) => isAdmin || !n.adminOnly).map(({ to, label, icon: Icon }) => (
+          {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} className={navClass}>
               <Icon size={20} strokeWidth={1.75} />
               {label}

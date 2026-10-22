@@ -34,15 +34,25 @@ export function formatTalkTime(seconds: number): string {
 
 export const percent = (part: number, whole: number) => (whole ? `${Math.round((part / whole) * 1000) / 10}%` : '—');
 
-/** Start of today, n days back, in Sydney time, as an ISO timestamp. */
-export function sydneyDayStart(daysAgo = 0): string {
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
-  const [y, m, d] = today.split('-').map(Number);
-  // Find the UTC instant of Sydney midnight by checking the offset at that date.
-  const guess = new Date(Date.UTC(y, m - 1, d - daysAgo));
+/** Today's date in Sydney, YYYY-MM-DD. */
+export const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+
+/** YYYY-MM-DD shifted by n days. */
+export function addDays(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/** The instant a Sydney calendar day (YYYY-MM-DD) starts, as an ISO timestamp. Handles daylight saving. */
+export function sydneyMidnight(date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const guess = new Date(Date.UTC(y, m - 1, d));
   const offset = new Date(guess.toLocaleString('en-US', { timeZone: TZ })).getTime() - new Date(guess.toLocaleString('en-US', { timeZone: 'UTC' })).getTime();
   return new Date(guess.getTime() - offset).toISOString();
 }
+
+/** Start of today, n days back, in Sydney time, as an ISO timestamp. */
+export const sydneyDayStart = (daysAgo = 0) => sydneyMidnight(addDays(sydneyToday(), -daysAgo));
 
 export const domainOf = (url: string) => url.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
 export const withProtocol = (url: string) => (/^https?:\/\//i.test(url) ? url : `https://${url}`);

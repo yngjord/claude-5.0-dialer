@@ -1,6 +1,8 @@
 import { PlayCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useAuth } from '../auth/AuthProvider';
 import { DISPOSITIONS, PICKUP_STATUSES } from '../../shared/constants';
+import { DateRangeFilter } from '../components/DateRangeFilter';
 import { formatPhone } from '../../shared/phone';
 import type { CallRow, Campaign } from '../../shared/types';
 import { CallDetailModal } from '../components/CallDetail';
@@ -9,16 +11,17 @@ import { SearchInput } from '../components/ui/SearchInput';
 import { ServerPagination } from '../components/ui/ServerPagination';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/States';
 import { must, useLoad } from '../lib/api';
-import { formatDateTime, formatDuration, sydneyDayStart } from '../lib/format';
+import { defaultRange, rangeBounds, type DateRange } from '../lib/dateRange';
+import { formatDateTime, formatDuration } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import { DISPOSITION_TONES, PICKUP_TONES } from '../lib/tones';
 
 const PER_PAGE = 50;
-const RANGES = { today: 'Today', '7': 'Last 7 days', '30': 'Last 30 days', all: 'All time' } as const;
-type Range = keyof typeof RANGES;
 
 export default function Calls() {
-  const [range, setRange] = useState<Range>('7');
+  const { isAdmin } = useAuth();
+  const [range, setRange] = useState<DateRange>(() => defaultRange('7'));
+  const bounds = rangeBounds(range);
   const [campaignId, setCampaignId] = useState('');
   const [pickup, setPickup] = useState('');
   const [disposition, setDisposition] = useState('');
@@ -31,7 +34,7 @@ export default function Calls() {
     const t = setTimeout(() => setDebounced(query.trim()), 300);
     return () => clearTimeout(t);
   }, [query]);
-  useEffect(() => setPage(0), [range, campaignId, pickup, disposition, debounced]);
+  useEffect(() => setPage(0), [bounds.from, bounds.to, campaignId, pickup, disposition, debounced]);
 
   const campaigns = useLoad(async () => must(await supabase.from('dialer_campaigns').select('id, name').order('name')) as Pick<Campaign, 'id' | 'name'>[], []);
 
@@ -40,7 +43,8 @@ export default function Calls() {
       .from('dialer_calls')
       .select('id, started_at, full_name, company, phone_e164, campaign_name, agent_name, pickup_status, disposition, duration_s, recording_path, recording_sid, source', { count: 'exact' })
       .eq('direction', 'outbound');
-    if (range !== 'all') q = q.gte('started_at', sydneyDayStart(range === 'today' ? 0 : Number(range) - 1));
+    if (bounds.from) q = q.gte('started_at', bounds.from);
+    if (bounds.to) q = q.lt('started_at', bounds.to);
     if (campaignId) q = q.eq('campaign_id', campaignId);
     if (pickup) q = q.eq('pickup_status', pickup);
     if (disposition) q = q.eq('disposition', disposition);
@@ -51,24 +55,18 @@ export default function Calls() {
     }
     const res = await q.order('started_at', { ascending: false }).range(page * PER_PAGE, page * PER_PAGE + PER_PAGE - 1);
     return { calls: must(res) as CallRow[], total: res.count ?? 0 };
-  }, [range, campaignId, pickup, disposition, debounced, page]);
+  }, [bounds.from, bounds.to, campaignId, pickup, disposition, debounced, page]);
 
   const select = 'field !w-auto !rounded-full !py-2 text-sm';
 
   return (
     <>
-      <PageHeader title="Calls" subtitle="Every dial, with recordings and transcripts of the conversations." />
+      <PageHeader title="Call logs" subtitle={isAdmin ? "Every call the team has made, with recordings and transcripts." : "Your calls, with recordings and transcripts."} />
 
       <section className="card animate-appear p-4 sm:p-6">
         <div className="mb-5 flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <select aria-label="Date range" className={select} value={range} onChange={(e) => setRange(e.target.value as Range)}>
-              {Object.entries(RANGES).map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
+            <DateRangeFilter value={range} onChange={setRange} presets={['today', '7', '30', '90', 'all', 'custom']} />
             <select aria-label="Campaign" className={select} value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
               <option value="">All campaigns</option>
               {campaigns.data?.map((c) => (

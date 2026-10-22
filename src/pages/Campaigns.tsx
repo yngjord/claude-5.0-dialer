@@ -1,11 +1,15 @@
 import { ArrowRight, PhoneOutgoing } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Campaign, CampaignStats } from '../../shared/types';
+import type { CallStatsRow, Campaign, CampaignStats } from '../../shared/types';
 import { useAuth } from '../auth/AuthProvider';
+import { DateRangeFilter } from '../components/DateRangeFilter';
 import { Badge } from '../components/ui/Badge';
+import { Metric } from '../components/ui/Metric';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/States';
 import { must, useLoad } from '../lib/api';
-import { percent } from '../lib/format';
+import { defaultRange, rangeBounds, type DateRange } from '../lib/dateRange';
+import { formatTalkTime, percent } from '../lib/format';
 import { supabase } from '../lib/supabase';
 
 export default function Campaigns() {
@@ -23,7 +27,7 @@ export default function Campaigns() {
     <>
       <PageHeader
         title="Campaigns"
-        subtitle={isAdmin ? 'Every active campaign. Assign people in Manage campaigns.' : 'The call lists assigned to you.'}
+        subtitle={isAdmin ? "The team's numbers and every active campaign." : 'Your numbers and the call lists assigned to you.'}
         actions={
           isAdmin && (
             <Link to="/admin/campaigns" className="inline-flex h-10 items-center rounded-full border border-line-border bg-white/70 px-5 text-[15px] font-medium hover:border-brand hover:text-brand">
@@ -33,6 +37,9 @@ export default function Campaigns() {
         }
       />
 
+      <CallMetrics campaigns={data?.map((d) => d.campaign) ?? []} />
+
+      <h2 className="mb-3 mt-8 animate-appear font-display text-lg font-medium">{isAdmin ? 'Campaigns' : 'Your campaigns'}</h2>
       <section className="card animate-appear p-4 sm:p-6">
         {error ? (
           <ErrorState message={error} onRetry={reload} />
@@ -96,5 +103,70 @@ export default function Campaigns() {
         )}
       </section>
     </>
+  );
+}
+
+/**
+ * Dials, connects, connect rate, appointments, follow-ups and talk time for a date range and campaign. Reps only
+ * ever count their own calls (RLS on dialer_calls), and the campaign list only holds campaigns they're assigned to.
+ */
+function CallMetrics({ campaigns }: { campaigns: Pick<Campaign, 'id' | 'name'>[] }) {
+  const [range, setRange] = useState<DateRange>(() => defaultRange('7'));
+  const [campaignId, setCampaignId] = useState('');
+  const bounds = rangeBounds(range);
+  const stats = useLoad(
+    async () =>
+      must(
+        await supabase.rpc('dialer_call_stats', {
+          p_from: bounds.from ?? '2000-01-01T00:00:00Z',
+          p_to: bounds.to ?? new Date(Date.now() + 60_000).toISOString(),
+          p_campaign_id: campaignId || null,
+        }),
+      ) as CallStatsRow[],
+    [bounds.from, bounds.to, campaignId],
+  );
+
+  const t = useMemo(
+    () =>
+      (stats.data ?? []).reduce(
+        (sum, r) => ({
+          dials: sum.dials + r.dials,
+          connects: sum.connects + r.connects,
+          appointments: sum.appointments + r.appointments,
+          followUps: sum.followUps + r.follow_ups,
+          talk: sum.talk + r.talk_seconds,
+        }),
+        { dials: 0, connects: 0, appointments: 0, followUps: 0, talk: 0 },
+      ),
+    [stats.data],
+  );
+
+  const loading = stats.loading;
+  return (
+    <section className="animate-appear">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <DateRangeFilter value={range} onChange={setRange} presets={['today', '7', '30', '90', 'custom']} />
+        <select aria-label="Campaign" className="field !w-auto !rounded-full !py-2 text-sm" value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
+          <option value="">All campaigns</option>
+          {campaigns.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {stats.error ? (
+        <ErrorState message={stats.error} onRetry={stats.reload} />
+      ) : (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+          <Metric label="Dials" value={t.dials.toLocaleString()} loading={loading} />
+          <Metric label="Connects" value={t.connects.toLocaleString()} loading={loading} />
+          <Metric label="Connect rate" value={percent(t.connects, t.dials)} loading={loading} />
+          <Metric label="Appointments" value={t.appointments.toLocaleString()} loading={loading} />
+          <Metric label="Follow-ups" value={t.followUps.toLocaleString()} loading={loading} />
+          <Metric label="Talk time" value={formatTalkTime(t.talk)} loading={loading} />
+        </div>
+      )}
+    </section>
   );
 }
