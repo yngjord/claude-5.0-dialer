@@ -1,0 +1,220 @@
+import { PGlite } from '@electric-sql/pglite';
+import { readFileSync } from 'node:fs';
+import { beforeAll, describe, expect, it } from 'vitest';
+
+// Runs the real migration on an in-memory Postgres with the bits of Supabase it relies on stubbed
+// (auth.users / auth.uid(), storage, the realtime publication, the portal's profiles table).
+
+const SUPABASE_STUBS = `
+  create role anon; create role authenticated; create role service_role;
+  create schema auth;
+  create table auth.users (id uuid primary key, email text);
+  create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+  create schema storage;
+  create table storage.buckets (id text primary key, name text, public boolean);
+  create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text);
+  alter table storage.objects enable row level security;
+  create publication supabase_realtime;
+  grant usage on schema public, auth, storage to anon, authenticated;
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+  create type public.user_role as enum ('client', 'team', 'admin');
+  create table public.profiles (id uuid primary key references auth.users(id), role public.user_role not null default 'client', email text, client_names text[] not null default '{}');
+  alter table public.profiles enable row level security;
+  create policy "Users can view own profile" on public.profiles for select to authenticated using (auth.uid() = id);
+`;
+
+const ADMIN = '00000000-0000-0000-0000-00000000000a';
+const TEAM1 = '00000000-0000-0000-0000-000000000001';
+const TEAM2 = '00000000-0000-0000-0000-000000000002';
+const CLIENT = '00000000-0000-0000-0000-00000000000c';
+const CAMPAIGN = '10000000-0000-0000-0000-000000000001';
+const OTHER_CAMPAIGN = '10000000-0000-0000-0000-000000000002';
+
+let pg: PGlite;
+
+async function as<T>(userId: string | null, fn: () => Promise<T>): Promise<T> {
+  await pg.exec(userId ? `set role authenticated; set request.jwt.claim.sub = '${userId}';` : 'reset role;');
+  try {
+    return await fn();
+  } finally {
+    await pg.exec(`reset role; set request.jwt.claim.sub = '';`);
+  }
+}
+
+const rows = async <T>(sql: string, params: unknown[] = []) => (await pg.query<T>(sql, params)).rows;
+
+beforeAll(async () => {
+  pg = new PGlite();
+  await pg.exec(SUPABASE_STUBS);
+  const migration = readFileSync(new URL('./migrations/20261022000000_dialer.sql', import.meta.url), 'utf8');
+  await pg.exec(migration);
+  // Re-running must be safe.
+  await pg.exec(migration);
+
+  await pg.exec(`
+    insert into auth.users (id, email) values ('${ADMIN}', 'admin@x'), ('${TEAM1}', 't1@x'), ('${TEAM2}', 't2@x'), ('${CLIENT}', 'c@x');
+    insert into profiles (id, role, email) values ('${ADMIN}', 'admin', 'admin@x'), ('${TEAM1}', 'team', 't1@x'), ('${TEAM2}', 'team', 't2@x'), ('${CLIENT}', 'client', 'c@x');
+    insert into campaigns (id, name, client_name, airtable_client_id, max_attempts) values
+      ('${CAMPAIGN}', 'Kintell Oct', 'Kintell', 'recKintell', 2),
+      ('${OTHER_CAMPAIGN}', 'Other', 'Morfless', 'recMorfless', 3);
+    insert into campaign_members (campaign_id, user_id) values ('${CAMPAIGN}', '${TEAM1}'), ('${CAMPAIGN}', '${TEAM2}');
+    insert into contacts (campaign_id, full_name, phone_e164, created_at) values
+      ('${CAMPAIGN}', 'A', '+61411111111', now() - interval '3 hours'),
+      ('${CAMPAIGN}', 'B', '+61422222222', now() - interval '2 hours'),
+      ('${CAMPAIGN}', 'C', '+61433333333', now() - interval '1 hour');
+    insert into contacts (campaign_id, full_name, phone_e164, status) values ('${CAMPAIGN}', 'Done', '+61444444444', 'done');
+    insert into contacts (campaign_id, full_name, phone_e164, attempts) values ('${CAMPAIGN}', 'Maxed', '+61455555555', 2);
+    insert into contacts (campaign_id, full_name, phone_e164, status, next_attempt_at) values ('${CAMPAIGN}', 'Later', '+61466666666', 'callback', now() + interval '1 day');
+    insert into contacts (campaign_id, full_name, phone_e164) values ('${OTHER_CAMPAIGN}', 'Elsewhere', '+64211234567');
+  `);
+});
+
+describe('pickup status trigger', () => {
+  const newCall = async () => (await rows<{ id: string }>(`insert into calls (twilio_status) values ('initiated') returning id`))[0].id;
+  const pickup = async (id: string) => (await rows<{ pickup_status: string | null }>('select pickup_status from calls where id = $1', [id]))[0].pickup_status;
+
+  it('stays empty while ringing', async () => {
+    const id = await newCall();
+    await pg.query(`update calls set twilio_status = 'ringing' where id = $1`, [id]);
+    expect(await pickup(id)).toBeNull();
+  });
+
+  it('uses AMD whichever callback arrives first', async () => {
+    const a = await newCall();
+    await pg.query(`update calls set twilio_status = 'in-progress', answered_at = now() where id = $1`, [a]);
+    await pg.query(`update calls set answered_by = 'human' where id = $1`, [a]);
+    await pg.query(`update calls set twilio_status = 'completed' where id = $1`, [a]);
+    expect(await pickup(a)).toBe('Human Pickup');
+
+    const b = await newCall();
+    await pg.query(`update calls set twilio_status = 'completed', answered_at = now() where id = $1`, [b]);
+    expect(await pickup(b)).toBe('Unclassified Pickup');
+    await pg.query(`update calls set answered_by = 'machine_end_beep' where id = $1`, [b]);
+    expect(await pickup(b)).toBe('Machine Pickup');
+  });
+
+  it('maps unanswered outcomes', async () => {
+    for (const [status, expected] of [['no-answer', 'Unanswered'], ['canceled', 'Unanswered'], ['busy', 'Busy'], ['failed', 'Failed']]) {
+      const id = await newCall();
+      await pg.query(`update calls set twilio_status = $2 where id = $1`, [id, status]);
+      expect(await pickup(id)).toBe(expected);
+    }
+  });
+
+  it("never overrides the rep's correction", async () => {
+    const id = await newCall();
+    await pg.query(`update calls set pickup_status = 'Human Pickup', pickup_source = 'agent' where id = $1`, [id]);
+    await pg.query(`update calls set answered_by = 'machine_start', twilio_status = 'completed' where id = $1`, [id]);
+    expect(await pickup(id)).toBe('Human Pickup');
+  });
+
+  it('leaves imported JustCall rows alone', async () => {
+    const [{ pickup_status }] = await rows<{ pickup_status: string }>(
+      `insert into calls (source, pickup_source, pickup_status, twilio_status) values ('justcall', 'import', 'Machine Pickup', 'completed') returning pickup_status`,
+    );
+    expect(pickup_status).toBe('Machine Pickup');
+  });
+});
+
+describe('claim_next_contact', () => {
+  const claim = (user: string, campaign = CAMPAIGN) =>
+    as(user, () => rows<{ full_name: string; locked_by: string }>('select full_name, locked_by from claim_next_contact($1)', [campaign]));
+
+  it('gives two reps different contacts, oldest first, skipping finished/maxed/not-yet-due ones', async () => {
+    const [first] = await claim(TEAM1);
+    const [second] = await claim(TEAM2);
+    expect(first).toMatchObject({ full_name: 'A', locked_by: TEAM1 });
+    expect(second).toMatchObject({ full_name: 'B', locked_by: TEAM2 });
+
+    // Claiming again first lets go of what you held, so rep 1 gets A back rather than piling up locks.
+    const [third] = await claim(TEAM1);
+    expect(third.full_name).toBe('A');
+    const remaining = await claim(TEAM2);
+    expect(remaining.map((r) => r.full_name)).not.toContain('Done');
+    expect(remaining.map((r) => r.full_name)).not.toContain('Maxed');
+    expect(remaining.map((r) => r.full_name)).not.toContain('Later');
+  });
+
+  it('returns nothing when the queue is empty', async () => {
+    await as(null, () => pg.exec(`update contacts set locked_by = '${ADMIN}', locked_at = now() where campaign_id = '${CAMPAIGN}'`));
+    expect(await claim(TEAM1)).toEqual([]);
+    await as(null, () => pg.exec(`update contacts set locked_by = null, locked_at = null`));
+  });
+
+  it('takes over abandoned locks', async () => {
+    await as(null, () => pg.exec(`update contacts set locked_by = '${TEAM2}', locked_at = now() - interval '31 minutes' where campaign_id = '${CAMPAIGN}'`));
+    const [c] = await claim(TEAM1);
+    expect(c.locked_by).toBe(TEAM1);
+    await as(null, () => pg.exec(`update contacts set locked_by = null, locked_at = null`));
+  });
+
+  it('refuses reps who are not on the campaign, and paused campaigns', async () => {
+    await expect(claim(TEAM1, OTHER_CAMPAIGN)).rejects.toThrow(/not assigned/);
+    await expect(claim(CLIENT)).rejects.toThrow(/not assigned/);
+    await as(null, () => pg.exec(`update campaigns set status = 'paused' where id = '${CAMPAIGN}'`));
+    await expect(claim(TEAM1)).rejects.toThrow(/paused/);
+    await as(null, () => pg.exec(`update campaigns set status = 'active' where id = '${CAMPAIGN}'`));
+  });
+
+  it('release with skip pushes the contact back', async () => {
+    const [c] = await as(TEAM1, () => rows<{ id: string }>('select id from claim_next_contact($1)', [CAMPAIGN]));
+    await as(TEAM1, () => pg.query('select release_contact($1, true)', [c.id]));
+    const [after] = await rows<{ locked_by: string | null; later: boolean }>(
+      `select locked_by, next_attempt_at > now() + interval '23 hours' as later from contacts where id = $1`,
+      [c.id],
+    );
+    expect(after).toEqual({ locked_by: null, later: true });
+  });
+});
+
+describe('row level security', () => {
+  it('portal clients see nothing', async () => {
+    await as(CLIENT, async () => {
+      expect(await rows('select * from campaigns')).toEqual([]);
+      expect(await rows('select * from contacts')).toEqual([]);
+      expect(await rows('select * from calls')).toEqual([]);
+      expect(await rows('select * from phone_numbers')).toEqual([]);
+      expect(await rows('select * from dialer_users()')).toEqual([]);
+    });
+  });
+
+  it('team members only see their campaigns', async () => {
+    await as(TEAM1, async () => {
+      expect((await rows<{ name: string }>('select name from campaigns')).map((r) => r.name)).toEqual(['Kintell Oct']);
+      expect((await rows<{ full_name: string }>('select full_name from contacts')).map((r) => r.full_name)).not.toContain('Elsewhere');
+      expect((await rows('select * from dialer_users()')).length).toBe(3);
+    });
+  });
+
+  it('admins see everything', async () => {
+    await as(ADMIN, async () => {
+      expect((await rows('select * from campaigns')).length).toBe(2);
+    });
+  });
+
+  it("team members can import into their campaigns but can't edit contacts or calls", async () => {
+    await as(TEAM1, async () => {
+      await pg.query(`insert into contacts (campaign_id, phone_e164) values ($1, '+61477777777')`, [CAMPAIGN]);
+      await expect(pg.query(`insert into contacts (campaign_id, phone_e164) values ($1, '+61477777778')`, [OTHER_CAMPAIGN])).rejects.toThrow();
+      const updated = await pg.query(`update contacts set status = 'done' where campaign_id = $1`, [CAMPAIGN]);
+      expect(updated.affectedRows).toBe(0);
+      await expect(pg.query(`update calls set disposition = 'Do Not Call'`)).rejects.toThrow(/permission denied/);
+      await expect(pg.query(`insert into calls (direction) values ('outbound')`)).rejects.toThrow(/permission denied/);
+    });
+  });
+
+  it('only AU/NZ mobiles can be stored', async () => {
+    await expect(pg.query(`insert into contacts (campaign_id, phone_e164) values ($1, '+61298765432')`, [CAMPAIGN])).rejects.toThrow(/check/);
+  });
+});
+
+describe('stats', () => {
+  it('campaign_stats and call_stats run', async () => {
+    await pg.exec(`insert into calls (campaign_id, user_id, agent_name, twilio_status, answered_by) values ('${CAMPAIGN}', '${TEAM1}', 'T1', 'completed', 'human')`);
+    const [s] = await as(TEAM1, () => rows<{ dials_today: number; connects_today: number }>('select * from campaign_stats where campaign_id = $1', [CAMPAIGN]));
+    expect(s).toMatchObject({ dials_today: 1, connects_today: 1 });
+    const daily = await as(TEAM1, () => rows<{ dials: number; connects: number }>(`select * from call_stats(now() - interval '1 day', now() + interval '1 day')`));
+    expect(daily[0]).toMatchObject({ dials: 1, connects: 1 });
+  });
+});

@@ -1,0 +1,191 @@
+import type { ContactStatus, Disposition, PickupStatus } from './constants';
+import type { LeadInput } from './leads';
+
+// Row shapes of the Supabase tables (supabase/migrations). Timestamps are ISO strings.
+
+export type Role = 'team' | 'admin';
+
+export interface Me {
+  userId: string;
+  email: string;
+  role: Role;
+  displayName: string;
+}
+
+export interface DialerUser {
+  id: string;
+  email: string;
+  display_name: string | null;
+  role: Role;
+}
+
+export interface PhoneNumber {
+  id: string;
+  e164: string;
+  twilio_sid: string | null;
+  label: string | null;
+  assigned_user_id: string | null;
+  is_default: boolean;
+  voicemail_greeting_path: string | null;
+  created_at: string;
+}
+
+export interface Campaign {
+  id: string;
+  name: string;
+  client_name: string;
+  airtable_client_id: string;
+  caller_number_id: string | null;
+  status: 'active' | 'paused' | 'archived';
+  max_attempts: number;
+  retry_after_minutes: number;
+  created_at: string;
+}
+
+export interface CampaignStats {
+  campaign_id: string;
+  contacts_total: number;
+  contacts_remaining: number;
+  dials_today: number;
+  connects_today: number;
+  dials_total: number;
+  connects_total: number;
+}
+
+export interface Contact {
+  id: string;
+  campaign_id: string;
+  full_name: string | null;
+  first_name: string | null;
+  company: string | null;
+  title: string | null;
+  email: string | null;
+  phone_e164: string;
+  phone_raw: string | null;
+  linkedin: string | null;
+  website: string | null;
+  custom: Record<string, string>;
+  status: ContactStatus;
+  attempts: number;
+  last_called_at: string | null;
+  next_attempt_at: string | null;
+  last_disposition: string | null;
+  locked_by: string | null;
+  locked_at: string | null;
+  airtable_lead_id: string | null;
+  created_at: string;
+}
+
+export interface CallRow {
+  id: string;
+  direction: 'outbound' | 'inbound';
+  kind: 'call' | 'voicemail';
+  source: 'dialer' | 'justcall';
+  campaign_id: string | null;
+  contact_id: string | null;
+  user_id: string | null;
+  agent_name: string | null;
+  client_name: string | null;
+  campaign_name: string | null;
+  full_name: string | null;
+  email: string | null;
+  company: string | null;
+  linkedin: string | null;
+  website: string | null;
+  phone_e164: string | null;
+  from_number: string | null;
+  to_number: string | null;
+  twilio_call_sid: string | null;
+  twilio_status: string | null;
+  answered_by: string | null;
+  started_at: string;
+  answered_at: string | null;
+  ended_at: string | null;
+  duration_s: number | null;
+  pickup_status: PickupStatus | null;
+  pickup_source: 'twilio' | 'agent' | 'import';
+  disposition: Disposition | null;
+  notes: string | null;
+  wrapped_up_at: string | null;
+  recording_sid: string | null;
+  recording_path: string | null;
+  recording_duration_s: number | null;
+  transcript_status: 'pending' | 'completed' | 'failed' | 'skipped' | null;
+  transcript: string | null;
+  transcript_json: TranscriptTurn[] | null;
+  visible: boolean;
+  airtable_lead_id: string | null;
+  lead_sync_error: string | null;
+  read_at: string | null;
+  justcall_call_id: number | null;
+}
+
+export interface TranscriptTurn {
+  speaker: string;
+  text: string;
+  start: number | null;
+}
+
+export interface SmsMessage {
+  id: string;
+  direction: 'outbound' | 'inbound';
+  contact_id: string | null;
+  user_id: string | null;
+  phone_e164: string;
+  our_number: string;
+  body: string;
+  twilio_sid: string | null;
+  status: string | null;
+  error: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface CallStatsRow {
+  day: string;
+  user_id: string | null;
+  agent_name: string | null;
+  dials: number;
+  connects: number;
+  machine: number;
+  unanswered: number;
+  appointments: number;
+  follow_ups: number;
+  talk_seconds: number;
+}
+
+// API request/response shapes (netlify/functions)
+
+export interface WrapUpRequest {
+  callId: string;
+  pickupStatus: PickupStatus;
+  disposition: Disposition;
+  notes: string;
+  lead?: LeadInput;
+}
+
+export interface WrapUpResponse {
+  ok: true;
+  leadId: string | null;
+  /** Set when the call was saved but the Airtable Lead couldn't be created. Retry by submitting again. */
+  leadError: string | null;
+}
+
+export interface AirtableClient {
+  id: string;
+  name: string;
+  status: string | null;
+}
+
+export interface CallMediaResponse {
+  recordingUrl: string | null;
+  transcript: string | null;
+  transcriptJson: TranscriptTurn[] | null;
+  transcriptStatus: CallRow['transcript_status'];
+}
+
+export interface SmsSendRequest {
+  to: string;
+  body: string;
+  contactId?: string | null;
+}
