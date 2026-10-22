@@ -134,7 +134,14 @@ export default function AdminCampaigns() {
 
 function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campaign | null; numbers: PhoneNumber[]; onClose: () => void; onSaved: () => void }) {
   const { me } = useAuth();
-  const clients = useLoad(() => api<AirtableClient[]>('clients'), []);
+  const clients = useLoad(async () => {
+    const list = await api<AirtableClient[]>('clients');
+    // Editing a campaign whose client has since gone inactive: keep its client selectable.
+    if (campaign && !list.some((c) => c.id === campaign.airtable_client_id)) {
+      list.unshift({ id: campaign.airtable_client_id, name: campaign.client_name, status: null });
+    }
+    return list;
+  }, [campaign]);
   const [name, setName] = useState(campaign?.name ?? '');
   const [clientId, setClientId] = useState(campaign?.airtable_client_id ?? '');
   const [numberId, setNumberId] = useState(campaign?.caller_number_id ?? '');
@@ -204,7 +211,6 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
             {clients.data?.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
-                {c.status ? ` (${c.status})` : ''}
               </option>
             ))}
           </select>

@@ -4,11 +4,11 @@ import { listAll } from './_lib/airtable';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
 import { handler, json } from './_lib/http';
 
-/** GET /api/clients: Airtable Clients, for linking a campaign to a client (admins). */
+/** GET /api/clients: active Airtable Clients, for linking a campaign or phone number to a client (admins). */
 export default handler(async (req) => {
   requireAdmin(await requireDialerUser(req));
   const records = await listAll<{ 'Client Company': string; Status: string }>('Clients', {
-    filterByFormula: "{Client Company} != ''",
+    filterByFormula: "AND({Client Company} != '', {Status} = 'Active')",
     fields: ['Client Company', 'Status'],
   });
   const clients: AirtableClient[] = records
