@@ -211,6 +211,16 @@ describe('row level security', () => {
     });
   });
 
+  it('signed-out visitors cannot call the queue functions', async () => {
+    await pg.exec('set role anon');
+    try {
+      await expect(pg.query('select * from claim_next_contact($1)', [CAMPAIGN])).rejects.toThrow(/permission denied/);
+      await expect(pg.query('select * from dialer_users()')).rejects.toThrow(/permission denied/);
+    } finally {
+      await pg.exec('reset role');
+    }
+  });
+
   it('only AU/NZ mobiles can be stored', async () => {
     await expect(pg.query(`insert into contacts (campaign_id, phone_e164) values ($1, '+61298765432')`, [CAMPAIGN])).rejects.toThrow(/check/);
   });

@@ -23,7 +23,7 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 create or replace function public.set_updated_at() returns trigger
-language plpgsql as $$
+language plpgsql set search_path = public as $$
 begin
   new.updated_at = now();
   return new;
@@ -168,6 +168,7 @@ create index if not exists calls_client on public.calls (client_name, started_at
 create index if not exists calls_campaign on public.calls (campaign_id, started_at desc);
 create index if not exists calls_user on public.calls (user_id, started_at desc);
 create index if not exists calls_phone on public.calls (phone_e164, started_at desc);
+create index if not exists calls_contact on public.calls (contact_id);
 create index if not exists calls_recording_pending on public.calls (recording_sid) where recording_path is null;
 create index if not exists calls_transcript_pending on public.calls (transcript_status) where transcript_status = 'pending';
 
@@ -189,6 +190,7 @@ create table if not exists public.sms_messages (
 );
 create index if not exists sms_phone on public.sms_messages (phone_e164, created_at desc);
 create index if not exists sms_user on public.sms_messages (user_id, created_at desc);
+create index if not exists sms_contact on public.sms_messages (contact_id);
 
 -- ── Pickup Status from Twilio ───────────────────────────────────────────────────────────────────────────────
 -- Twilio reports the prospect's leg in separate callbacks (call status, answering machine detection) that can
@@ -198,7 +200,7 @@ create index if not exists sms_user on public.sms_messages (user_id, created_at 
 --   status:      CallStatus of the <Number> leg (initiated, ringing, in-progress, completed, busy, no-answer, failed, canceled)
 --   answered_by: AMD result (human, machine_start, machine_end_*, fax, unknown)
 create or replace function public.pickup_status_from(p_status text, p_answered_by text, p_answered boolean) returns text
-language sql immutable as $$
+language sql immutable set search_path = public as $$
   select case
     when p_answered_by = 'human' then 'Human Pickup'
     when p_answered_by like 'machine%' or p_answered_by = 'fax' then 'Machine Pickup'
@@ -214,7 +216,7 @@ language sql immutable as $$
 $$;
 
 create or replace function public.calls_set_pickup() returns trigger
-language plpgsql as $$
+language plpgsql set search_path = public as $$
 begin
   new.pickup_status = coalesce(pickup_status_from(new.twilio_status, new.answered_by, new.answered_at is not null), new.pickup_status);
   return new;
@@ -254,7 +256,7 @@ drop policy if exists "Admins manage campaigns" on public.campaigns;
 create policy "Admins manage campaigns" on public.campaigns for all to authenticated using (is_dialer_admin()) with check (is_dialer_admin());
 
 drop policy if exists "Read own memberships" on public.campaign_members;
-create policy "Read own memberships" on public.campaign_members for select to authenticated using (user_id = auth.uid() or is_dialer_admin());
+create policy "Read own memberships" on public.campaign_members for select to authenticated using (user_id = (select auth.uid()) or is_dialer_admin());
 drop policy if exists "Admins manage memberships" on public.campaign_members;
 create policy "Admins manage memberships" on public.campaign_members for all to authenticated using (is_dialer_admin()) with check (is_dialer_admin());
 
@@ -270,21 +272,21 @@ create policy "Admins delete contacts" on public.contacts for delete to authenti
 
 drop policy if exists "Read calls" on public.calls;
 create policy "Read calls" on public.calls for select to authenticated
-  using (is_dialer_admin() or (is_dialer_user() and (user_id = auth.uid() or (campaign_id is not null and can_access_campaign(campaign_id)))));
+  using (is_dialer_admin() or (is_dialer_user() and (user_id = (select auth.uid()) or (campaign_id is not null and can_access_campaign(campaign_id)))));
 -- The browser may only mark its own voicemails as read (column grant below limits it to read_at).
 drop policy if exists "Mark own voicemails read" on public.calls;
 create policy "Mark own voicemails read" on public.calls for update to authenticated
-  using (is_dialer_admin() or (is_dialer_user() and user_id = auth.uid()))
-  with check (is_dialer_admin() or (is_dialer_user() and user_id = auth.uid()));
+  using (is_dialer_admin() or (is_dialer_user() and user_id = (select auth.uid())))
+  with check (is_dialer_admin() or (is_dialer_user() and user_id = (select auth.uid())));
 
 drop policy if exists "Read messages" on public.sms_messages;
 create policy "Read messages" on public.sms_messages for select to authenticated
-  using (is_dialer_admin() or (is_dialer_user() and (user_id = auth.uid()
+  using (is_dialer_admin() or (is_dialer_user() and (user_id = (select auth.uid())
     or exists (select 1 from contacts c where c.id = contact_id and can_access_campaign(c.campaign_id)))));
 drop policy if exists "Mark own messages read" on public.sms_messages;
 create policy "Mark own messages read" on public.sms_messages for update to authenticated
-  using (is_dialer_admin() or (is_dialer_user() and user_id = auth.uid()))
-  with check (is_dialer_admin() or (is_dialer_user() and user_id = auth.uid()));
+  using (is_dialer_admin() or (is_dialer_user() and user_id = (select auth.uid())))
+  with check (is_dialer_admin() or (is_dialer_user() and user_id = (select auth.uid())));
 
 revoke insert, update, delete on public.calls from anon, authenticated;
 grant update (read_at) on public.calls to authenticated;
@@ -351,6 +353,12 @@ language sql stable security definer set search_path = public as $$
   where p.role in ('team', 'admin') and is_dialer_user()
   order by coalesce(p.display_name, p.email)
 $$;
+
+-- Only signed-in users may call the dialer's functions (they also check the caller's role themselves).
+revoke execute on function public.is_dialer_user(), public.is_dialer_admin(), public.can_access_campaign(uuid),
+  public.claim_next_contact(uuid), public.release_contact(uuid, boolean), public.dialer_users() from public, anon;
+grant execute on function public.is_dialer_user(), public.is_dialer_admin(), public.can_access_campaign(uuid),
+  public.claim_next_contact(uuid), public.release_contact(uuid, boolean), public.dialer_users() to authenticated, service_role;
 
 -- ── Stats ───────────────────────────────────────────────────────────────────────────────────────────────────
 create or replace view public.campaign_stats with (security_invoker = true) as
