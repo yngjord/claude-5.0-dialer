@@ -319,6 +319,8 @@ begin
     and attempts < camp.max_attempts
     and (next_attempt_at is null or next_attempt_at <= now())
     and (locked_by is null or locked_at < now() - interval '30 minutes')
+    -- Do Not Call follows the number into lists imported later.
+    and not exists (select 1 from contacts d where d.phone_e164 = contacts.phone_e164 and d.status = 'do_not_call')
   order by coalesce(next_attempt_at, created_at), created_at
   limit 1
   for update skip locked;

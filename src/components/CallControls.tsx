@@ -21,7 +21,7 @@ export function CallControls({ call, compact = false }: { call: ActiveCall; comp
   const { hangUp, toggleMute, sendDigits } = useVoice();
   const [keypad, setKeypad] = useState(false);
   const status = callStatusLabel(call);
-  const answeredAt = call.row?.answered_at ? new Date(call.row.answered_at).getTime() : null;
+  const answeredAt = call.row?.answered_at ? new Date(call.row.answered_at).getTime() : call.answeredAt;
   const elapsed = useElapsed(call.phase === 'ended' ? null : answeredAt);
   const onCall = call.phase !== 'ended';
 

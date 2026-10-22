@@ -106,7 +106,7 @@ export default function Stats() {
             <Metric label="Talk time" value={formatTalkTime(total.talk_seconds)} loading={loading} />
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid gap-6 2xl:grid-cols-2">
             <StatsTable title="By rep" first="Rep" rows={byRep.map((r) => [r.name, r])} loading={loading} />
             <StatsTable
               title="By day"

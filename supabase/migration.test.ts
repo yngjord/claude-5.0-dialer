@@ -136,6 +136,13 @@ describe('claim_next_contact', () => {
     expect(remaining.map((r) => r.full_name)).not.toContain('Later');
   });
 
+  it('skips numbers marked Do Not Call in any campaign', async () => {
+    await pg.exec(`insert into contacts (campaign_id, full_name, phone_e164, status) values ('${OTHER_CAMPAIGN}', 'DNC elsewhere', '+61411111111', 'do_not_call')`);
+    const names = [...(await claim(TEAM1)), ...(await claim(TEAM2))].map((r) => r.full_name);
+    expect(names).not.toContain('A');
+    await pg.exec(`delete from contacts where full_name = 'DNC elsewhere'`);
+  });
+
   it('returns nothing when the queue is empty', async () => {
     await as(null, () => pg.exec(`update contacts set locked_by = '${ADMIN}', locked_at = now() where campaign_id = '${CAMPAIGN}'`));
     expect(await claim(TEAM1)).toEqual([]);
