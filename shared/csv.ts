@@ -49,8 +49,32 @@ export const CONTACT_FIELD_LABELS: Record<ContactField, string> = {
   website: 'Website',
 };
 
-/** Column index → contact field, or 'custom' (kept under its header name) or 'skip'. */
-export type ColumnMapping = (ContactField | 'custom' | 'skip')[];
+/** A saved custom field (dialer_custom_fields). Contacts store custom values under `key`. */
+export interface CustomField {
+  key: string;
+  label: string;
+  /** Normalised CSV headers that were mapped to this field before, so the next import maps them again. */
+  aliases: string[];
+}
+
+/** Where one CSV column goes. */
+export type ColumnTarget =
+  | { kind: 'field'; field: ContactField }
+  | { kind: 'custom'; key: string }
+  | { kind: 'new'; label: string }
+  | { kind: 'skip' };
+export type ColumnMapping = ColumnTarget[];
+
+/** "Employee Count" / "employee_count" / "EMPLOYEE-COUNT" → "employeecount", for matching headers. */
+export const headerKey = (header: string) => header.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** "Employee Count" → "employee_count": the key a new custom field is saved under. */
+export const customFieldKey = (label: string) =>
+  label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'field';
 
 const GUESSES: [RegExp, ContactField][] = [
   [/^(full)?name$|^(contact|prospect|person)(full)?name$/, 'full_name'],
@@ -65,15 +89,35 @@ const GUESSES: [RegExp, ContactField][] = [
   [/title|role|position/, 'title'],
 ];
 
-export function guessMapping(headers: string[]): ColumnMapping {
+/**
+ * First guess at where each column goes: a standard contact field, else a saved custom field whose name or a
+ * previously mapped header matches, else a new custom field named after the header. Blank headers are skipped.
+ */
+export function guessMapping(headers: string[], customFields: CustomField[] = []): ColumnMapping {
   const used = new Set<ContactField>();
-  return headers.map((h) => {
-    const key = h.toLowerCase().replace(/[^a-z]/g, '');
-    const hit = GUESSES.find(([re, field]) => !used.has(field) && re.test(key));
-    if (!hit) return 'custom';
-    used.add(hit[1]);
-    return hit[1];
+  const usedCustom = new Set<string>();
+  return headers.map((h): ColumnTarget => {
+    const hk = headerKey(h);
+    if (!hk) return { kind: 'skip' };
+    const hit = GUESSES.find(([re, field]) => !used.has(field) && re.test(h.toLowerCase().replace(/[^a-z]/g, '')));
+    if (hit) {
+      used.add(hit[1]);
+      return { kind: 'field', field: hit[1] };
+    }
+    const saved = customFields.find(
+      (f) => !usedCustom.has(f.key) && (headerKey(f.label) === hk || f.key === customFieldKey(h) || f.aliases.includes(hk)),
+    );
+    if (saved) {
+      usedCustom.add(saved.key);
+      return { kind: 'custom', key: saved.key };
+    }
+    return { kind: 'new', label: h.trim() };
   });
+}
+
+/** Custom field key a column's values are stored under, or null if the column isn't a custom field. */
+export function columnCustomKey(t: ColumnTarget): string | null {
+  return t.kind === 'custom' ? t.key : t.kind === 'new' ? customFieldKey(t.label) : null;
 }
 
 export interface ImportContact {
@@ -98,17 +142,18 @@ export interface ImportPreview {
 
 /** Turns parsed rows (header row first) into contacts, using the column mapping. */
 export function buildImport(rows: string[][], mapping: ColumnMapping, existingPhones: Set<string> = new Set()): ImportPreview {
-  const [headers, ...body] = rows;
+  const [, ...body] = rows;
   const seen = new Set(existingPhones);
   const preview: ImportPreview = { valid: [], invalid: [], duplicates: 0 };
   const clean = (v: string | undefined) => (v && v.trim() ? v.trim() : null);
 
   body.forEach((cells, i) => {
-    const get = (field: ContactField) => clean(cells[mapping.indexOf(field)]);
+    const get = (field: ContactField) => clean(cells[mapping.findIndex((t) => t.kind === 'field' && t.field === field)]);
     const custom: Record<string, string> = {};
-    mapping.forEach((m, col) => {
+    mapping.forEach((t, col) => {
+      const key = columnCustomKey(t);
       const v = clean(cells[col]);
-      if (m === 'custom' && v && headers[col]?.trim()) custom[headers[col].trim()] = v;
+      if (key && v) custom[key] = v;
     });
 
     const first = get('first_name');

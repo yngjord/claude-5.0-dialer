@@ -61,7 +61,7 @@ export default function Campaigns() {
               <tbody className="divide-y divide-line">
                 {!data?.length ? (
                   <EmptyRow colSpan={6}>
-                    {isAdmin ? 'No campaigns yet. Create one in Manage campaigns.' : "You're not assigned to any campaigns yet. Ask an admin to add you."}
+                    {isAdmin ? 'No campaigns yet. Create one in Manage campaigns.' : "You aren't assigned any campaigns yet."}
                   </EmptyRow>
                 ) : (
                   data.map(({ campaign: c, stats: s }) => (

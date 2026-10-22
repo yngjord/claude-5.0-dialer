@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildImport, guessMapping, parseCsv } from './csv';
+import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
 import { buildLeadFields, todayInSydney, validateLead, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
@@ -112,9 +112,25 @@ describe('csv import', () => {
   });
 
   it('guesses columns', () => {
-    expect(guessMapping(['First Name', 'Last Name', 'Mobile Phone', 'Email Address', 'Company Website', 'Company', 'Job Title', 'LinkedIn URL', 'Industry'])).toEqual([
-      'first_name', 'last_name', 'phone', 'email', 'website', 'company', 'title', 'linkedin', 'custom',
+    const f = (field: string) => ({ kind: 'field', field });
+    expect(guessMapping(['First Name', 'Last Name', 'Mobile Phone', 'Email Address', 'Company Website', 'Company', 'Job Title', 'LinkedIn URL', 'Industry', ''])).toEqual([
+      f('first_name'), f('last_name'), f('phone'), f('email'), f('website'), f('company'), f('title'), f('linkedin'),
+      { kind: 'new', label: 'Industry' }, { kind: 'skip' },
     ]);
+  });
+
+  it('maps saved custom fields by name, key or a header used before', () => {
+    const saved = [
+      { key: 'employee_count', label: 'Employee count', aliases: ['headcount'] },
+      { key: 'industry', label: 'Industry', aliases: [] },
+    ];
+    expect(guessMapping(['Phone', 'EMPLOYEE COUNT', 'Industry'], saved).slice(1)).toEqual([
+      { kind: 'custom', key: 'employee_count' },
+      { kind: 'custom', key: 'industry' },
+    ]);
+    expect(guessMapping(['Head-count'], saved)).toEqual([{ kind: 'custom', key: 'employee_count' }]);
+    expect(guessMapping(['Revenue'], saved)).toEqual([{ kind: 'new', label: 'Revenue' }]);
+    expect(customFieldKey(' Annual Revenue ($) ')).toBe('annual_revenue');
   });
 
   it('builds contacts, rejecting bad numbers and duplicates', () => {
@@ -124,7 +140,7 @@ describe('csv import', () => {
       ['Jane Doe', '+61412345678', 'Jane'],
       ['Kim', '+61423456789', 'Kim'],
     ]);
-    expect(preview.valid[0].custom).toEqual({ Industry: 'SaaS' });
+    expect(preview.valid[0].custom).toEqual({ industry: 'SaaS' });
     expect(preview.invalid).toEqual([{ row: 3, phone: '02 9876 5432', name: 'Bob', reason: 'Looks like an AU landline (use +64 for NZ mobiles)' }]);
     expect(preview.duplicates).toBe(2);
   });

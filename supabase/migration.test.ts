@@ -260,6 +260,29 @@ describe('deleting a campaign', () => {
   });
 });
 
+describe('custom fields', () => {
+  const save = (user: string | null, fields: object[]) => as(user, () => pg.query('select dialer_save_custom_fields($1)', [JSON.stringify(fields)]));
+
+  it('team members save new fields and remember headers; nothing is renamed', async () => {
+    await save(TEAM1, [{ key: 'industry', label: 'Industry', alias: 'industry' }]);
+    await save(TEAM2, [{ key: 'industry', label: 'Renamed?', alias: 'sector' }, { key: 'industry', label: '', alias: 'sector' }]);
+    const [f] = await as(TEAM1, () => rows<{ label: string; aliases: string[] }>(`select label, aliases from dialer_custom_fields where key = 'industry'`));
+    expect(f.label).toBe('Industry');
+    expect([...f.aliases].sort()).toEqual(['industry', 'sector']);
+  });
+
+  it('portal clients and signed-out visitors cannot', async () => {
+    await expect(save(CLIENT, [{ key: 'x', label: 'X', alias: 'x' }])).rejects.toThrow(/Maronly team/);
+    await pg.exec('set role anon');
+    try {
+      await expect(pg.query('select dialer_save_custom_fields($1)', ['[]'])).rejects.toThrow(/permission denied/);
+    } finally {
+      await pg.exec('reset role');
+    }
+    await expect(as(TEAM1, () => pg.query(`insert into dialer_custom_fields (key, label) values ('sneaky', 'S')`))).rejects.toThrow();
+  });
+});
+
 describe('stats', () => {
   it('campaign_stats and call_stats run', async () => {
     await pg.exec(`insert into dialer_calls (campaign_id, user_id, agent_name, twilio_status, answered_by) values ('${CAMPAIGN}', '${TEAM1}', 'T1', 'completed', 'human')`);

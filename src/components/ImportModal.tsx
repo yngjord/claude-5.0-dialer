@@ -1,6 +1,17 @@
 import { FileUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { buildImport, CONTACT_FIELD_LABELS, CONTACT_FIELDS, guessMapping, parseCsv, type ColumnMapping } from '../../shared/csv';
+import {
+  buildImport,
+  columnCustomKey,
+  CONTACT_FIELD_LABELS,
+  CONTACT_FIELDS,
+  guessMapping,
+  headerKey,
+  parseCsv,
+  type ColumnMapping,
+  type ColumnTarget,
+  type CustomField,
+} from '../../shared/csv';
 import { toCsv, downloadCsv } from '../lib/csv';
 import { supabase } from '../lib/supabase';
 import { Button } from './ui/Button';
@@ -19,18 +30,35 @@ async function existingPhones(campaignId: string): Promise<Set<string>> {
   }
 }
 
-/** CSV upload → map columns → check numbers → add to the campaign. Numbers already in the campaign are skipped. */
+// <select> values for a column target: "field:phone", "custom:industry", "new", "skip".
+const targetValue = (t: ColumnTarget) => (t.kind === 'field' ? `field:${t.field}` : t.kind === 'custom' ? `custom:${t.key}` : t.kind);
+function parseTarget(value: string, header: string): ColumnTarget {
+  if (value.startsWith('field:')) return { kind: 'field', field: value.slice(6) as (typeof CONTACT_FIELDS)[number] };
+  if (value.startsWith('custom:')) return { kind: 'custom', key: value.slice(7) };
+  if (value === 'new') return { kind: 'new', label: header.trim() };
+  return { kind: 'skip' };
+}
+
+/**
+ * CSV upload → map columns → check numbers → add to the campaign. Numbers already in the campaign are skipped.
+ * Extra columns become saved custom fields; the headers used are remembered so the next file maps itself.
+ */
 export function ImportModal({ campaignId, onClose, onImported }: { campaignId: string; onClose: () => void; onImported: () => void }) {
   const [fileName, setFileName] = useState<string | null>(null);
   const [rows, setRows] = useState<string[][] | null>(null);
   const [mapping, setMapping] = useState<ColumnMapping>([]);
+  const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [existing, setExisting] = useState<Set<string> | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<number | null>(null);
 
-  const preview = useMemo(() => (rows && existing && mapping.includes('phone') ? buildImport(rows, mapping, existing) : null), [rows, mapping, existing]);
+  const hasPhone = mapping.some((t) => t.kind === 'field' && t.field === 'phone');
+  const preview = useMemo(() => (rows && existing && hasPhone ? buildImport(rows, mapping, existing) : null), [rows, mapping, existing, hasPhone]);
+  const newFields = new Set(mapping.flatMap((t) => (t.kind === 'new' ? [columnCustomKey(t)!] : [])).filter((k) => !customFields.some((f) => f.key === k)));
+  const blankNewField = mapping.some((t) => t.kind === 'new' && !t.label.trim());
+  const setTarget = (col: number, t: ColumnTarget) => setMapping((m) => m.map((v, i) => (i === col ? t : v)));
 
   const onFile = async (file: File) => {
     setError(null);
@@ -38,8 +66,11 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
     try {
       const parsed = parseCsv(await file.text());
       if (parsed.length < 2) throw new Error('That file has no rows under the header.');
+      const { data: saved, error: fieldsError } = await supabase.from('dialer_custom_fields').select('key, label, aliases').order('label');
+      if (fieldsError) throw new Error(fieldsError.message);
+      setCustomFields(saved as CustomField[]);
       setRows(parsed);
-      setMapping(guessMapping(parsed[0]));
+      setMapping(guessMapping(parsed[0], saved as CustomField[]));
       setFileName(file.name);
       setExisting(await existingPhones(campaignId));
     } catch (err) {
@@ -54,6 +85,17 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
     setBusy(true);
     setError(null);
     try {
+      // Save new custom fields, and remember this file's headers for the fields they were mapped to.
+      const fields = mapping.flatMap((t, col) => {
+        const key = columnCustomKey(t);
+        if (!key) return [];
+        const label = t.kind === 'new' ? t.label : (customFields.find((f) => f.key === key)?.label ?? key);
+        return [{ key, label, alias: headerKey(rows?.[0][col] ?? '') }];
+      });
+      if (fields.length) {
+        const { error } = await supabase.rpc('dialer_save_custom_fields', { p_fields: fields });
+        if (error) throw new Error(error.message);
+      }
       for (let i = 0; i < preview.valid.length; i += BATCH) {
         setProgress(i / preview.valid.length);
         const batch = preview.valid.slice(i, i + BATCH).map((c) => ({ ...c, campaign_id: campaignId, source: 'csv' }));
@@ -88,13 +130,13 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
             <Button variant="ghost" onClick={onClose} disabled={busy}>
               Cancel
             </Button>
-            <Button onClick={runImport} disabled={busy || !preview?.valid.length}>
+            <Button onClick={runImport} disabled={busy || !preview?.valid.length || blankNewField}>
               {busy && progress != null ? (
                 <>
                   <Spinner /> {Math.round(progress * 100)}%
                 </>
               ) : (
-                `Import ${preview?.valid.length.toLocaleString() ?? ''} contacts`
+                `Import ${preview?.valid.length.toLocaleString() ?? ''} contact${preview?.valid.length === 1 ? '' : 's'}`
               )}
             </Button>
           </>
@@ -122,25 +164,49 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
                   <p className="truncate text-sm font-medium">{header || `Column ${col + 1}`}</p>
                   <p className="truncate text-xs text-ink-faint">{rows[1]?.[col]}</p>
                 </div>
-                <select
-                  aria-label={`Field for ${header}`}
-                  className="field !w-44 !py-2 text-sm"
-                  value={mapping[col]}
-                  onChange={(e) => setMapping((m) => m.map((v, i) => (i === col ? (e.target.value as ColumnMapping[number]) : v)))}
-                >
-                  {CONTACT_FIELDS.map((f) => (
-                    <option key={f} value={f}>
-                      {CONTACT_FIELD_LABELS[f]}
-                    </option>
-                  ))}
-                  <option value="custom">Extra info</option>
-                  <option value="skip">Don't import</option>
-                </select>
+                <div className="flex w-56 shrink-0 flex-col gap-1.5">
+                  <select aria-label={`Field for ${header}`} className="field !py-2 text-sm" value={targetValue(mapping[col])} onChange={(e) => setTarget(col, parseTarget(e.target.value, header))}>
+                    <optgroup label="Contact fields">
+                      {CONTACT_FIELDS.map((f) => (
+                        <option key={f} value={`field:${f}`}>
+                          {CONTACT_FIELD_LABELS[f]}
+                        </option>
+                      ))}
+                    </optgroup>
+                    {customFields.length > 0 && (
+                      <optgroup label="Custom fields">
+                        {customFields.map((f) => (
+                          <option key={f.key} value={`custom:${f.key}`}>
+                            {f.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <option value="new">New custom field…</option>
+                    <option value="skip">Don't import</option>
+                  </select>
+                  {mapping[col].kind === 'new' && (
+                    <input
+                      aria-label={`Name of the new field for ${header}`}
+                      className="field !py-1.5 text-sm"
+                      placeholder="Field name"
+                      value={(mapping[col] as { label: string }).label}
+                      onChange={(e) => setTarget(col, { kind: 'new', label: e.target.value })}
+                    />
+                  )}
+                </div>
               </div>
             ))}
           </div>
 
-          {!mapping.includes('phone') ? (
+          {blankNewField && <p className="text-sm text-red-600">Give each new custom field a name, or set it to Don't import.</p>}
+          {newFields.size > 0 && (
+            <p className="text-sm text-ink-muted">
+              {newFields.size} new custom field{newFields.size === 1 ? '' : 's'} will be saved and matched automatically next time.
+            </p>
+          )}
+
+          {!hasPhone ? (
             <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">Choose which column holds the phone number.</p>
           ) : preview ? (
             <div className="grid grid-cols-3 gap-3 text-center">

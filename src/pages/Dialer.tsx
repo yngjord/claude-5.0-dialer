@@ -1,11 +1,12 @@
-import { ArrowLeft, Pause, Phone, PhoneOutgoing, SkipForward, Square } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { LogOut, Pause, Phone, PhoneOutgoing, SkipForward, Square } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { APPOINTMENT_SET, CONNECTED_PICKUP_STATUS, NEEDS_FOLLOW_UP } from '../../shared/constants';
 import { formatPhone } from '../../shared/phone';
 import type { Campaign, Contact } from '../../shared/types';
 import { CallControls } from '../components/CallControls';
 import { ContactCard } from '../components/ContactCard';
+import LoadingBar from '../components/LoadingBar';
 import { Button } from '../components/ui/Button';
 import { Spinner } from '../components/ui/Spinner';
 import { ErrorState } from '../components/ui/States';
@@ -39,6 +40,7 @@ function readDelay(): number {
  */
 export default function Dialer() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const { active, dial, clear, start, deviceState, deviceError } = useVoice();
   const campaignQuery = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*').eq('id', id).maybeSingle()) as Campaign | null, [id]);
   const campaign = campaignQuery.data;
@@ -150,21 +152,25 @@ export default function Dialer() {
     setStage('ready');
   };
 
-  if (campaignQuery.error) return <ErrorState message={campaignQuery.error} onRetry={campaignQuery.reload} />;
-  if (!campaignQuery.loading && !campaign) return <ErrorState message="Campaign not found, or you're not assigned to it." />;
+  // Can't leave mid-call or with a wrap-up still to save (the call would go unlogged).
+  const endBlocked = !!myCall && !failedToStart;
+  const endSession = () => {
+    if (!endBlocked) navigate('/campaigns');
+  };
+
+  if (campaignQuery.error || (!campaignQuery.loading && !campaign)) {
+    return (
+      <FocusLayout title="Power dialer" onEnd={endSession} endBlocked={false}>
+        <ErrorState message={campaignQuery.error ?? "Campaign not found, or you're not assigned to it."} onRetry={campaignQuery.error ? campaignQuery.reload : undefined} />
+      </FocusLayout>
+    );
+  }
 
   const shown = myCall?.contact ?? contact;
 
   return (
-    <>
-      <div className="mb-6 flex animate-appear flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <Link to={`/campaigns/${id}`} className="mb-3 inline-flex items-center gap-1 text-sm text-ink-muted hover:text-brand">
-            <ArrowLeft size={15} /> {campaign?.name ?? 'Campaign'}
-          </Link>
-          <h1 className="font-display text-[30px] font-normal leading-tight sm:text-[36px]">Power dialer</h1>
-          <p className="mt-1 text-[15px] text-ink-muted">{campaign?.client_name}</p>
-        </div>
+    <FocusLayout title={campaign?.name ?? 'Power dialer'} subtitle={campaign?.client_name} onEnd={endSession} endBlocked={endBlocked}>
+      <div className="mb-6 flex animate-appear flex-wrap items-center justify-end gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <dl className="flex gap-2 text-center text-sm">
             {(
@@ -305,7 +311,31 @@ export default function Dialer() {
           </section>
         </div>
       )}
+    </FocusLayout>
+  );
+}
 
-    </>
+/**
+ * The dialer runs full screen with no sidebar, so reps aren't distracted. "End dialling session" is the way back
+ * to Campaigns (the browser's back button works too).
+ */
+function FocusLayout({ title, subtitle, onEnd, endBlocked, children }: { title: string; subtitle?: string; onEnd: () => void; endBlocked: boolean; children: ReactNode }) {
+  return (
+    <div className="min-h-screen">
+      <LoadingBar />
+      <header className="sticky top-0 z-30 border-b border-line bg-white/90 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-4 px-4 sm:px-6 lg:px-10">
+          <img src="/maronly-mark.png" alt="Maronly" className="h-8 w-8" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-display text-[17px] font-medium leading-tight">{title}</p>
+            {subtitle && <p className="truncate text-xs text-ink-muted">{subtitle}</p>}
+          </div>
+          <Button variant="outline" onClick={onEnd} disabled={endBlocked} title={endBlocked ? 'Hang up and save the wrap-up first' : undefined}>
+            <LogOut size={16} /> End dialling session
+          </Button>
+        </div>
+      </header>
+      <main className="mx-auto max-w-[1400px] px-4 pb-16 pt-6 sm:px-6 lg:px-10">{children}</main>
+    </div>
   );
 }

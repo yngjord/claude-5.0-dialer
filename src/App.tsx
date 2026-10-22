@@ -46,8 +46,9 @@ export default function App() {
   return (
     <VoiceProvider>
       <Routes>
+        {/* Full screen, no sidebar: the dialer has its own "End dialling session" header. */}
+        <Route path="/campaigns/:id/dial" element={<Dialer />} />
         <Route element={<AppShell />}>
-          <Route path="/campaigns/:id/dial" element={<Dialer />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/campaigns/:id" element={<CampaignPage />} />
           <Route path="/calls" element={<Calls />} />

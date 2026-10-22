@@ -23,10 +23,13 @@ Browser (React + Vite)
   and see every campaign and call. Team members only see the campaigns they're ticked for in **Manage campaigns**,
   and only calls they made themselves. RLS enforces this in the database, not just in the UI.
 - **Campaigns and contacts.** Each campaign belongs to one Airtable client: calls show in that client's Cold Call
-  Logs, and Leads are linked to them. Contacts come from a CSV upload. Only AU (+614) and NZ (+642) mobiles are
+  Logs, and Leads are linked to them. Contacts come from a CSV upload. Columns that aren't standard fields become
+  saved custom fields (`dialer_custom_fields`) shown on the contact card; the headers used are remembered, so the
+  next file with the same columns maps itself. Only AU (+614) and NZ (+642) mobiles are
   accepted, and duplicate numbers within a campaign are skipped. A local number written like `02 9876 5432` is
   read as an AU landline, so write NZ `027/028/029` mobiles with +64.
-- **Power dialer.** `dialer_claim_next_contact()` hands each rep the next due contact and locks it to them, so two reps
+- **Power dialer.** Runs full screen with no sidebar; **End dialling session** goes back to Campaigns (blocked mid-call
+  or until the wrap-up is saved). `dialer_claim_next_contact()` hands each rep the next due contact and locks it to them, so two reps
   never get the same person. After a countdown (or straight away, or on demand) the browser dials. After hanging
   up, the rep fills in the wrap-up form and the next contact is dialed. No Answer and Left Voicemail come back
   after the campaign's retry delay until the max number of dials. Do Not Call applies to that number in every

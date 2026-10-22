@@ -193,6 +193,42 @@ create index if not exists dialer_sms_phone on public.dialer_sms_messages (phone
 create index if not exists dialer_sms_user on public.dialer_sms_messages (user_id, created_at desc);
 create index if not exists dialer_sms_contact on public.dialer_sms_messages (contact_id);
 
+-- ── Custom contact fields ───────────────────────────────────────────────────────────────────────────────────
+-- Extra CSV columns (industry, headcount…) are saved as named fields and reused by later imports. Contacts keep
+-- their values in contacts.custom under `key`. `aliases` are the normalised CSV headers mapped to the field before,
+-- so the next file with the same header maps itself.
+create table if not exists public.dialer_custom_fields (
+  id uuid primary key default gen_random_uuid(),
+  key text not null unique check (key ~ '^[a-z0-9_]+$'),
+  label text not null,
+  aliases text[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+alter table public.dialer_custom_fields enable row level security;
+drop policy if exists "Dialer users read custom fields" on public.dialer_custom_fields;
+create policy "Dialer users read custom fields" on public.dialer_custom_fields for select to authenticated using (is_dialer_user());
+drop policy if exists "Admins manage custom fields" on public.dialer_custom_fields;
+create policy "Admins manage custom fields" on public.dialer_custom_fields for all to authenticated using (is_dialer_admin()) with check (is_dialer_admin());
+
+-- Called by CSV import (team members can import too): adds new fields and remembers which headers map to which
+-- field. Never renames or removes anything. p_fields: [{"key": "industry", "label": "Industry", "alias": "sector"}]
+create or replace function public.dialer_save_custom_fields(p_fields jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  f jsonb;
+begin
+  if not is_dialer_user() then
+    raise exception 'Only the Maronly team can import contacts' using errcode = '42501';
+  end if;
+  for f in select * from jsonb_array_elements(p_fields) loop
+    insert into dialer_custom_fields (key, label, aliases)
+    values (f->>'key', coalesce(nullif(trim(f->>'label'), ''), f->>'key'), case when coalesce(f->>'alias', '') = '' then '{}' else array[f->>'alias'] end)
+    on conflict (key) do update
+      set aliases = (select coalesce(array_agg(distinct a), '{}') from unnest(dialer_custom_fields.aliases || excluded.aliases) a);
+  end loop;
+end $$;
+
 -- ── Pickup Status from Twilio ───────────────────────────────────────────────────────────────────────────────
 -- Twilio reports the prospect's leg in separate callbacks (call status, answering machine detection) that can
 -- arrive in any order or at the same moment. Each callback only writes its raw column; this trigger works out
@@ -358,9 +394,11 @@ $$;
 
 -- Only signed-in users may call the dialer's functions (they also check the caller's role themselves).
 revoke execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
-  public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users() from public, anon;
+  public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
+  public.dialer_save_custom_fields(jsonb) from public, anon;
 grant execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
-  public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users() to authenticated, service_role;
+  public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
+  public.dialer_save_custom_fields(jsonb) to authenticated, service_role;
 
 -- ── Stats ───────────────────────────────────────────────────────────────────────────────────────────────────
 create or replace view public.dialer_campaign_stats with (security_invoker = true) as

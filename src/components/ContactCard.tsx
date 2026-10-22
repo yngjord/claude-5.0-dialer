@@ -24,7 +24,12 @@ export function ContactCard({ contact }: { contact: Contact }) {
       ) as Pick<CallRow, 'id' | 'started_at' | 'agent_name' | 'pickup_status' | 'disposition' | 'notes' | 'campaign_name'>[],
     [contact.phone_e164],
   );
-  const custom = Object.entries(contact.custom ?? {});
+  // Custom values are stored under field keys (dialer_custom_fields); show each field's name.
+  const fieldNames = useLoad(
+    async () => new Map((must(await supabase.from('dialer_custom_fields').select('key, label')) as { key: string; label: string }[]).map((f) => [f.key, f.label])),
+    [],
+  );
+  const custom = Object.entries(contact.custom ?? {}).map(([key, value]) => [fieldNames.data?.get(key) ?? key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), value] as const);
 
   return (
     <div>
