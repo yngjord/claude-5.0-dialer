@@ -49,7 +49,8 @@ Browser (React + Vite)
   `sweep` (every 10 minutes) finishes anything a webhook didn't.
 - **Inbound.** There are no live inbound calls. Callers hear the number's greeting (the standard spoken one, or an
   upload in **Phone numbers**, so each client's number can have its own) and can leave a voicemail. Voicemails and
-  texts go to the admin **Inbox**, tagged with the rep who last called or texted that person.
+  texts are saved against the rep who last called or texted that person. (The Inbox page that shows them is hidden
+  for now; see `src/pages/Inbox.tsx` to bring it back.)
 - **Caller ID.** Each number belongs to a client (set in **Phone numbers**), and several reps share it. A campaign
   calls and texts from the number picked on the campaign, else its client's number, else the default number. Text
   replies stay on whichever number the conversation is already on.

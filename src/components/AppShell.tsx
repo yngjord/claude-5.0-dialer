@@ -1,8 +1,7 @@
-import { BarChart3, Inbox as InboxIcon, LayoutList, LogOut, Menu, PhoneCall, Settings2, Smartphone, X, type LucideIcon } from 'lucide-react';
+import { BarChart3, LayoutList, LogOut, Menu, PhoneCall, Settings2, Smartphone, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
-import { useInboxCount } from '../lib/useInboxCount';
 import { useVoice } from '../voice/VoiceProvider';
 import Brand from './Brand';
 import { ClickToCallBar } from './ClickToCall';
@@ -12,7 +11,6 @@ import LoadingBar from './LoadingBar';
 const NAV: { to: string; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
   { to: '/campaigns', label: 'Campaigns', icon: LayoutList },
   { to: '/calls', label: 'Calls', icon: PhoneCall, adminOnly: true },
-  { to: '/inbox', label: 'Inbox', icon: InboxIcon, adminOnly: true },
   { to: '/stats', label: 'Stats', icon: BarChart3 },
 ];
 const ADMIN_NAV: { to: string; label: string; icon: LucideIcon }[] = [
@@ -45,17 +43,10 @@ function PhoneStatus() {
 export default function AppShell() {
   const { me, error, signOut, isAdmin } = useAuth();
   const [open, setOpen] = useState(false);
-  const unread = useInboxCount(isAdmin ? me?.userId : undefined);
   const location = useLocation();
 
   useEffect(() => setOpen(false), [location.pathname]);
 
-  const badge = (to: string) =>
-    to === '/inbox' && unread > 0 ? (
-      <span className="ml-auto rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold tabular-nums text-ink" aria-label={`${unread} unread`}>
-        {unread}
-      </span>
-    ) : null;
 
   return (
     <div className="min-h-screen">
@@ -68,7 +59,6 @@ export default function AppShell() {
         </NavLink>
         <button className="relative flex h-10 w-10 items-center justify-center rounded-xl text-white hover:bg-white/10" aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(true)}>
           <Menu size={22} />
-          {unread > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-amber-400" />}
         </button>
       </header>
 
@@ -90,7 +80,6 @@ export default function AppShell() {
             <NavLink key={to} to={to} className={navClass}>
               <Icon size={20} strokeWidth={1.75} />
               {label}
-              {badge(to)}
             </NavLink>
           ))}
           {isAdmin && (

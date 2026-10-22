@@ -11,7 +11,6 @@ import Calls from './pages/Calls';
 import CampaignPage from './pages/Campaign';
 import Campaigns from './pages/Campaigns';
 import Dialer from './pages/Dialer';
-import Inbox from './pages/Inbox';
 import Login from './pages/Login';
 import Stats from './pages/Stats';
 import { VoiceProvider } from './voice/VoiceProvider';
@@ -55,7 +54,6 @@ export default function App() {
           <Route path="/stats" element={<Stats />} />
           {isAdmin && <Route path="/calls" element={<Calls />} />}
           {isAdmin && <Route path="/calls/:id" element={<CallDetailPage />} />}
-          {isAdmin && <Route path="/inbox" element={<Inbox />} />}
           {isAdmin && <Route path="/admin/campaigns" element={<AdminCampaigns />} />}
           {isAdmin && <Route path="/admin/numbers" element={<Numbers />} />}
         </Route>

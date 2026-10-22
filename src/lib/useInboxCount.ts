@@ -1,3 +1,5 @@
+// Hidden for now: the Inbox isn't linked or routed anywhere (incoming texts and voicemails are still saved).
+// To bring it back, add the /inbox route in App.tsx and the nav item + unread badge in AppShell.tsx.
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 
