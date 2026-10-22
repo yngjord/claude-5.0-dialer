@@ -1,8 +1,8 @@
-import { Plus, Users } from 'lucide-react';
+import { Plus, Trash2, Users } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPhone } from '../../../shared/phone';
-import type { AirtableClient, Campaign, DialerUser, PhoneNumber } from '../../../shared/types';
+import type { AirtableClient, Campaign, CampaignStats, DialerUser, PhoneNumber } from '../../../shared/types';
 import { useAuth } from '../../auth/AuthProvider';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -150,6 +150,7 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
   const [retryHours, setRetryHours] = useState(String((campaign?.retry_after_minutes ?? 1440) / 60));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
@@ -180,12 +181,19 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
     onSaved();
   };
 
+  if (campaign && deleting) return <DeleteCampaignModal campaign={campaign} onCancel={() => setDeleting(false)} onDeleted={onSaved} />;
+
   return (
     <Modal
       title={campaign ? 'Edit campaign' : 'New campaign'}
       onClose={onClose}
       footer={
         <>
+          {campaign && (
+            <Button variant="ghost" className="mr-auto !text-red-600 hover:!bg-red-50" onClick={() => setDeleting(true)}>
+              <Trash2 size={15} /> Delete campaign
+            </Button>
+          )}
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
@@ -261,6 +269,83 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
           </p>
         )}
       </form>
+    </Modal>
+  );
+}
+
+/**
+ * Deleting is two steps: open this from Edit campaign, then type the campaign's name. Contacts and team assignments
+ * go with the campaign (cascade); call logs stay, keeping the campaign and client name, recordings and transcripts.
+ */
+function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Campaign; onCancel: () => void; onDeleted: () => void }) {
+  const stats = useLoad(
+    async () => must(await supabase.from('dialer_campaign_stats').select('contacts_total, dials_total').eq('campaign_id', campaign.id).maybeSingle()) as Pick<CampaignStats, 'contacts_total' | 'dials_total'> | null,
+    [campaign.id],
+  );
+  const [typed, setTyped] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const matches = typed.trim() === campaign.name.trim();
+
+  const remove = async () => {
+    if (!matches) return;
+    setDeleting(true);
+    setError(null);
+    const { data, error } = await supabase.from('dialer_campaigns').delete().eq('id', campaign.id).select('id');
+    if (error || !data?.length) {
+      setDeleting(false);
+      return setError(error?.message ?? "The campaign couldn't be deleted. Only admins can delete campaigns.");
+    }
+    onDeleted();
+  };
+
+  const contacts = stats.data?.contacts_total ?? 0;
+  const dials = stats.data?.dials_total ?? 0;
+  return (
+    <Modal
+      title="Delete campaign?"
+      onClose={deleting ? () => undefined : onCancel}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onCancel} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button className="!border-red-600 !bg-red-600 hover:!bg-red-700 hover:!shadow-none" onClick={remove} disabled={!matches || deleting}>
+            {deleting ? <Spinner /> : <Trash2 size={15} />} Delete for good
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4 text-[15px]">
+        <p>
+          This permanently deletes <b>{campaign.name}</b>
+          {stats.loading ? '' : ` and its ${contacts.toLocaleString()} contact${contacts === 1 ? '' : 's'}`}, and removes everyone assigned to it. It can't be
+          undone.
+        </p>
+        <p className="rounded-2xl bg-neutral-50 px-4 py-3 text-sm text-ink-muted">
+          {dials > 0 ? `Its ${dials.toLocaleString()} logged call${dials === 1 ? '' : 's'} are kept` : 'Any calls made are kept'}, with their recordings and transcripts, so the
+          client's Cold Call Logs and your stats don't change. To just stop dialing it, set the status to Paused or Archived instead.
+        </p>
+        <div>
+          <label htmlFor="confirm-name" className="mb-2 block text-sm font-medium text-ink-soft">
+            Type <span className="font-semibold text-ink">{campaign.name}</span> to confirm
+          </label>
+          <input
+            id="confirm-name"
+            className="field"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && remove()}
+            autoComplete="off"
+            autoFocus
+          />
+        </div>
+        {error && (
+          <p role="alert" className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+      </div>
     </Modal>
   );
 }

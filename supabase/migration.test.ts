@@ -237,6 +237,29 @@ describe('row level security', () => {
   });
 });
 
+describe('deleting a campaign', () => {
+  it('only admins can; contacts and members go, calls stay with their snapshot', async () => {
+    const DOOMED = '10000000-0000-0000-0000-0000000000dd';
+    await pg.exec(`
+      insert into dialer_campaigns (id, name, client_name, airtable_client_id) values ('${DOOMED}', 'Doomed', 'Kintell', 'recK');
+      insert into dialer_campaign_members (campaign_id, user_id) values ('${DOOMED}', '${TEAM1}');
+      insert into dialer_contacts (campaign_id, full_name, phone_e164) values ('${DOOMED}', 'Gone', '+61499999991');
+      insert into dialer_calls (campaign_id, user_id, campaign_name, client_name, twilio_status) values ('${DOOMED}', '${TEAM1}', 'Doomed', 'Kintell', 'completed');
+    `);
+    const teamDelete = await as(TEAM1, () => pg.query(`delete from dialer_campaigns where id = $1`, [DOOMED]));
+    expect(teamDelete.affectedRows).toBe(0);
+
+    const adminDelete = await as(ADMIN, () => pg.query(`delete from dialer_campaigns where id = $1`, [DOOMED]));
+    expect(adminDelete.affectedRows).toBe(1);
+    expect(await rows(`select 1 from dialer_contacts where full_name = 'Gone'`)).toEqual([]);
+    expect(await rows(`select 1 from dialer_campaign_members where campaign_id = $1`, [DOOMED])).toEqual([]);
+    expect(await rows(`select campaign_id, campaign_name, client_name from dialer_calls where campaign_name = 'Doomed'`)).toEqual([
+      { campaign_id: null, campaign_name: 'Doomed', client_name: 'Kintell' },
+    ]);
+    await pg.exec(`delete from dialer_calls where campaign_name = 'Doomed'`);
+  });
+});
+
 describe('stats', () => {
   it('campaign_stats and call_stats run', async () => {
     await pg.exec(`insert into dialer_calls (campaign_id, user_id, agent_name, twilio_status, answered_by) values ('${CAMPAIGN}', '${TEAM1}', 'T1', 'completed', 'human')`);
