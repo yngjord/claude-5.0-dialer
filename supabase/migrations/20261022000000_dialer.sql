@@ -4,7 +4,7 @@
 --
 -- Access:
 --   admin: everything.
---   team:  only campaigns they're a member of (campaign_members), plus their own calls and messages.
+--   team:  only campaigns they're a member of (campaign_members), and only calls they made themselves.
 --   client (portal users): nothing. The dialer's functions also refuse them.
 
 -- ── Profiles ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -271,9 +271,10 @@ create policy "Admins edit contacts" on public.dialer_contacts for update to aut
 drop policy if exists "Admins delete contacts" on public.dialer_contacts;
 create policy "Admins delete contacts" on public.dialer_contacts for delete to authenticated using (is_dialer_admin());
 
+-- Reps only ever see calls they made themselves; admins see every call.
 drop policy if exists "Read calls" on public.dialer_calls;
 create policy "Read calls" on public.dialer_calls for select to authenticated
-  using (is_dialer_admin() or (is_dialer_user() and (user_id = (select auth.uid()) or (campaign_id is not null and dialer_can_access_campaign(campaign_id)))));
+  using (is_dialer_admin() or (is_dialer_user() and user_id = (select auth.uid())));
 -- The browser may only mark its own voicemails as read (column grant below limits it to read_at).
 drop policy if exists "Mark own voicemails read" on public.dialer_calls;
 create policy "Mark own voicemails read" on public.dialer_calls for update to authenticated

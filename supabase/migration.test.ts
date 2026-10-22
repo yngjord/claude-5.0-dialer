@@ -194,6 +194,17 @@ describe('row level security', () => {
     });
   });
 
+  it('reps only see calls they made, even in a shared campaign; admins see all', async () => {
+    await pg.exec(`
+      insert into dialer_calls (campaign_id, user_id, agent_name, twilio_status) values
+        ('${CAMPAIGN}', '${TEAM1}', 'T1', 'completed'), ('${CAMPAIGN}', '${TEAM2}', 'T2', 'completed')`);
+    const agents = async (user: string) => (await as(user, () => rows<{ agent_name: string }>(`select distinct agent_name from dialer_calls where agent_name in ('T1', 'T2') order by 1`))).map((r) => r.agent_name);
+    expect(await agents(TEAM1)).toEqual(['T1']);
+    expect(await agents(TEAM2)).toEqual(['T2']);
+    expect(await agents(ADMIN)).toEqual(['T1', 'T2']);
+    await pg.exec(`delete from dialer_calls where agent_name in ('T1', 'T2')`);
+  });
+
   it('admins see everything', async () => {
     await as(ADMIN, async () => {
       expect((await rows('select * from dialer_campaigns')).length).toBe(2);

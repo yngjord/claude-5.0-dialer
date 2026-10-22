@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import { DISPOSITIONS, PICKUP_STATUSES } from '../../shared/constants';
 import { formatPhone } from '../../shared/phone';
 import type { CallRow, Campaign } from '../../shared/types';
-import { useAuth } from '../auth/AuthProvider';
 import { CallDetailModal } from '../components/CallDetail';
 import { Badge } from '../components/ui/Badge';
 import { SearchInput } from '../components/ui/SearchInput';
@@ -19,12 +18,10 @@ const RANGES = { today: 'Today', '7': 'Last 7 days', '30': 'Last 30 days', all: 
 type Range = keyof typeof RANGES;
 
 export default function Calls() {
-  const { me, isAdmin } = useAuth();
   const [range, setRange] = useState<Range>('7');
   const [campaignId, setCampaignId] = useState('');
   const [pickup, setPickup] = useState('');
   const [disposition, setDisposition] = useState('');
-  const [mine, setMine] = useState(!isAdmin);
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [page, setPage] = useState(0);
@@ -34,7 +31,7 @@ export default function Calls() {
     const t = setTimeout(() => setDebounced(query.trim()), 300);
     return () => clearTimeout(t);
   }, [query]);
-  useEffect(() => setPage(0), [range, campaignId, pickup, disposition, mine, debounced]);
+  useEffect(() => setPage(0), [range, campaignId, pickup, disposition, debounced]);
 
   const campaigns = useLoad(async () => must(await supabase.from('dialer_campaigns').select('id, name').order('name')) as Pick<Campaign, 'id' | 'name'>[], []);
 
@@ -47,7 +44,6 @@ export default function Calls() {
     if (campaignId) q = q.eq('campaign_id', campaignId);
     if (pickup) q = q.eq('pickup_status', pickup);
     if (disposition) q = q.eq('disposition', disposition);
-    if (mine && me) q = q.eq('user_id', me.userId);
     if (debounced) {
       const term = debounced.replace(/[%,()]/g, ' ');
       const digits = term.replace(/\D/g, '');
@@ -55,7 +51,7 @@ export default function Calls() {
     }
     const res = await q.order('started_at', { ascending: false }).range(page * PER_PAGE, page * PER_PAGE + PER_PAGE - 1);
     return { calls: must(res) as CallRow[], total: res.count ?? 0 };
-  }, [range, campaignId, pickup, disposition, mine, debounced, page, me]);
+  }, [range, campaignId, pickup, disposition, debounced, page]);
 
   const select = 'field !w-auto !rounded-full !py-2 text-sm';
 
@@ -93,9 +89,6 @@ export default function Calls() {
                 <option key={d}>{d}</option>
               ))}
             </select>
-            <label className="ml-1 flex items-center gap-2 text-sm text-ink-soft">
-              <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} className="h-4 w-4 accent-brand" /> Only my calls
-            </label>
           </div>
           <SearchInput value={query} onChange={setQuery} placeholder="Search name, company, phone" />
         </div>
