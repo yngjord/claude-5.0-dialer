@@ -14,7 +14,7 @@ export default handler(async (req) => {
   const id = new URL(req.url).searchParams.get('id');
   if (!id) throw new HttpError(400, 'Missing call id.');
 
-  const access = must(await db().from('calls').select('user_id, campaign_id').eq('id', id).maybeSingle()) as Pick<CallRow, 'user_id' | 'campaign_id'> | null;
+  const access = must(await db().from('dialer_calls').select('user_id, campaign_id').eq('id', id).maybeSingle()) as Pick<CallRow, 'user_id' | 'campaign_id'> | null;
   if (!access) throw new HttpError(404, 'Call not found.');
   if (me.role !== 'admin' && access.user_id !== me.userId) {
     if (!access.campaign_id) throw new HttpError(403, "You don't have access to this call.");
@@ -27,7 +27,7 @@ export default handler(async (req) => {
   }
   if (call?.transcript_status === 'pending') await storeTranscript(call).catch((err) => console.error('Transcript fetch failed', id, err));
 
-  const row = must(await db().from('calls').select('recording_path, transcript, transcript_json, transcript_status').eq('id', id).single()) as Pick<
+  const row = must(await db().from('dialer_calls').select('recording_path, transcript, transcript_json, transcript_status').eq('id', id).single()) as Pick<
     CallRow,
     'recording_path' | 'transcript' | 'transcript_json' | 'transcript_status'
   >;

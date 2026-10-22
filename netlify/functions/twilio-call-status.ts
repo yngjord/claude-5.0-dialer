@@ -21,10 +21,10 @@ export default handler(async (req) => {
   if (FINAL.includes(status)) {
     patch.ended_at = new Date().toISOString();
     patch.duration_s = Number.parseInt(p.CallDuration ?? '0', 10) || 0;
-    must(await db().from('calls').update(patch).eq('id', callId));
+    must(await db().from('dialer_calls').update(patch).eq('id', callId));
   } else {
     // Events can arrive out of order: never let "ringing" overwrite a finished call.
-    must(await db().from('calls').update(patch).eq('id', callId).or(`twilio_status.is.null,twilio_status.not.in.(${FINAL.join(',')})`));
+    must(await db().from('dialer_calls').update(patch).eq('id', callId).or(`twilio_status.is.null,twilio_status.not.in.(${FINAL.join(',')})`));
   }
   return json({ ok: true });
 });

@@ -18,13 +18,13 @@ export default handler(async (req) => {
   const caller = phone.ok ? phone.e164 : null;
   const route = caller ? await routeInbound(caller) : { contact: null, campaign: null, userId: null };
 
-  const number = must(await db().from('phone_numbers').select('voicemail_greeting_path').eq('e164', p.To).maybeSingle()) as {
+  const number = must(await db().from('dialer_phone_numbers').select('voicemail_greeting_path').eq('e164', p.To).maybeSingle()) as {
     voicemail_greeting_path: string | null;
   } | null;
 
   const call = must(
     await db()
-      .from('calls')
+      .from('dialer_calls')
       .insert({
         direction: 'inbound',
         kind: 'voicemail',
@@ -49,7 +49,7 @@ export default handler(async (req) => {
 
   let greeting = `<Say voice="Polly.Olivia-Neural" language="en-AU">${xml(DEFAULT_GREETING)}</Say>`;
   if (number?.voicemail_greeting_path) {
-    const { data } = await db().storage.from('greetings').createSignedUrl(number.voicemail_greeting_path, 600);
+    const { data } = await db().storage.from('dialer-greetings').createSignedUrl(number.voicemail_greeting_path, 600);
     if (data?.signedUrl) greeting = `<Play>${xml(data.signedUrl)}</Play>`;
   }
 

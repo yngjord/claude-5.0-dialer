@@ -40,7 +40,7 @@ function readDelay(): number {
 export default function Dialer() {
   const { id = '' } = useParams();
   const { active, dial, clear, start, deviceState, deviceError } = useVoice();
-  const campaignQuery = useLoad(async () => must(await supabase.from('campaigns').select('*').eq('id', id).maybeSingle()) as Campaign | null, [id]);
+  const campaignQuery = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*').eq('id', id).maybeSingle()) as Campaign | null, [id]);
   const campaign = campaignQuery.data;
 
   const [stage, setStage] = useState<Stage>('idle');
@@ -56,7 +56,7 @@ export default function Dialer() {
   heldRef.current = stage === 'ready' && contact ? contact.id : null;
   useEffect(
     () => () => {
-      if (heldRef.current) supabase.rpc('release_contact', { p_contact_id: heldRef.current, p_skip: false });
+      if (heldRef.current) supabase.rpc('dialer_release_contact', { p_contact_id: heldRef.current, p_skip: false });
     },
     [],
   );
@@ -67,7 +67,7 @@ export default function Dialer() {
     setStage('claiming');
     setError(null);
     try {
-      const rows = must(await supabase.rpc('claim_next_contact', { p_campaign_id: id })) as Contact[];
+      const rows = must(await supabase.rpc('dialer_claim_next_contact', { p_campaign_id: id })) as Contact[];
       if (!rows.length) {
         setContact(null);
         setStage('empty');
@@ -118,12 +118,12 @@ export default function Dialer() {
   };
 
   const skip = async () => {
-    if (contact) await supabase.rpc('release_contact', { p_contact_id: contact.id, p_skip: true });
+    if (contact) await supabase.rpc('dialer_release_contact', { p_contact_id: contact.id, p_skip: true });
     await claimNext();
   };
 
   const stop = async () => {
-    if (stage === 'ready' && contact) await supabase.rpc('release_contact', { p_contact_id: contact.id, p_skip: false });
+    if (stage === 'ready' && contact) await supabase.rpc('dialer_release_contact', { p_contact_id: contact.id, p_skip: false });
     setContact(null);
     setCountdown(null);
     setStage('paused');

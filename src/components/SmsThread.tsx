@@ -10,7 +10,7 @@ import { Spinner } from './ui/Spinner';
 /** A text conversation with one number, live-updating, with a reply box. */
 export function SmsThread({ phone, contactId }: { phone: string; contactId?: string | null }) {
   const { data, setData, loading, error } = useLoad(
-    async () => must(await supabase.from('sms_messages').select('*').eq('phone_e164', phone).order('created_at').limit(500)) as SmsMessage[],
+    async () => must(await supabase.from('dialer_sms_messages').select('*').eq('phone_e164', phone).order('created_at').limit(500)) as SmsMessage[],
     [phone],
   );
   const [text, setText] = useState('');
@@ -21,7 +21,7 @@ export function SmsThread({ phone, contactId }: { phone: string; contactId?: str
   useEffect(() => {
     const channel = supabase
       .channel(`sms-${phone}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sms_messages', filter: `phone_e164=eq.${phone}` }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialer_sms_messages', filter: `phone_e164=eq.${phone}` }, (payload) => {
         const msg = payload.new as SmsMessage;
         if (!msg?.id) return;
         setData((list) => {
@@ -40,7 +40,7 @@ export function SmsThread({ phone, contactId }: { phone: string; contactId?: str
   const unreadKey = unread.join(',');
   useEffect(() => {
     if (!unreadKey) return;
-    supabase.from('sms_messages').update({ read_at: new Date().toISOString() }).in('id', unreadKey.split(',')).then(() => window.dispatchEvent(new Event('inbox:changed')));
+    supabase.from('dialer_sms_messages').update({ read_at: new Date().toISOString() }).in('id', unreadKey.split(',')).then(() => window.dispatchEvent(new Event('inbox:changed')));
   }, [unreadKey]);
 
   useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [data?.length]);

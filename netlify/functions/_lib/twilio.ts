@@ -46,7 +46,7 @@ export async function pickCallerNumber(
   userId: string,
   campaignNumberId: string | null,
 ): Promise<string | null> {
-  const { data } = await dbClient.from('phone_numbers').select('id, e164, assigned_user_id, is_default');
+  const { data } = await dbClient.from('dialer_phone_numbers').select('id, e164, assigned_user_id, is_default');
   const numbers = (data ?? []) as { id: string; e164: string; assigned_user_id: string | null; is_default: boolean }[];
   return (
     numbers.find((n) => n.assigned_user_id === userId)?.e164 ??

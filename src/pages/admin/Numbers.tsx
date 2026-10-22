@@ -14,7 +14,7 @@ import { supabase } from '../../lib/supabase';
  * "Sync from Twilio" imports bought numbers and points their voicemail/SMS webhooks at this site.
  */
 export default function Numbers() {
-  const list = useLoad(async () => must(await supabase.from('phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
+  const list = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
   const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -23,10 +23,10 @@ export default function Numbers() {
   const update = async (id: string, fields: Partial<PhoneNumber>) => {
     setError(null);
     if (fields.is_default) {
-      const { error } = await supabase.from('phone_numbers').update({ is_default: false }).neq('id', id);
+      const { error } = await supabase.from('dialer_phone_numbers').update({ is_default: false }).neq('id', id);
       if (error) return setError(error.message);
     }
-    const { error } = await supabase.from('phone_numbers').update(fields).eq('id', id);
+    const { error } = await supabase.from('dialer_phone_numbers').update(fields).eq('id', id);
     if (error) setError(error.message);
     list.reload({ quiet: true });
   };
@@ -50,20 +50,20 @@ export default function Numbers() {
     setError(null);
     const ext = file.name.split('.').pop()?.toLowerCase() || 'mp3';
     const path = `${n.id}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('greetings').upload(path, file, { contentType: file.type || 'audio/mpeg' });
+    const { error } = await supabase.storage.from('dialer-greetings').upload(path, file, { contentType: file.type || 'audio/mpeg' });
     if (error) return setError(error.message);
-    if (n.voicemail_greeting_path) await supabase.storage.from('greetings').remove([n.voicemail_greeting_path]);
+    if (n.voicemail_greeting_path) await supabase.storage.from('dialer-greetings').remove([n.voicemail_greeting_path]);
     await update(n.id, { voicemail_greeting_path: path });
   };
 
   const removeGreeting = async (n: PhoneNumber) => {
-    if (n.voicemail_greeting_path) await supabase.storage.from('greetings').remove([n.voicemail_greeting_path]);
+    if (n.voicemail_greeting_path) await supabase.storage.from('dialer-greetings').remove([n.voicemail_greeting_path]);
     await update(n.id, { voicemail_greeting_path: null });
   };
 
   const playGreeting = async (n: PhoneNumber) => {
     if (!n.voicemail_greeting_path) return;
-    const { data } = await supabase.storage.from('greetings').createSignedUrl(n.voicemail_greeting_path, 300);
+    const { data } = await supabase.storage.from('dialer-greetings').createSignedUrl(n.voicemail_greeting_path, 300);
     if (data?.signedUrl) new Audio(data.signedUrl).play();
   };
 

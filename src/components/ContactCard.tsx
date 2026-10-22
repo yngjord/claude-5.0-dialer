@@ -16,7 +16,7 @@ export function ContactCard({ contact }: { contact: Contact }) {
     async () =>
       must(
         await supabase
-          .from('calls')
+          .from('dialer_calls')
           .select('id, started_at, agent_name, pickup_status, disposition, notes, campaign_name')
           .eq('phone_e164', contact.phone_e164)
           .order('started_at', { ascending: false })

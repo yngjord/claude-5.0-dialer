@@ -1,6 +1,6 @@
 /**
  * Copies the JustCall history out of Airtable ('JustCall Storage' + 'Cold Call Transcripts') into the Supabase
- * `calls` table, including the recordings (JustCall's links will stop working once that account is closed).
+ * `dialer_calls` table, including the recordings (JustCall's links will stop working once that account is closed).
  * Safe to re-run: rows are upserted on justcall_call_id, and recordings already copied are skipped.
  *
  *   AIRTABLE_API_KEY=… AIRTABLE_BASE_ID=app… SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… \
@@ -183,7 +183,7 @@ async function main() {
   if (dryRun) return;
 
   for (let i = 0; i < rows.length; i += 500) {
-    must(await db().from('calls').upsert(rows.slice(i, i + 500), { onConflict: 'justcall_call_id' }));
+    must(await db().from('dialer_calls').upsert(rows.slice(i, i + 500), { onConflict: 'justcall_call_id' }));
     console.log(`  upserted ${Math.min(i + 500, rows.length)}/${rows.length}`);
   }
 
@@ -192,7 +192,7 @@ async function main() {
   // Copy recordings that aren't in Storage yet.
   const done = new Set<number>();
   for (let from = 0; ; from += 1000) {
-    const page = must(await db().from('calls').select('justcall_call_id').eq('source', 'justcall').not('recording_path', 'is', null).range(from, from + 999)) as { justcall_call_id: number }[];
+    const page = must(await db().from('dialer_calls').select('justcall_call_id').eq('source', 'justcall').not('recording_path', 'is', null).range(from, from + 999)) as { justcall_call_id: number }[];
     page.forEach((r) => done.add(r.justcall_call_id));
     if (page.length < 1000) break;
   }
@@ -212,7 +212,7 @@ async function main() {
       const path = `justcall/${callId}.${ext}`;
       const { error } = await db().storage.from(RECORDINGS_BUCKET).upload(path, await res.arrayBuffer(), { contentType: type, upsert: true });
       if (error) throw new Error(error.message);
-      must(await db().from('calls').update({ recording_path: path }).eq('justcall_call_id', callId));
+      must(await db().from('dialer_calls').update({ recording_path: path }).eq('justcall_call_id', callId));
       if (++copied % 50 === 0) console.log(`  ${copied}/${todo.length}`);
     } catch (err) {
       failed.push(`${callId}: ${(err as Error).message}`);

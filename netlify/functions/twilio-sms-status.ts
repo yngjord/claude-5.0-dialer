@@ -9,7 +9,7 @@ export default handler(async (req) => {
   if (p.MessageSid) {
     must(
       await db()
-        .from('sms_messages')
+        .from('dialer_sms_messages')
         .update({ status: p.MessageStatus, error: p.ErrorCode ? `Error ${p.ErrorCode}` : null })
         .eq('twilio_sid', p.MessageSid),
     );

@@ -24,14 +24,14 @@ Browser (React + Vite)
   Logs, and Leads are linked to them. Contacts come from a CSV upload. Only AU (+614) and NZ (+642) mobiles are
   accepted, and duplicate numbers within a campaign are skipped. A local number written like `02 9876 5432` is
   read as an AU landline, so write NZ `027/028/029` mobiles with +64.
-- **Power dialer.** `claim_next_contact()` hands each rep the next due contact and locks it to them, so two reps
+- **Power dialer.** `dialer_claim_next_contact()` hands each rep the next due contact and locks it to them, so two reps
   never get the same person. After a countdown (or straight away, or on demand) the browser dials. After hanging
   up, the rep fills in the wrap-up form and the next contact is dialed. No Answer and Left Voicemail come back
   after the campaign's retry delay until the max number of dials. Do Not Call applies to that number in every
   campaign.
 - **Click-to-call.** The phone button on any contact. Same call logging and wrap-up, shown in a bar above the page.
 - **Pickup status.** Twilio's call status and answering machine detection (AMD) are written to the call row
-  by webhooks. The `calls_pickup` trigger turns them into Human / Machine / Unclassified Pickup, Unanswered, Busy
+  by webhooks. The `dialer_calls_pickup` trigger turns them into Human / Machine / Unclassified Pickup, Unanswered, Busy
   or Failed, so it's filled in even if the rep closes the tab. The rep can correct it at wrap-up, and then it's
   never overwritten (`pickup_source = 'agent'`). The raw values stay in `twilio_status` and `answered_by`.
 - **No abandoned calls.** The rep hears the line from the first ring (`answerOnBridge`); AMD only labels the call.
@@ -43,7 +43,7 @@ Browser (React + Vite)
     website. The rep's notes go in `Notes (Maronly)`.
   - If Airtable fails, the call is still saved and the rep can retry. All Lead field names are in `shared/leads.ts`.
 - **Recordings and transcripts.** Dual-channel recordings are copied from Twilio into the private Supabase bucket
-  `recordings`, then deleted from Twilio. Calls that might have been a conversation (not machines, 5s+) and all
+  `dialer-recordings`, then deleted from Twilio. Calls that might have been a conversation (not machines, 5s+) and all
   voicemails are transcribed with Twilio Voice Intelligence, with rep and prospect on separate channels.
   `sweep` (every 10 minutes) finishes anything a webhook didn't.
 - **Inbound.** There are no live inbound calls. Callers hear the number's greeting (the standard spoken one, or an
@@ -51,15 +51,15 @@ Browser (React + Vite)
   called or texted that number.
 - **Caller ID.** Calls go out from the rep's own number, else the campaign's number, else the default number.
 
-Every table, policy and function is in [`supabase/migrations/20261022000000_dialer.sql`](supabase/migrations/20261022000000_dialer.sql).
+Everything the dialer adds to the shared Supabase project is prefixed `dialer_` (tables, views, functions, triggers, indexes) or `dialer-` (storage buckets), so it's easy to tell apart from the portal's and other projects' objects. Every table, policy and function is in [`supabase/migrations/20261022000000_dialer.sql`](supabase/migrations/20261022000000_dialer.sql).
 
 ## Setup
 
 ### 1. Supabase
 
 Run `supabase/migrations/20261022000000_dialer.sql` in the SQL editor of the portal's project. It's safe to
-re-run. It adds the dialer tables, a `display_name` column on `profiles` (shown as the agent name), the
-`recordings` and `greetings` storage buckets and realtime on `calls` and `sms_messages`. It doesn't change
+re-run. It adds the `dialer_` tables, a `display_name` column on `profiles` (shown as the agent name), the
+`dialer-recordings` and `dialer-greetings` storage buckets and realtime on `dialer_calls` and `dialer_sms_messages`. It doesn't change
 anything the portal uses.
 
 Then for each person:

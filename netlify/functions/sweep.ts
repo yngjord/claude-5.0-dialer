@@ -11,7 +11,7 @@ export default async () => {
 
   const recordings = must(
     await db()
-      .from('calls')
+      .from('dialer_calls')
       .select('id')
       .not('recording_sid', 'is', null)
       .or('recording_path.is.null,transcript_status.is.null')
@@ -24,7 +24,7 @@ export default async () => {
   }
 
   const transcripts = must(
-    await db().from('calls').select('id').eq('transcript_status', 'pending').lt('updated_at', twoMinutesAgo).order('updated_at').limit(20),
+    await db().from('dialer_calls').select('id').eq('transcript_status', 'pending').lt('updated_at', twoMinutesAgo).order('updated_at').limit(20),
   ) as { id: string }[];
   for (const { id } of transcripts) {
     const call = await loadMediaCall(id);
@@ -33,7 +33,7 @@ export default async () => {
 
   must(
     await db()
-      .from('calls')
+      .from('dialer_calls')
       .update({ twilio_status: 'completed' })
       .eq('direction', 'inbound')
       .eq('twilio_status', 'in-progress')

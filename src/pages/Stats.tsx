@@ -30,11 +30,11 @@ function add(t: Totals, r: CallStatsRow) {
 export default function Stats() {
   const [range, setRange] = useState<Range>('7');
   const [campaignId, setCampaignId] = useState('');
-  const campaigns = useLoad(async () => must(await supabase.from('campaigns').select('id, name').order('name')) as Pick<Campaign, 'id' | 'name'>[], []);
+  const campaigns = useLoad(async () => must(await supabase.from('dialer_campaigns').select('id, name').order('name')) as Pick<Campaign, 'id' | 'name'>[], []);
   const stats = useLoad(
     async () =>
       must(
-        await supabase.rpc('call_stats', {
+        await supabase.rpc('dialer_call_stats', {
           p_from: sydneyDayStart(Number(range) - 1),
           p_to: new Date(Date.now() + 60_000).toISOString(),
           p_campaign_id: campaignId || null,

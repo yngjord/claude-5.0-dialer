@@ -31,12 +31,12 @@ export default handler(async (req) => {
     throw err;
   }
 
-  const contact = must(await db().from('contacts').select('*').eq('id', p.contactId).maybeSingle()) as Contact | null;
+  const contact = must(await db().from('dialer_contacts').select('*').eq('id', p.contactId).maybeSingle()) as Contact | null;
   if (!contact) return say('Sorry, that contact no longer exists.');
-  const campaign = must(await db().from('campaigns').select('*').eq('id', contact.campaign_id).single()) as Campaign;
+  const campaign = must(await db().from('dialer_campaigns').select('*').eq('id', contact.campaign_id).single()) as Campaign;
 
   if (me.role !== 'admin') {
-    const member = must(await db().from('campaign_members').select('user_id').eq('campaign_id', campaign.id).eq('user_id', me.userId).maybeSingle());
+    const member = must(await db().from('dialer_campaign_members').select('user_id').eq('campaign_id', campaign.id).eq('user_id', me.userId).maybeSingle());
     if (!member) return say("Sorry, you're not assigned to this campaign.");
   }
 
@@ -44,7 +44,7 @@ export default handler(async (req) => {
   const from = await pickCallerNumber(db(), me.userId, campaign.caller_number_id);
 
   must(
-    await db().from('calls').insert({
+    await db().from('dialer_calls').insert({
       id: callId,
       direction: 'outbound',
       campaign_id: campaign.id,

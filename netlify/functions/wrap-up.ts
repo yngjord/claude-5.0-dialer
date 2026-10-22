@@ -21,7 +21,7 @@ export default handler(async (req) => {
   if (!isPickupStatus(body.pickupStatus)) throw new HttpError(400, 'Choose a pickup status.');
   if (!isDisposition(body.disposition)) throw new HttpError(400, 'Choose a disposition.');
 
-  const call = must(await db().from('calls').select('*').eq('id', body.callId).maybeSingle()) as CallRow | null;
+  const call = must(await db().from('dialer_calls').select('*').eq('id', body.callId).maybeSingle()) as CallRow | null;
   if (!call) throw new HttpError(404, "This call wasn't logged. Check your connection and try the next one.");
   if (call.user_id !== me.userId && me.role !== 'admin') throw new HttpError(403, 'This is not your call.');
 
@@ -36,7 +36,7 @@ export default handler(async (req) => {
   const pickupChanged = body.pickupStatus !== call.pickup_status;
   must(
     await db()
-      .from('calls')
+      .from('dialer_calls')
       .update({
         disposition: body.disposition,
         notes: body.notes?.trim() || null,
@@ -46,8 +46,8 @@ export default handler(async (req) => {
       .eq('id', call.id),
   );
 
-  const contact = call.contact_id ? (must(await db().from('contacts').select('*').eq('id', call.contact_id).maybeSingle()) as Contact | null) : null;
-  const campaign = call.campaign_id ? (must(await db().from('campaigns').select('*').eq('id', call.campaign_id).maybeSingle()) as Campaign | null) : null;
+  const contact = call.contact_id ? (must(await db().from('dialer_contacts').select('*').eq('id', call.contact_id).maybeSingle()) as Contact | null) : null;
+  const campaign = call.campaign_id ? (must(await db().from('dialer_campaigns').select('*').eq('id', call.campaign_id).maybeSingle()) as Campaign | null) : null;
 
   if (contact && campaign) {
     const attempts = firstWrapUp ? contact.attempts + 1 : contact.attempts;
@@ -58,7 +58,7 @@ export default handler(async (req) => {
     });
     must(
       await db()
-        .from('contacts')
+        .from('dialer_contacts')
         .update({
           attempts,
           last_called_at: call.started_at,
@@ -76,7 +76,7 @@ export default handler(async (req) => {
 
   // Do Not Call applies to the number everywhere, not just this campaign.
   if (body.disposition === 'Do Not Call' && call.phone_e164) {
-    must(await db().from('contacts').update({ status: 'do_not_call', locked_by: null, locked_at: null }).eq('phone_e164', call.phone_e164));
+    must(await db().from('dialer_contacts').update({ status: 'do_not_call', locked_by: null, locked_at: null }).eq('phone_e164', call.phone_e164));
   }
 
   let leadId = call.airtable_lead_id;
@@ -94,12 +94,12 @@ export default handler(async (req) => {
           todaySydney: todayInSydney(),
         }),
       );
-      must(await db().from('calls').update({ airtable_lead_id: leadId, lead_sync_error: null }).eq('id', call.id));
-      if (contact) must(await db().from('contacts').update({ airtable_lead_id: leadId }).eq('id', contact.id));
+      must(await db().from('dialer_calls').update({ airtable_lead_id: leadId, lead_sync_error: null }).eq('id', call.id));
+      if (contact) must(await db().from('dialer_contacts').update({ airtable_lead_id: leadId }).eq('id', contact.id));
     } catch (err) {
       leadError = err instanceof Error ? err.message : 'Could not create the Lead in Airtable.';
       console.error('Lead creation failed for call', call.id, err);
-      must(await db().from('calls').update({ lead_sync_error: leadError }).eq('id', call.id));
+      must(await db().from('dialer_calls').update({ lead_sync_error: leadError }).eq('id', call.id));
     }
   }
 

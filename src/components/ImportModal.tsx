@@ -12,7 +12,7 @@ const BATCH = 500;
 async function existingPhones(campaignId: string): Promise<Set<string>> {
   const phones = new Set<string>();
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from('contacts').select('phone_e164').eq('campaign_id', campaignId).range(from, from + 999);
+    const { data, error } = await supabase.from('dialer_contacts').select('phone_e164').eq('campaign_id', campaignId).range(from, from + 999);
     if (error) throw new Error(error.message);
     data.forEach((r) => phones.add(r.phone_e164 as string));
     if (data.length < 1000) return phones;
@@ -57,7 +57,7 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
       for (let i = 0; i < preview.valid.length; i += BATCH) {
         setProgress(i / preview.valid.length);
         const batch = preview.valid.slice(i, i + BATCH).map((c) => ({ ...c, campaign_id: campaignId, source: 'csv' }));
-        const { error } = await supabase.from('contacts').upsert(batch, { onConflict: 'campaign_id,phone_e164', ignoreDuplicates: true });
+        const { error } = await supabase.from('dialer_contacts').upsert(batch, { onConflict: 'campaign_id,phone_e164', ignoreDuplicates: true });
         if (error) throw new Error(error.message);
       }
       setDone(preview.valid.length);

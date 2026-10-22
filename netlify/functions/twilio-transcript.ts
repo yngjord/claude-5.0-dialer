@@ -18,7 +18,7 @@ export default handler(async (req) => {
   }
   if (!sid || !/^GT[0-9a-f]{32}$/i.test(sid)) return json({ ok: true });
 
-  const row = must(await db().from('calls').select('id').eq('transcript_sid', sid).maybeSingle()) as { id: string } | null;
+  const row = must(await db().from('dialer_calls').select('id').eq('transcript_sid', sid).maybeSingle()) as { id: string } | null;
   if (!row) return json({ ok: true });
   const call = await loadMediaCall(row.id);
   if (call) await storeTranscript(call);

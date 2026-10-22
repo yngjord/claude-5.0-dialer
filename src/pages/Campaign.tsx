@@ -37,14 +37,14 @@ export default function CampaignPage() {
 
   const head = useLoad(async () => {
     const [c, s] = await Promise.all([
-      supabase.from('campaigns').select('*').eq('id', id).maybeSingle(),
-      supabase.from('campaign_stats').select('*').eq('campaign_id', id).maybeSingle(),
+      supabase.from('dialer_campaigns').select('*').eq('id', id).maybeSingle(),
+      supabase.from('dialer_campaign_stats').select('*').eq('campaign_id', id).maybeSingle(),
     ]);
     return { campaign: must(c) as Campaign | null, stats: must(s) as CampaignStats | null };
   }, [id]);
 
   const list = useLoad(async () => {
-    let q = supabase.from('contacts').select('*', { count: 'exact' }).eq('campaign_id', id);
+    let q = supabase.from('dialer_contacts').select('*', { count: 'exact' }).eq('campaign_id', id);
     const statuses = FILTERS[filter];
     if (statuses) q = q.in('status', statuses);
     if (debounced) {

@@ -39,6 +39,6 @@ export function requireAdmin(me: Me): void {
 /** Admins can use every campaign; team members only the ones they're assigned to. */
 export async function requireCampaignAccess(me: Me, campaignId: string): Promise<void> {
   if (me.role === 'admin') return;
-  const row = must(await db().from('campaign_members').select('user_id').eq('campaign_id', campaignId).eq('user_id', me.userId).maybeSingle());
+  const row = must(await db().from('dialer_campaign_members').select('user_id').eq('campaign_id', campaignId).eq('user_id', me.userId).maybeSingle());
   if (!row) throw new HttpError(403, "You're not assigned to this campaign.");
 }

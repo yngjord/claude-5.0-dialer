@@ -17,9 +17,9 @@ export default handler(async (req) => {
 
   for (const n of numbers) {
     await client.incomingPhoneNumbers(n.sid).update({ voiceUrl, voiceMethod: 'POST', smsUrl, smsMethod: 'POST' });
-    const existing = must(await db().from('phone_numbers').select('id').eq('e164', n.phoneNumber).maybeSingle());
-    if (existing) must(await db().from('phone_numbers').update({ twilio_sid: n.sid }).eq('e164', n.phoneNumber));
-    else must(await db().from('phone_numbers').insert({ e164: n.phoneNumber, twilio_sid: n.sid, label: n.friendlyName }));
+    const existing = must(await db().from('dialer_phone_numbers').select('id').eq('e164', n.phoneNumber).maybeSingle());
+    if (existing) must(await db().from('dialer_phone_numbers').update({ twilio_sid: n.sid }).eq('e164', n.phoneNumber));
+    else must(await db().from('dialer_phone_numbers').insert({ e164: n.phoneNumber, twilio_sid: n.sid, label: n.friendlyName }));
   }
   return json({ synced: numbers.length });
 });

@@ -4,7 +4,7 @@ import { db, must } from './db';
 import { env } from './http';
 import { twilioAuthHeader, twilioClient } from './twilio';
 
-export const RECORDINGS_BUCKET = 'recordings';
+export const RECORDINGS_BUCKET = 'dialer-recordings';
 
 type MediaCall = Pick<
   CallRow,
@@ -15,7 +15,7 @@ const MEDIA_COLUMNS =
   'id, kind, direction, answered_by, duration_s, recording_sid, recording_path, recording_duration_s, transcript_status, transcript_sid, agent_name, full_name';
 
 export async function loadMediaCall(callId: string): Promise<MediaCall | null> {
-  return must(await db().from('calls').select(MEDIA_COLUMNS).eq('id', callId).maybeSingle()) as MediaCall | null;
+  return must(await db().from('dialer_calls').select(MEDIA_COLUMNS).eq('id', callId).maybeSingle()) as MediaCall | null;
 }
 
 /**
@@ -34,7 +34,7 @@ export async function processRecording(call: MediaCall): Promise<void> {
     const path = `${call.id}.mp3`;
     const { error } = await db().storage.from(RECORDINGS_BUCKET).upload(path, await res.arrayBuffer(), { contentType: 'audio/mpeg', upsert: true });
     if (error) throw new Error(`Recording upload failed: ${error.message}`);
-    must(await db().from('calls').update({ recording_path: path }).eq('id', call.id));
+    must(await db().from('dialer_calls').update({ recording_path: path }).eq('id', call.id));
     call.recording_path = path;
   }
 
@@ -43,7 +43,7 @@ export async function processRecording(call: MediaCall): Promise<void> {
   const serviceSid = process.env.TWILIO_INTELLIGENCE_SERVICE_SID;
   const duration = call.recording_duration_s ?? call.duration_s;
   if (!serviceSid || !shouldTranscribe({ kind: call.kind, answeredBy: call.answered_by, durationS: duration })) {
-    must(await db().from('calls').update({ transcript_status: 'skipped' }).eq('id', call.id));
+    must(await db().from('dialer_calls').update({ transcript_status: 'skipped' }).eq('id', call.id));
     await deleteTwilioRecording(call.recording_sid);
     return;
   }
@@ -53,7 +53,7 @@ export async function processRecording(call: MediaCall): Promise<void> {
     channel: { media_properties: { source_sid: call.recording_sid } },
     customerKey: call.id,
   });
-  must(await db().from('calls').update({ transcript_sid: transcript.sid, transcript_status: 'pending' }).eq('id', call.id));
+  must(await db().from('dialer_calls').update({ transcript_sid: transcript.sid, transcript_status: 'pending' }).eq('id', call.id));
 }
 
 /**
@@ -67,7 +67,7 @@ export async function storeTranscript(call: MediaCall): Promise<boolean> {
 
   if (t.status === 'queued' || t.status === 'in-progress') return false;
   if (t.status !== 'completed') {
-    must(await db().from('calls').update({ transcript_status: 'failed' }).eq('id', call.id));
+    must(await db().from('dialer_calls').update({ transcript_status: 'failed' }).eq('id', call.id));
     return true;
   }
 
@@ -86,7 +86,7 @@ export async function storeTranscript(call: MediaCall): Promise<boolean> {
 
   must(
     await db()
-      .from('calls')
+      .from('dialer_calls')
       .update({
         transcript_status: 'completed',
         transcript: turns.map((t) => `${t.speaker}: ${t.text}`).join('\n'),

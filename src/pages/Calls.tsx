@@ -36,11 +36,11 @@ export default function Calls() {
   }, [query]);
   useEffect(() => setPage(0), [range, campaignId, pickup, disposition, mine, debounced]);
 
-  const campaigns = useLoad(async () => must(await supabase.from('campaigns').select('id, name').order('name')) as Pick<Campaign, 'id' | 'name'>[], []);
+  const campaigns = useLoad(async () => must(await supabase.from('dialer_campaigns').select('id, name').order('name')) as Pick<Campaign, 'id' | 'name'>[], []);
 
   const list = useLoad(async () => {
     let q = supabase
-      .from('calls')
+      .from('dialer_calls')
       .select('id, started_at, full_name, company, phone_e164, campaign_name, agent_name, pickup_status, disposition, duration_s, recording_path, recording_sid, source', { count: 'exact' })
       .eq('direction', 'outbound');
     if (range !== 'all') q = q.gte('started_at', sydneyDayStart(range === 'today' ? 0 : Number(range) - 1));

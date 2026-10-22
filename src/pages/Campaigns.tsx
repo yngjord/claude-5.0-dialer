@@ -12,8 +12,8 @@ export default function Campaigns() {
   const { isAdmin } = useAuth();
   const { data, error, loading, reload } = useLoad(async () => {
     const [campaigns, stats] = await Promise.all([
-      supabase.from('campaigns').select('*').neq('status', 'archived').order('created_at', { ascending: false }),
-      supabase.from('campaign_stats').select('*'),
+      supabase.from('dialer_campaigns').select('*').neq('status', 'archived').order('created_at', { ascending: false }),
+      supabase.from('dialer_campaign_stats').select('*'),
     ]);
     const byId = new Map((must(stats) as CampaignStats[]).map((s) => [s.campaign_id, s]));
     return (must(campaigns) as Campaign[]).map((c) => ({ campaign: c, stats: byId.get(c.id) }));

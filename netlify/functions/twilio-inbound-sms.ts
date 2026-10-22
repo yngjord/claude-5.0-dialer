@@ -14,7 +14,7 @@ export default handler(async (req) => {
 
   must(
     await db()
-      .from('sms_messages')
+      .from('dialer_sms_messages')
       .upsert(
         {
           direction: 'inbound',

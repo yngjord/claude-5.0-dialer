@@ -48,7 +48,7 @@ function Texts() {
   const { data, error, loading, reload } = useLoad(
     async () =>
       must(
-        await supabase.from('sms_messages').select('*, contact:contacts(full_name, company)').order('created_at', { ascending: false }).limit(1000),
+        await supabase.from('dialer_sms_messages').select('*, contact:dialer_contacts(full_name, company)').order('created_at', { ascending: false }).limit(1000),
       ) as Msg[],
     [],
   );
@@ -56,7 +56,7 @@ function Texts() {
   useEffect(() => {
     const channel = supabase
       .channel('inbox-texts')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sms_messages' }, () => reload({ quiet: true }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialer_sms_messages' }, () => reload({ quiet: true }))
       .subscribe();
     const onChange = () => reload({ quiet: true });
     window.addEventListener('inbox:changed', onChange);
@@ -142,7 +142,7 @@ function Voicemails() {
   const { me } = useAuth();
   const [open, setOpen] = useState<string | null>(null);
   const { data, error, loading, reload } = useLoad(
-    async () => must(await supabase.from('calls').select('*').eq('kind', 'voicemail').order('started_at', { ascending: false }).limit(200)) as CallRow[],
+    async () => must(await supabase.from('dialer_calls').select('*').eq('kind', 'voicemail').order('started_at', { ascending: false }).limit(200)) as CallRow[],
     [],
   );
 

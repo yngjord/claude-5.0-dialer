@@ -7,7 +7,7 @@ import { verifyTwilioWebhook } from './_lib/twilio';
 export default handler(async (req) => {
   const p = await verifyTwilioWebhook(req);
   const callId = new URL(req.url).searchParams.get('callId');
-  if (callId && p.AnsweredBy) must(await db().from('calls').update({ answered_by: p.AnsweredBy }).eq('id', callId));
+  if (callId && p.AnsweredBy) must(await db().from('dialer_calls').update({ answered_by: p.AnsweredBy }).eq('id', callId));
   return json({ ok: true });
 });
 

@@ -10,16 +10,16 @@ export function useInboxCount(userId: string | undefined): number {
     let cancelled = false;
     const load = async () => {
       const [sms, vm] = await Promise.all([
-        supabase.from('sms_messages').select('id', { count: 'exact', head: true }).eq('direction', 'inbound').eq('user_id', userId).is('read_at', null),
-        supabase.from('calls').select('id', { count: 'exact', head: true }).eq('kind', 'voicemail').eq('user_id', userId).is('read_at', null),
+        supabase.from('dialer_sms_messages').select('id', { count: 'exact', head: true }).eq('direction', 'inbound').eq('user_id', userId).is('read_at', null),
+        supabase.from('dialer_calls').select('id', { count: 'exact', head: true }).eq('kind', 'voicemail').eq('user_id', userId).is('read_at', null),
       ]);
       if (!cancelled) setCount((sms.count ?? 0) + (vm.count ?? 0));
     };
     load();
     const channel = supabase
       .channel('inbox-count')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sms_messages', filter: `user_id=eq.${userId}` }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `user_id=eq.${userId}` }, (p) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialer_sms_messages', filter: `user_id=eq.${userId}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialer_calls', filter: `user_id=eq.${userId}` }, (p) => {
         if ((p.new as { kind?: string })?.kind === 'voicemail') load();
       })
       .subscribe();

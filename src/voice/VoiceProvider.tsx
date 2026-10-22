@@ -129,12 +129,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (!callId) return;
     let cancelled = false;
     const refresh = async () => {
-      const { data } = await supabase.from('calls').select('*').eq('id', callId).maybeSingle();
+      const { data } = await supabase.from('dialer_calls').select('*').eq('id', callId).maybeSingle();
       if (!cancelled && data) patch(callId, { row: data as CallRow });
     };
     const channel = supabase
       .channel(`call-${callId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `id=eq.${callId}` }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialer_calls', filter: `id=eq.${callId}` }, (payload) => {
         if (payload.new && 'id' in payload.new) patch(callId, { row: payload.new as CallRow });
       })
       .subscribe();
@@ -153,7 +153,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (!callId || !ended) return;
     const timers = [500, 2000, 5000].map((ms) =>
       setTimeout(async () => {
-        const { data } = await supabase.from('calls').select('*').eq('id', callId).maybeSingle();
+        const { data } = await supabase.from('dialer_calls').select('*').eq('id', callId).maybeSingle();
         if (data) patch(callId, { row: data as CallRow });
       }, ms),
     );

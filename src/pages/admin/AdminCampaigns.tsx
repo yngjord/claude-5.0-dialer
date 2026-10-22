@@ -17,9 +17,9 @@ type Row = Campaign & { campaign_members: { user_id: string }[] };
 export default function AdminCampaigns() {
   const [editing, setEditing] = useState<Campaign | 'new' | null>(null);
   const [members, setMembers] = useState<Row | null>(null);
-  const list = useLoad(async () => must(await supabase.from('campaigns').select('*, campaign_members(user_id)').order('created_at', { ascending: false })) as Row[], []);
+  const list = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false })) as Row[], []);
   const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
-  const numbers = useLoad(async () => must(await supabase.from('phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
+  const numbers = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
   const nameOf = (id: string) => {
     const u = users.data?.find((x) => x.id === id);
     return u?.display_name || u?.email || 'Unknown';
@@ -157,8 +157,8 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
       retry_after_minutes: minutes,
     };
     const { error } = campaign
-      ? await supabase.from('campaigns').update(fields).eq('id', campaign.id)
-      : await supabase.from('campaigns').insert({ ...fields, created_by: me?.userId });
+      ? await supabase.from('dialer_campaigns').update(fields).eq('id', campaign.id)
+      : await supabase.from('dialer_campaigns').insert({ ...fields, created_by: me?.userId });
     setSaving(false);
     if (error) return setError(error.message);
     onSaved();
@@ -262,8 +262,8 @@ function MembersModal({ campaign, users, onClose, onSaved }: { campaign: Row; us
     const add = [...selected].filter((id) => !before.has(id));
     const remove = [...before].filter((id) => !selected.has(id));
     try {
-      if (add.length) must(await supabase.from('campaign_members').insert(add.map((user_id) => ({ campaign_id: campaign.id, user_id }))));
-      if (remove.length) must(await supabase.from('campaign_members').delete().eq('campaign_id', campaign.id).in('user_id', remove));
+      if (add.length) must(await supabase.from('dialer_campaign_members').insert(add.map((user_id) => ({ campaign_id: campaign.id, user_id }))));
+      if (remove.length) must(await supabase.from('dialer_campaign_members').delete().eq('campaign_id', campaign.id).in('user_id', remove));
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save.');

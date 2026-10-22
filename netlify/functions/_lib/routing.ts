@@ -10,9 +10,9 @@ export async function routeInbound(phone: string): Promise<{
   userId: string | null;
 }> {
   const [{ data: contact }, { data: lastCall }, { data: lastSms }] = await Promise.all([
-    db().from('contacts').select('id, campaign_id, full_name, company').eq('phone_e164', phone).order('last_called_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle(),
-    db().from('calls').select('user_id, started_at').eq('phone_e164', phone).eq('direction', 'outbound').not('user_id', 'is', null).order('started_at', { ascending: false }).limit(1).maybeSingle(),
-    db().from('sms_messages').select('user_id, created_at').eq('phone_e164', phone).eq('direction', 'outbound').not('user_id', 'is', null).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    db().from('dialer_contacts').select('id, campaign_id, full_name, company').eq('phone_e164', phone).order('last_called_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle(),
+    db().from('dialer_calls').select('user_id, started_at').eq('phone_e164', phone).eq('direction', 'outbound').not('user_id', 'is', null).order('started_at', { ascending: false }).limit(1).maybeSingle(),
+    db().from('dialer_sms_messages').select('user_id, created_at').eq('phone_e164', phone).eq('direction', 'outbound').not('user_id', 'is', null).order('created_at', { ascending: false }).limit(1).maybeSingle(),
   ]);
 
   const last = [lastCall && { userId: lastCall.user_id as string, at: lastCall.started_at as string }, lastSms && { userId: lastSms.user_id as string, at: lastSms.created_at as string }]
@@ -20,7 +20,7 @@ export async function routeInbound(phone: string): Promise<{
     .sort((a, b) => b.at.localeCompare(a.at))[0];
 
   const campaign = contact
-    ? ((await db().from('campaigns').select('id, name, client_name').eq('id', contact.campaign_id).maybeSingle()).data as { id: string; name: string; client_name: string } | null)
+    ? ((await db().from('dialer_campaigns').select('id, name, client_name').eq('id', contact.campaign_id).maybeSingle()).data as { id: string; name: string; client_name: string } | null)
     : null;
 
   return { contact: contact ?? null, campaign, userId: last?.userId ?? null };

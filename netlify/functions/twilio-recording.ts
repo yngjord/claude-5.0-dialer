@@ -15,7 +15,7 @@ export default handler(async (req) => {
 
   must(
     await db()
-      .from('calls')
+      .from('dialer_calls')
       .update({ recording_sid: p.RecordingSid, recording_duration_s: Number.parseInt(p.RecordingDuration ?? '0', 10) || 0 })
       .eq('id', callId),
   );
