@@ -133,16 +133,20 @@ describe('csv import', () => {
     expect(customFieldKey(' Annual Revenue ($) ')).toBe('annual_revenue');
   });
 
-  it('builds contacts, rejecting bad numbers and duplicates', () => {
+  it('builds contacts, rejecting bad numbers and flagging duplicates', () => {
     const rows = parseCsv('Name,Phone,Company,Industry\nJane Doe,0412 345 678,Acme,SaaS\nBob,02 9876 5432,Beta,\nJane again,+61412345678,Acme,\nKim,0423 456 789,,Fin\nOld,0499 999 999,,');
     const preview = buildImport(rows, guessMapping(rows[0]), new Set(['+61499999999']));
-    expect(preview.valid.map((c) => [c.full_name, c.phone_e164, c.first_name])).toEqual([
+    expect(preview.unique.map((c) => [c.full_name, c.phone_e164, c.first_name])).toEqual([
       ['Jane Doe', '+61412345678', 'Jane'],
       ['Kim', '+61423456789', 'Kim'],
     ]);
+    expect(preview.valid.map((c) => c.full_name)).toEqual(['Jane Doe', 'Jane again', 'Kim', 'Old']);
     expect(preview.valid[0].custom).toEqual({ industry: 'SaaS' });
     expect(preview.invalid).toEqual([{ row: 3, phone: '02 9876 5432', name: 'Bob', reason: 'Looks like an AU landline (use +64 for NZ mobiles)' }]);
-    expect(preview.duplicates).toBe(2);
+    expect(preview.duplicates).toEqual([
+      { row: 4, phone: '+61412345678', name: 'Jane again', reason: 'Same number as row 2' },
+      { row: 6, phone: '0499 999 999', name: 'Old', reason: 'Already in this campaign' },
+    ]);
   });
 });
 

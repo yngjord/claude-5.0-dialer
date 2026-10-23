@@ -11,6 +11,7 @@ import {
   type ColumnMapping,
   type ColumnTarget,
   type CustomField,
+  type ImportRowIssue,
 } from '../../shared/csv';
 import { toCsv, downloadCsv } from '../lib/csv';
 import { supabase } from '../lib/supabase';
@@ -40,7 +41,8 @@ function parseTarget(value: string, header: string): ColumnTarget {
 }
 
 /**
- * CSV upload → map columns → check numbers → add to the campaign. Numbers already in the campaign are skipped.
+ * CSV upload → map columns → check numbers → add to the campaign. Numbers repeated in the file or already in the
+ * campaign are flagged, and left out unless the user unticks "Remove duplicates".
  * Extra columns become saved custom fields; the headers used are remembered so the next file maps itself.
  */
 export function ImportModal({ campaignId, onClose, onImported }: { campaignId: string; onClose: () => void; onImported: () => void }) {
@@ -53,9 +55,11 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<number | null>(null);
+  const [dedupe, setDedupe] = useState(true);
 
   const hasPhone = mapping.some((t) => t.kind === 'field' && t.field === 'phone');
   const preview = useMemo(() => (rows && existing && hasPhone ? buildImport(rows, mapping, existing) : null), [rows, mapping, existing, hasPhone]);
+  const toImport = preview ? (dedupe ? preview.unique : preview.valid) : null;
   const newFields = new Set(mapping.flatMap((t) => (t.kind === 'new' ? [columnCustomKey(t)!] : [])).filter((k) => !customFields.some((f) => f.key === k)));
   const blankNewField = mapping.some((t) => t.kind === 'new' && !t.label.trim());
   const setTarget = (col: number, t: ColumnTarget) => setMapping((m) => m.map((v, i) => (i === col ? t : v)));
@@ -81,7 +85,7 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
   };
 
   const runImport = async () => {
-    if (!preview) return;
+    if (!toImport) return;
     setBusy(true);
     setError(null);
     try {
@@ -96,13 +100,13 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
         const { error } = await supabase.rpc('dialer_save_custom_fields', { p_fields: fields });
         if (error) throw new Error(error.message);
       }
-      for (let i = 0; i < preview.valid.length; i += BATCH) {
-        setProgress(i / preview.valid.length);
-        const batch = preview.valid.slice(i, i + BATCH).map((c) => ({ ...c, campaign_id: campaignId, source: 'csv' }));
-        const { error } = await supabase.from('dialer_contacts').upsert(batch, { onConflict: 'campaign_id,phone_e164', ignoreDuplicates: true });
+      for (let i = 0; i < toImport.length; i += BATCH) {
+        setProgress(i / toImport.length);
+        const batch = toImport.slice(i, i + BATCH).map((c) => ({ ...c, campaign_id: campaignId, source: 'csv' }));
+        const { error } = await supabase.from('dialer_contacts').insert(batch);
         if (error) throw new Error(error.message);
       }
-      setDone(preview.valid.length);
+      setDone(toImport.length);
       onImported();
     } catch (err) {
       setError(err instanceof Error ? `Import stopped: ${err.message}` : 'Import failed.');
@@ -112,10 +116,8 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
     }
   };
 
-  const downloadRejected = () => {
-    if (!preview) return;
-    downloadCsv(`${fileName?.replace(/\.csv$/i, '') ?? 'contacts'}-rejected.csv`, toCsv(['Row', 'Name', 'Phone', 'Reason'], preview.invalid.map((r) => [String(r.row), r.name, r.phone, r.reason])));
-  };
+  const downloadRows = (suffix: string, issues: ImportRowIssue[]) =>
+    downloadCsv(`${fileName?.replace(/\.csv$/i, '') ?? 'contacts'}-${suffix}.csv`, toCsv(['Row', 'Name', 'Phone', 'Reason'], issues.map((r) => [String(r.row), r.name, r.phone, r.reason])));
 
   return (
     <Modal
@@ -130,13 +132,13 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
             <Button variant="ghost" onClick={onClose} disabled={busy}>
               Cancel
             </Button>
-            <Button onClick={runImport} disabled={busy || !preview?.valid.length || blankNewField}>
+            <Button onClick={runImport} disabled={busy || !toImport?.length || blankNewField}>
               {busy && progress != null ? (
                 <>
                   <Spinner /> {Math.round(progress * 100)}%
                 </>
               ) : (
-                `Import ${preview?.valid.length.toLocaleString() ?? ''} contact${preview?.valid.length === 1 ? '' : 's'}`
+                `Import ${toImport?.length.toLocaleString() ?? ''} contact${toImport?.length === 1 ? '' : 's'}`
               )}
             </Button>
           </>
@@ -210,19 +212,35 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
             <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">Choose which column holds the phone number.</p>
           ) : preview ? (
             <div className="grid grid-cols-3 gap-3 text-center">
-              <Count label="Ready to import" value={preview.valid.length} tone="text-emerald-700" />
-              <Count label="Already in list" value={preview.duplicates} tone="text-ink-muted" />
+              <Count label="Ready to import" value={toImport?.length ?? 0} tone="text-emerald-700" />
+              <Count label="Duplicates" value={preview.duplicates.length} tone={preview.duplicates.length ? 'text-amber-700' : 'text-ink-muted'} />
               <Count label="Invalid numbers" value={preview.invalid.length} tone={preview.invalid.length ? 'text-red-600' : 'text-ink-muted'} />
             </div>
           ) : (
             <Spinner className="text-brand" />
           )}
 
+          {preview && preview.duplicates.length > 0 && (
+            <div className="space-y-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p>
+                {preview.duplicates.length.toLocaleString()} row{preview.duplicates.length === 1 ? ' has' : 's have'} a phone number that's already in this file or campaign, e.g. row {preview.duplicates[0].row}{' '}
+                ({preview.duplicates[0].name || preview.duplicates[0].phone}): {preview.duplicates[0].reason.toLowerCase()}.{' '}
+                <button onClick={() => downloadRows('duplicates', preview.duplicates)} className="font-medium text-brand hover:underline">
+                  Download duplicate rows
+                </button>
+              </p>
+              <label className="flex cursor-pointer items-center gap-2 font-medium">
+                <input type="checkbox" className="h-4 w-4 accent-brand" checked={dedupe} onChange={(e) => setDedupe(e.target.checked)} />
+                Remove duplicates (keep the first row for each number)
+              </label>
+            </div>
+          )}
+
           {preview && preview.invalid.length > 0 && (
             <div className="text-sm">
               <p className="text-ink-muted">
                 e.g. row {preview.invalid[0].row}: “{preview.invalid[0].phone}”: {preview.invalid[0].reason}.{' '}
-                <button onClick={downloadRejected} className="font-medium text-brand hover:underline">
+                <button onClick={() => downloadRows('rejected', preview.invalid)} className="font-medium text-brand hover:underline">
                   Download rejected rows
                 </button>
               </p>

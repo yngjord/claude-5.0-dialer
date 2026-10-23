@@ -101,9 +101,10 @@ create table if not exists public.dialer_contacts (
   airtable_lead_id text,
   source text not null default 'csv' check (source in ('csv', 'api')),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (campaign_id, phone_e164)
+  updated_at timestamptz not null default now()
 );
+-- A number may appear more than once in a campaign; the import screen flags duplicates and removes them by default.
+alter table public.dialer_contacts drop constraint if exists dialer_contacts_campaign_id_phone_e164_key;
 create index if not exists dialer_contacts_queue on public.dialer_contacts (campaign_id, status, next_attempt_at);
 create index if not exists dialer_contacts_phone on public.dialer_contacts (phone_e164);
 

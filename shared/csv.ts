@@ -133,18 +133,29 @@ export interface ImportContact {
   custom: Record<string, string>;
 }
 
+export interface ImportRowIssue {
+  row: number;
+  phone: string;
+  name: string;
+  reason: string;
+}
+
 export interface ImportPreview {
+  /** Every row with a valid number, duplicates included. */
   valid: ImportContact[];
-  invalid: { row: number; phone: string; name: string; reason: string }[];
+  /** `valid` without the duplicates: what's imported when de-duplicating. */
+  unique: ImportContact[];
+  invalid: ImportRowIssue[];
   /** Rows whose number already appears earlier in the file, or in `existingPhones`. */
-  duplicates: number;
+  duplicates: ImportRowIssue[];
 }
 
 /** Turns parsed rows (header row first) into contacts, using the column mapping. */
 export function buildImport(rows: string[][], mapping: ColumnMapping, existingPhones: Set<string> = new Set()): ImportPreview {
   const [, ...body] = rows;
-  const seen = new Set(existingPhones);
-  const preview: ImportPreview = { valid: [], invalid: [], duplicates: 0 };
+  // Number → the file row it first appeared on (0 = already in the campaign).
+  const seen = new Map([...existingPhones].map((p) => [p, 0]));
+  const preview: ImportPreview = { valid: [], unique: [], invalid: [], duplicates: [] };
   const clean = (v: string | undefined) => (v && v.trim() ? v.trim() : null);
 
   body.forEach((cells, i) => {
@@ -166,13 +177,7 @@ export function buildImport(rows: string[][], mapping: ColumnMapping, existingPh
       preview.invalid.push({ row: i + 2, phone: rawPhone, name: fullName ?? '', reason: phone.reason });
       return;
     }
-    if (seen.has(phone.e164)) {
-      preview.duplicates++;
-      return;
-    }
-    seen.add(phone.e164);
-
-    preview.valid.push({
+    const contact: ImportContact = {
       full_name: fullName,
       first_name: first ?? fullName?.split(/\s+/)[0] ?? null,
       company: get('company'),
@@ -183,7 +188,15 @@ export function buildImport(rows: string[][], mapping: ColumnMapping, existingPh
       linkedin: get('linkedin'),
       website: get('website'),
       custom,
-    });
+    };
+    preview.valid.push(contact);
+    const firstRow = seen.get(phone.e164);
+    if (firstRow == null) {
+      seen.set(phone.e164, i + 2);
+      preview.unique.push(contact);
+    } else {
+      preview.duplicates.push({ row: i + 2, phone: rawPhone, name: fullName ?? '', reason: firstRow === 0 ? 'Already in this campaign' : `Same number as row ${firstRow}` });
+    }
   });
 
   return preview;
