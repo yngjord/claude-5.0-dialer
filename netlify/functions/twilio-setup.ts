@@ -1,9 +1,9 @@
 import type { Config } from '@netlify/functions';
 import type { TwilioStatus } from '../../shared/types';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
-import { handler, json } from './_lib/http';
+import { handler, HttpError, json } from './_lib/http';
 import { requireTwilioConfigured, twilioClient } from './_lib/twilio';
-import { runTwilioSetup } from './_lib/twilioSetup';
+import { runTwilioSetup, TwilioSetupError } from './_lib/twilioSetup';
 
 const isSet = (name: string) => !!process.env[name];
 
@@ -27,7 +27,13 @@ export default handler(async (req) => {
 
   requireTwilioConfigured();
   const base = process.env.PUBLIC_BASE_URL || new URL(req.url).origin;
-  return json(await runTwilioSetup(twilioClient(), base));
+  try {
+    return json(await runTwilioSetup(twilioClient(), base));
+  } catch (err) {
+    // Show Twilio's actual reason to the admin instead of a generic error.
+    if (err instanceof TwilioSetupError) throw new HttpError(502, err.message);
+    throw err;
+  }
 });
 
 export const config: Config = { path: '/api/admin/twilio-setup', method: ['GET', 'POST'] };

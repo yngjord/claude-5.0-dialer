@@ -225,8 +225,9 @@ export interface TwilioStatus {
 
 export interface TwilioSetupResponse {
   twimlAppSid: string;
-  intelligenceServiceSid: string;
-  transcriptLanguage: string;
+  intelligenceServiceSid: string | null;
+  transcriptLanguage: string | null;
+  transcriptsSkipped: string | null;
   numbersUpdated: string[];
   log: string[];
 }

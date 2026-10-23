@@ -20,7 +20,8 @@ async function main() {
   result.log.forEach((line) => console.log(line));
   console.log("\nAdd these to the Netlify site's environment variables, then redeploy:");
   console.log(`  TWILIO_TWIML_APP_SID=${result.twimlAppSid}`);
-  console.log(`  TWILIO_INTELLIGENCE_SERVICE_SID=${result.intelligenceServiceSid}`);
+  if (result.intelligenceServiceSid) console.log(`  TWILIO_INTELLIGENCE_SERVICE_SID=${result.intelligenceServiceSid}`);
+  else console.log(`\nTranscripts weren't set up: ${result.transcriptsSkipped}`);
 }
 
 main().catch((err) => {

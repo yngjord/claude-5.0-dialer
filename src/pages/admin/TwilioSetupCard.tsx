@@ -45,11 +45,19 @@ export function TwilioSetupCard() {
 
       {result ? (
         <div className="mt-4 space-y-4 text-[15px]">
-          <p>Done. Add these two values to Netlify (Site configuration → Environment variables), then redeploy the site:</p>
+          <p>
+            Done. Add {result.intelligenceServiceSid ? 'these two values' : 'this value'} to Netlify (Site configuration → Environment variables), then redeploy the
+            site:
+          </p>
           <div className="space-y-2">
             <CopyRow name="TWILIO_TWIML_APP_SID" value={result.twimlAppSid} />
-            <CopyRow name="TWILIO_INTELLIGENCE_SERVICE_SID" value={result.intelligenceServiceSid} />
+            {result.intelligenceServiceSid && <CopyRow name="TWILIO_INTELLIGENCE_SERVICE_SID" value={result.intelligenceServiceSid} />}
           </div>
+          {result.transcriptsSkipped && (
+            <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Calling is set up, but Twilio wouldn't create the transcript service, so calls won't be transcribed yet. Twilio said: {result.transcriptsSkipped}
+            </p>
+          )}
           <details className="text-sm text-ink-muted">
             <summary className="cursor-pointer">What was set up</summary>
             <ul className="mt-2 list-disc space-y-1 pl-5">
