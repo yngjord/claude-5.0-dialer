@@ -25,7 +25,8 @@ export function handler(fn: (req: Request) => Promise<Response>) {
 }
 
 export function env(name: string): string {
-  const value = process.env[name];
+  // Trimmed: a value pasted into Netlify with a trailing space or newline otherwise fails auth (e.g. Twilio 70051).
+  const value = process.env[name]?.trim();
   if (!value) throw new Error(`Missing environment variable ${name}`);
   return value;
 }
