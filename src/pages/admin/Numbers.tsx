@@ -9,6 +9,7 @@ import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/
 import { api, must, useLoad } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { BuyNumberModal } from './BuyNumberModal';
+import { TwilioSetupCard } from './TwilioSetupCard';
 
 /**
  * Twilio numbers: which client each number belongs to, the default, and custom voicemail greetings.
@@ -85,6 +86,8 @@ export default function Numbers() {
           </>
         }
       />
+
+      <TwilioSetupCard />
 
       {message && <p className="mb-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{message}</p>}
       {error && (

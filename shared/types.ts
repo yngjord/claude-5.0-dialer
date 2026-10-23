@@ -212,3 +212,21 @@ export interface BuyNumberRequest {
   clientName: string;
   label?: string | null;
 }
+
+/** Which Twilio settings are in Netlify (never the values themselves). */
+export interface TwilioStatus {
+  keys: boolean;
+  authToken: boolean;
+  twimlApp: boolean;
+  intelligence: boolean;
+  /** The address Twilio's webhooks will point at if setup runs now. */
+  siteUrl: string;
+}
+
+export interface TwilioSetupResponse {
+  twimlAppSid: string;
+  intelligenceServiceSid: string;
+  transcriptLanguage: string;
+  numbersUpdated: string[];
+  log: string[];
+}

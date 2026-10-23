@@ -87,7 +87,7 @@ Then for each person:
 4. **Voice → Settings → Geo permissions:** allow only Australia and New Zealand. Do the same under
    **Messaging → Settings → Geo permissions**.
 5. **Account → API keys:** create a *Standard* key. Keep the SID (`SK…`) and secret.
-6. Deploy the site (step 3), then run the setup script against it. It creates the TwiML App and the Voice
+6. Deploy the site (step 3), then in the dialer open **Phone numbers → Finish Twilio setup** (admins), or run the setup script against it. It creates the TwiML App and the Voice
    Intelligence service, sets the voicemail/SMS webhooks on every number, and prints the SIDs:
    ```bash
    TWILIO_ACCOUNT_SID=AC… TWILIO_API_KEY_SID=SK… TWILIO_API_KEY_SECRET=… \
