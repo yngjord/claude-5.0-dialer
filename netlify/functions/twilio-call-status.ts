@@ -18,6 +18,10 @@ export default handler(async (req) => {
   const patch: Record<string, unknown> = { twilio_status: status, twilio_child_sid: p.CallSid };
   if (status === 'in-progress') patch.answered_at = new Date().toISOString();
 
+  if (status === 'failed' || status === 'busy') {
+    // Twilio's reason for the failure, e.g. 13227 (geo permissions) or SIP 403/404. Shows in the Netlify function logs.
+    console.warn(`Call ${callId} ${status}: ErrorCode=${p.ErrorCode ?? '-'} SipResponseCode=${p.SipResponseCode ?? '-'} ${p.ErrorMessage ?? ''}`.trim());
+  }
   if (FINAL.includes(status)) {
     patch.ended_at = new Date().toISOString();
     patch.duration_s = Number.parseInt(p.CallDuration ?? '0', 10) || 0;
