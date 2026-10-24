@@ -4,7 +4,6 @@ import { useAuth } from './auth/AuthProvider';
 import AppShell from './components/AppShell';
 import Splash from './components/Splash';
 import { Button } from './components/ui/Button';
-import AdminCampaigns from './pages/admin/AdminCampaigns';
 import Numbers from './pages/admin/Numbers';
 import Performance from './pages/admin/Performance';
 import CallDetailPage from './pages/CallDetailPage';
@@ -54,7 +53,8 @@ export default function App() {
           <Route path="/campaigns/:id" element={<CampaignPage />} />
           <Route path="/calls" element={<Calls />} />
           <Route path="/calls/:id" element={<CallDetailPage />} />
-          {isAdmin && <Route path="/admin/campaigns" element={<AdminCampaigns />} />}
+          {/* Campaign management moved onto the Campaigns page. */}
+          <Route path="/admin/campaigns" element={<Navigate to="/campaigns" replace />} />
           {isAdmin && <Route path="/admin/numbers" element={<Numbers />} />}
           {isAdmin && <Route path="/admin/performance" element={<Performance />} />}
         </Route>

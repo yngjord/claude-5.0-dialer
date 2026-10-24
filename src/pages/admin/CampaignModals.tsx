@@ -1,163 +1,39 @@
-import { Camera, Plus, RotateCcw, Trash2, Users } from 'lucide-react';
+import { Camera, Plus, Trash2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPhone } from '../../../shared/phone';
 import type { AirtableClient, Campaign, CampaignStats, DialerUser, PhoneNumber } from '../../../shared/types';
 import { useAuth } from '../../auth/AuthProvider';
 import { Avatar } from '../../components/Avatar';
-import { ClientLogo } from '../../components/ClientLogo';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Spinner } from '../../components/ui/Spinner';
-import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/ui/States';
+import { ErrorState, LoadingRows } from '../../components/ui/States';
 import { api, must, useLoad } from '../../lib/api';
-import { removeAvatar, uploadAvatar, useAvatarUrls } from '../../lib/avatars';
-import { useClientLogos } from '../../lib/clientLogos';
+import { removeAvatar, uploadAvatar } from '../../lib/avatars';
+import { setTeamMember, type CampaignRow } from '../../lib/campaigns';
 import { supabase } from '../../lib/supabase';
-import { CAMPAIGN_STATUS } from '../../lib/tones';
 
-type Row = Campaign & { campaign_members: { user_id: string }[] };
+// Admin popups for campaigns, opened from the Campaigns page: create/edit, delete, re-run, and who dials it.
 
-export default function AdminCampaigns() {
-  const [editing, setEditing] = useState<Campaign | 'new' | null>(null);
-  const [members, setMembers] = useState<Row | null>(null);
-  const [rerun, setRerun] = useState<Campaign | null>(null);
-  const list = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false })) as Row[], []);
-  const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
-  const avatars = useAvatarUrls(users.data);
-  const logos = useClientLogos();
-  const numbers = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
-  // Same order as pickCallerNumber on the server: campaign's own pick, else the client's number, else the default.
-  const callerLabel = (c: Campaign) => {
-    const picked = numbers.data?.find((n) => n.id === c.caller_number_id);
-    if (picked) return formatPhone(picked.e164);
-    const client = numbers.data?.find((n) => n.client_name === c.client_name);
-    if (client) return `${formatPhone(client.e164)} (client's)`;
-    const fallback = numbers.data?.find((n) => n.is_default);
-    return fallback ? `${formatPhone(fallback.e164)} (default)` : 'None set up';
-  };
-  const nameOf = (id: string) => {
-    const u = users.data?.find((x) => x.id === id);
-    return u?.display_name || u?.email || 'Unknown';
-  };
-
-  return (
-    <>
-      <PageHeader
-        title="Manage campaigns"
-        subtitle="Create call lists for a client and choose who can dial them."
-        actions={
-          <Button onClick={() => setEditing('new')}>
-            <Plus size={16} /> New campaign
-          </Button>
-        }
-      />
-
-      <section className="card animate-appear p-4 sm:p-6">
-        {list.error ? (
-          <ErrorState message={list.error} onRetry={list.reload} />
-        ) : list.loading ? (
-          <LoadingRows label="Loading campaigns…" />
-        ) : (
-          <div className="relative -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-            <table className="w-full min-w-[820px]">
-              <thead className="border-b border-line">
-                <tr>
-                  <th className="th">Client</th>
-                  <th className="th">Campaign</th>
-                  <th className="th">Status</th>
-                  <th className="th">Caller number</th>
-                  <th className="th">Team</th>
-                  <th className="th" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {!list.data?.length ? (
-                  <EmptyRow colSpan={6}>No campaigns yet.</EmptyRow>
-                ) : (
-                  list.data.map((c) => (
-                    <tr key={c.id}>
-                      <td className="td">
-                        <ClientLogo name={c.client_name} url={logos[c.airtable_client_id]} />
-                      </td>
-                      <td className="td font-medium">
-                        <Link to={`/campaigns/${c.id}`} className="hover:text-brand">
-                          {c.name}
-                        </Link>
-                      </td>
-                      <td className="td">
-                        <Badge tone={CAMPAIGN_STATUS[c.status].tone}>{CAMPAIGN_STATUS[c.status].label}</Badge>
-                      </td>
-                      <td className="td tabular-nums text-ink-muted">
-                        {callerLabel(c)}
-                      </td>
-                      <td className="td max-w-[240px]">
-                        <button
-                          onClick={() => setMembers(c)}
-                          className="inline-flex max-w-full items-center gap-1.5 text-brand hover:underline"
-                          title={c.campaign_members.map((m) => nameOf(m.user_id)).join(', ') || undefined}
-                        >
-                          {c.campaign_members.length ? (
-                            <span className="flex -space-x-2">
-                              {c.campaign_members.map((m) => (
-                                <Avatar key={m.user_id} url={avatars.get(m.user_id)} name={nameOf(m.user_id)} />
-                              ))}
-                            </span>
-                          ) : (
-                            <>
-                              <Users size={15} className="shrink-0" /> Assign people
-                            </>
-                          )}
-                        </button>
-                      </td>
-                      <td className="td whitespace-nowrap text-right">
-                        <Button variant="ghost" onClick={() => setRerun(c)} title="Make a new campaign from contacts already called">
-                          <RotateCcw size={15} /> Re-run
-                        </Button>
-                        <Button variant="ghost" onClick={() => setEditing(c)}>
-                          Edit
-                        </Button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {editing && (
-        <CampaignForm
-          campaign={editing === 'new' ? null : editing}
-          numbers={numbers.data ?? []}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            list.reload({ quiet: true });
-          }}
-        />
-      )}
-      {rerun && <RerunModal campaign={rerun} onClose={() => setRerun(null)} onCreated={() => list.reload({ quiet: true })} />}
-      {members && (
-        <MembersModal
-          campaign={members}
-          users={users.data ?? []}
-          avatars={avatars}
-          onPhotosChanged={() => users.reload({ quiet: true })}
-          onClose={() => setMembers(null)}
-          onSaved={() => {
-            setMembers(null);
-            list.reload({ quiet: true });
-          }}
-        />
-      )}
-    </>
-  );
-}
-
-function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campaign | null; numbers: PhoneNumber[]; onClose: () => void; onSaved: () => void }) {
+/**
+ * Create or edit a campaign in one go: name, client, caller number, the team member who dials it, and (new
+ * campaigns) save as a draft or launch.
+ */
+export function CampaignForm({
+  campaign,
+  numbers,
+  users,
+  onClose,
+  onSaved,
+}: {
+  campaign: CampaignRow | null;
+  numbers: PhoneNumber[];
+  users: DialerUser[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { me } = useAuth();
   const clients = useLoad(async () => {
     const list = await api<AirtableClient[]>('clients');
@@ -171,6 +47,9 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
   const [clientId, setClientId] = useState(campaign?.airtable_client_id ?? '');
   const [numberId, setNumberId] = useState(campaign?.caller_number_id ?? '');
   const [status, setStatus] = useState<Campaign['status']>(campaign?.status ?? 'active');
+  const team = users.filter((u) => u.role === 'team');
+  const teamBefore = (campaign?.campaign_members ?? []).map((m) => m.user_id).filter((id) => team.some((u) => u.id === id));
+  const [assignee, setAssignee] = useState(teamBefore[0] ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -191,12 +70,16 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
       caller_number_id: numberId || null,
       status: newStatus ?? status,
     };
-    const { error } = campaign
-      ? await supabase.from('dialer_campaigns').update(fields).eq('id', campaign.id)
-      : await supabase.from('dialer_campaigns').insert({ ...fields, created_by: me?.userId });
-    setSaving(false);
-    if (error) return setError(error.message);
-    onSaved();
+    try {
+      const id = campaign
+        ? (must(await supabase.from('dialer_campaigns').update(fields).eq('id', campaign.id)), campaign.id)
+        : (must(await supabase.from('dialer_campaigns').insert({ ...fields, created_by: me?.userId }).select('id').single()) as { id: string }).id;
+      await setTeamMember(id, assignee || null, teamBefore);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save.');
+      setSaving(false);
+    }
   };
 
   if (campaign && deleting) return <DeleteCampaignModal campaign={campaign} onCancel={() => setDeleting(false)} onDeleted={onSaved} />;
@@ -268,6 +151,20 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
           </select>
           <p className="mt-1.5 text-xs text-ink-faint">Leave as the client's number unless this campaign needs a different one. Set client numbers in Phone numbers.</p>
         </div>
+        <div>
+          <label htmlFor="c-assignee" className="mb-2 block text-sm font-medium text-ink-soft">
+            Team member
+          </label>
+          <select id="c-assignee" className="field" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+            <option value="">No one yet</option>
+            {team.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.display_name || u.email}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs text-ink-faint">The one team member who dials this campaign; only they will see it. Admins can dial every campaign.</p>
+        </div>
         {campaign ? (
           <div>
             <label htmlFor="c-status" className="mb-2 block text-sm font-medium text-ink-soft">
@@ -298,7 +195,7 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
  * Deleting is two clicks: Delete campaign in Edit campaign, then Delete for good here. Contacts and team assignments
  * go with the campaign (cascade); call logs stay, keeping the campaign and client name, recordings and transcripts.
  */
-function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Campaign; onCancel: () => void; onDeleted: () => void }) {
+export function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Campaign; onCancel: () => void; onDeleted: () => void }) {
   const stats = useLoad(
     async () => must(await supabase.from('dialer_campaign_stats').select('contacts_total, dials_total').eq('campaign_id', campaign.id).maybeSingle()) as Pick<CampaignStats, 'contacts_total' | 'dials_total'> | null,
     [campaign.id],
@@ -359,7 +256,7 @@ function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Camp
  * as fresh contacts, with the same client, caller number and team. The original campaign is left as it is.
  * Do Not Call numbers are never copied.
  */
-function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onClose: () => void; onCreated: () => void }) {
+export function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onClose: () => void; onCreated: () => void }) {
   const counts = useLoad(async () => must(await supabase.rpc('dialer_rerun_counts', { p_campaign_id: campaign.id })) as { disposition: string; contacts: number }[], [campaign.id]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(['No Answer']));
   const [name, setName] = useState(`${campaign.name} – re-run`);
@@ -482,7 +379,7 @@ function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onCl
   );
 }
 
-function MembersModal({
+export function MembersModal({
   campaign,
   users,
   avatars,
@@ -490,7 +387,7 @@ function MembersModal({
   onClose,
   onSaved,
 }: {
-  campaign: Row;
+  campaign: CampaignRow;
   users: DialerUser[];
   avatars: Map<string, string>;
   onPhotosChanged: () => void;
@@ -520,11 +417,8 @@ function MembersModal({
   const save = async () => {
     setSaving(true);
     setError(null);
-    const remove = before.filter((id) => id !== assignee);
     try {
-      // Remove first: the database allows only one team member per campaign.
-      if (remove.length) must(await supabase.from('dialer_campaign_members').delete().eq('campaign_id', campaign.id).in('user_id', remove));
-      if (assignee && !before.includes(assignee)) must(await supabase.from('dialer_campaign_members').insert({ campaign_id: campaign.id, user_id: assignee }));
+      await setTeamMember(campaign.id, assignee, before);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save.');

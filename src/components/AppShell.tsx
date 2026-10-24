@@ -1,4 +1,4 @@
-import { LayoutList, LogOut, Menu, PhoneCall, Settings2, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
+import { LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
@@ -14,7 +14,6 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
 ];
 const ADMIN_NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/admin/performance', label: 'Performance', icon: TrendingUp },
-  { to: '/admin/campaigns', label: 'Manage campaigns', icon: Settings2 },
   { to: '/admin/numbers', label: 'Phone numbers', icon: Smartphone },
 ];
 

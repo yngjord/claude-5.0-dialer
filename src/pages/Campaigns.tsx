@@ -1,20 +1,25 @@
-import { ArrowRight, Check, Info, PhoneOutgoing } from 'lucide-react';
+import { ArrowRight, Check, Info, Pencil, PhoneOutgoing, Plus, RotateCcw, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { CallStatsRow, Campaign, CampaignStats } from '../../shared/types';
+import type { CallStatsRow, Campaign, CampaignStats, DialerUser, PhoneNumber } from '../../shared/types';
 import { useAuth } from '../auth/AuthProvider';
+import { Avatar } from '../components/Avatar';
 import { ClientLogo } from '../components/ClientLogo';
 import { DateRangeFilter } from '../components/DateRangeFilter';
 import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
 import { Metric } from '../components/ui/Metric';
 import { Tabs } from '../components/ui/Tabs';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/States';
 import { must, useLoad } from '../lib/api';
+import { useAvatarUrls } from '../lib/avatars';
+import type { CampaignRow } from '../lib/campaigns';
 import { defaultRange, rangeBounds, type DateRange } from '../lib/dateRange';
 import { formatTalkTime, percent } from '../lib/format';
 import { useClientLogos } from '../lib/clientLogos';
 import { supabase } from '../lib/supabase';
 import { CAMPAIGN_STATUS } from '../lib/tones';
+import { CampaignForm, MembersModal, RerunModal } from './admin/CampaignModals';
 
 type Tab = 'active' | 'completed' | 'draft';
 
@@ -27,12 +32,29 @@ export default function Campaigns() {
   const [tab, setTab] = useState<Tab>('active');
   const { data, error, loading, reload } = useLoad(async () => {
     const [campaigns, stats] = await Promise.all([
-      supabase.from('dialer_campaigns').select('*').order('created_at', { ascending: false }),
+      supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false }),
       supabase.from('dialer_campaign_stats').select('*'),
     ]);
     const byId = new Map((must(stats) as CampaignStats[]).map((s) => [s.campaign_id, s]));
-    return (must(campaigns) as Campaign[]).map((c) => ({ campaign: c, stats: byId.get(c.id) }));
+    return (must(campaigns) as CampaignRow[]).map((c) => ({ campaign: c, stats: byId.get(c.id) }));
   }, []);
+
+  // Admin tools: create/edit, team member, re-run.
+  const [editing, setEditing] = useState<CampaignRow | 'new' | null>(null);
+  const [members, setMembers] = useState<CampaignRow | null>(null);
+  const [rerun, setRerun] = useState<Campaign | null>(null);
+  const users = useLoad(async () => (isAdmin ? (must(await supabase.rpc('dialer_users')) as DialerUser[]) : []), [isAdmin]);
+  const numbers = useLoad(async () => (isAdmin ? (must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[]) : []), [isAdmin]);
+  const avatars = useAvatarUrls(users.data);
+  const nameOf = (id: string) => {
+    const u = users.data?.find((x) => x.id === id);
+    return u?.display_name || u?.email || 'Unknown';
+  };
+  const saved = () => {
+    setEditing(null);
+    setMembers(null);
+    reload({ quiet: true });
+  };
 
   const count = (t: Tab) => data?.filter((d) => TAB_STATUSES[t].includes(d.campaign.status)).length ?? 0;
   const shown = data?.filter((d) => TAB_STATUSES[tab].includes(d.campaign.status)) ?? [];
@@ -49,9 +71,9 @@ export default function Campaigns() {
         subtitle={isAdmin ? 'Your numbers, and every campaign. Team-wide numbers are in Performance.' : 'Your numbers and the call lists assigned to you.'}
         actions={
           isAdmin && (
-            <Link to="/admin/campaigns" className="inline-flex h-10 items-center rounded-full border border-line-border bg-white/70 px-5 text-[15px] font-medium hover:border-brand hover:text-brand">
-              Manage campaigns
-            </Link>
+            <Button onClick={() => setEditing('new')}>
+              <Plus size={16} /> Create campaign
+            </Button>
           )
         }
       />
@@ -79,6 +101,7 @@ export default function Campaigns() {
                       Completed / Total contacts <Info size={14} className="text-ink-faint" />
                     </span>
                   </th>
+                  {isAdmin && <th className="th">Team</th>}
                   <th className="th text-right">Dials today</th>
                   <th className="th text-right">Connect rate</th>
                   <th className="th" aria-label="Actions" />
@@ -86,13 +109,13 @@ export default function Campaigns() {
               </thead>
               <tbody className="divide-y divide-line">
                 {!shown.length ? (
-                  <EmptyRow colSpan={6}>
+                  <EmptyRow colSpan={isAdmin ? 7 : 6}>
                     {tab === 'completed'
                       ? 'No completed campaigns yet.'
                       : tab === 'draft'
-                        ? 'No drafts. Save a new campaign as a draft in Manage campaigns.'
+                        ? 'No drafts. Use Create campaign and save it as a draft.'
                         : isAdmin
-                          ? 'No active campaigns. Create one in Manage campaigns.'
+                          ? 'No active campaigns. Use Create campaign to add one.'
                           : "You aren't assigned any campaigns yet."}
                   </EmptyRow>
                 ) : (
@@ -134,10 +157,41 @@ export default function Campaigns() {
                             )}
                           </div>
                         </td>
+                        {isAdmin && (
+                          <td className="td">
+                            <button
+                              onClick={() => setMembers(c)}
+                              className="inline-flex items-center gap-1.5 text-sm text-brand hover:underline"
+                              title={c.campaign_members.map((m) => nameOf(m.user_id)).join(', ') || 'Assign a team member'}
+                            >
+                              {c.campaign_members.length ? (
+                                <span className="flex -space-x-2">
+                                  {c.campaign_members.map((m) => (
+                                    <Avatar key={m.user_id} url={avatars.get(m.user_id)} name={nameOf(m.user_id)} />
+                                  ))}
+                                </span>
+                              ) : (
+                                <>
+                                  <Users size={15} /> Assign
+                                </>
+                              )}
+                            </button>
+                          </td>
+                        )}
                         <td className="td text-right tabular-nums">{(s?.dials_today ?? 0).toLocaleString()}</td>
                         <td className="td text-right tabular-nums">{percent(s?.connects_total ?? 0, s?.dials_total ?? 0)}</td>
                         <td className="td">
                           <div className="flex items-center justify-end gap-1">
+                            {isAdmin && (
+                              <>
+                                <button onClick={() => setEditing(c)} className="flex h-9 w-9 items-center justify-center rounded-full text-ink-muted hover:bg-black/[0.04] hover:text-ink" title="Edit campaign" aria-label={`Edit ${c.name}`}>
+                                  <Pencil size={15} />
+                                </button>
+                                <button onClick={() => setRerun(c)} className="flex h-9 w-9 items-center justify-center rounded-full text-ink-muted hover:bg-black/[0.04] hover:text-ink" title="Re-run: new campaign from contacts already called" aria-label={`Re-run ${c.name}`}>
+                                  <RotateCcw size={15} />
+                                </button>
+                              </>
+                            )}
                             {openable ? (
                               <Link to={`/campaigns/${c.id}`} className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium text-ink-muted hover:bg-black/[0.04] hover:text-ink">
                                 Contacts <ArrowRight size={14} />
@@ -165,6 +219,12 @@ export default function Campaigns() {
           </div>
         )}
       </section>
+
+      {editing && <CampaignForm campaign={editing === 'new' ? null : editing} numbers={numbers.data ?? []} users={users.data ?? []} onClose={() => setEditing(null)} onSaved={saved} />}
+      {rerun && <RerunModal campaign={rerun} onClose={() => setRerun(null)} onCreated={() => reload({ quiet: true })} />}
+      {members && (
+        <MembersModal campaign={members} users={users.data ?? []} avatars={avatars} onPhotosChanged={() => users.reload({ quiet: true })} onClose={() => setMembers(null)} onSaved={saved} />
+      )}
     </>
   );
 }
