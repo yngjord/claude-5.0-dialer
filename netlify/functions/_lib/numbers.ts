@@ -1,8 +1,8 @@
 import { twilioClient } from './twilio';
 
 // Buying Australian mobile numbers. Twilio only sells them to accounts with an approved AU regulatory bundle, and
-// each purchase must name that bundle and an address on the account. Both are found automatically;
-// TWILIO_BUNDLE_SID / TWILIO_ADDRESS_SID override that if the account ever has several.
+// each purchase must name that bundle and the address inside it (Twilio error 21651 otherwise). Both are found
+// automatically; TWILIO_BUNDLE_SID / TWILIO_ADDRESS_SID override that if the account ever has several.
 
 export const COUNTRY = 'AU';
 
@@ -20,10 +20,22 @@ export async function findBundle(): Promise<BundleState> {
   return { sid: approved?.sid ?? null, status: approved?.status ?? bundles[0]?.status ?? null };
 }
 
-export async function findAddress(): Promise<string | null> {
+/** The address that's part of the bundle (the business address approved with it). */
+export async function findBundleAddress(bundleSid: string): Promise<string | null> {
   if (process.env.TWILIO_ADDRESS_SID) return process.env.TWILIO_ADDRESS_SID;
-  const [address] = await twilioClient().addresses.list({ isoCountry: COUNTRY, limit: 1 });
-  return address?.sid ?? null;
+  const compliance = twilioClient().numbers.v2.regulatoryCompliance;
+  const items = await compliance.bundles(bundleSid).itemAssignments.list({ limit: 50 });
+  // Attached to the bundle directly…
+  const direct = items.find((i) => i.objectSid.startsWith('AD'));
+  if (direct) return direct.objectSid;
+  // …or, more often, named by one of its supporting documents (attributes.address_sids).
+  for (const item of items.filter((i) => i.objectSid.startsWith('RD'))) {
+    const doc = await compliance.supportingDocuments(item.objectSid).fetch();
+    const sids = (doc.attributes as { address_sids?: string[] | string } | null)?.address_sids;
+    const sid = Array.isArray(sids) ? sids[0] : sids;
+    if (sid?.startsWith('AD')) return sid;
+  }
+  return null;
 }
 
 /** Monthly price of an AU mobile number, as Twilio charges it (usually USD). Null if Twilio doesn't say. */

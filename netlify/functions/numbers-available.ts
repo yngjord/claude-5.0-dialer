@@ -1,5 +1,5 @@
 import type { Config } from '@netlify/functions';
-import { NUMBER_MATCHES, numberSearchPattern, type NumberMatch } from '../../shared/numberSearch';
+import { matchesNumberSearch, NUMBER_MATCHES, numberSearchPattern, type NumberMatch } from '../../shared/numberSearch';
 import type { AvailableNumbersResponse } from '../../shared/types';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
 import { handler, HttpError, json } from './_lib/http';
@@ -22,13 +22,17 @@ export default handler(async (req) => {
   const [found, price, bundle] = await Promise.all([
     twilioClient()
       .availablePhoneNumbers(COUNTRY)
-      .mobile.list({ voiceEnabled: true, smsEnabled: true, limit: 20, ...(pattern.contains ? { contains: pattern.contains } : {}) }),
+      // Twilio matches the digits anywhere, so fetch plenty and keep the true start/end matches below.
+      .mobile.list({ voiceEnabled: true, smsEnabled: true, limit: pattern.contains && match !== 'anywhere' ? 200 : 20, ...(pattern.contains ? { contains: pattern.contains } : {}) }),
     mobileMonthlyPrice(),
     findBundle(),
   ]);
 
   return json({
-    numbers: found.map((n) => ({ phoneNumber: n.phoneNumber, locality: n.locality || null, region: n.region || null, sms: n.capabilities.sms, voice: n.capabilities.voice })),
+    numbers: found
+      .filter((n) => matchesNumberSearch(n.phoneNumber, pattern.digits, match))
+      .slice(0, 20)
+      .map((n) => ({ phoneNumber: n.phoneNumber, locality: n.locality || null, region: n.region || null, sms: n.capabilities.sms, voice: n.capabilities.voice })),
     price,
     bundleReady: !!bundle.sid,
     bundleStatus: bundle.status,

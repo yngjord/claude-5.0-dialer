@@ -3,7 +3,7 @@ import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
 import { buildLeadFields, todayInSydney, validateLead, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
-import { numberSearchPattern } from './numberSearch';
+import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
 import { shouldTranscribe } from './pickup';
 
 describe('normalizePhone', () => {
@@ -154,17 +154,26 @@ describe('shouldTranscribe', () => {
 });
 
 describe('numberSearchPattern', () => {
-  it('builds Twilio contains patterns', () => {
-    expect(numberSearchPattern('888', 'anywhere')).toEqual({ ok: true, contains: '888' });
-    expect(numberSearchPattern('0488', 'start')).toEqual({ ok: true, contains: '488******' });
-    expect(numberSearchPattern('+61 488', 'start')).toEqual({ ok: true, contains: '488******' });
-    expect(numberSearchPattern('488', 'start')).toEqual({ ok: true, contains: '488******' });
-    expect(numberSearchPattern('8 888', 'end')).toEqual({ ok: true, contains: '*****8888' });
-    expect(numberSearchPattern('', 'end')).toEqual({ ok: true, contains: null });
+  it('works out the digits to search for', () => {
+    expect(numberSearchPattern('888', 'anywhere')).toEqual({ ok: true, digits: '888', contains: '888' });
+    expect(numberSearchPattern('0488', 'start')).toEqual({ ok: true, digits: '488', contains: '488' });
+    expect(numberSearchPattern('+61 488', 'start')).toEqual({ ok: true, digits: '488', contains: '488' });
+    expect(numberSearchPattern('8 888', 'end')).toEqual({ ok: true, digits: '8888', contains: '8888' });
+    expect(numberSearchPattern('', 'end')).toEqual({ ok: true, digits: null, contains: null });
   });
 
   it('rejects searches that cannot match a mobile', () => {
     expect(numberSearchPattern('02', 'start').ok).toBe(false);
     expect(numberSearchPattern('1234567890', 'anywhere').ok).toBe(false);
+  });
+
+  it('keeps only numbers that really start or end with the digits', () => {
+    // 777 in the middle: Twilio returns it for a "contains 777" search, but it doesn't end with 777.
+    expect(matchesNumberSearch('+61485077744', '777', 'end')).toBe(false);
+    expect(matchesNumberSearch('+61485094777', '777', 'end')).toBe(true);
+    expect(matchesNumberSearch('+61485077744', '777', 'anywhere')).toBe(true);
+    expect(matchesNumberSearch('+61488123456', '488', 'start')).toBe(true);
+    expect(matchesNumberSearch('+61412488000', '488', 'start')).toBe(false);
+    expect(matchesNumberSearch('+61412488000', null, 'start')).toBe(true);
   });
 });

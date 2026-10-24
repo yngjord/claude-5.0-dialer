@@ -4,7 +4,7 @@ import type { BuyNumberRequest, PhoneNumber } from '../../shared/types';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json, readJson } from './_lib/http';
-import { findAddress, findBundle } from './_lib/numbers';
+import { findBundle, findBundleAddress } from './_lib/numbers';
 import { callbackUrl, requireTwilioConfigured, twilioClient } from './_lib/twilio';
 
 /**
@@ -20,9 +20,11 @@ export default handler(async (req) => {
   const clientName = body.clientName?.trim();
   if (!clientName) throw new HttpError(400, 'Choose which client this number is for.');
 
-  const [bundle, addressSid] = await Promise.all([findBundle(), findAddress()]);
+  // Always bought as the business: the approved AU bundle, and the address approved inside it.
+  const bundle = await findBundle();
   if (!bundle.sid) throw new HttpError(409, `Your Australian regulatory bundle isn't approved yet${bundle.status ? ` (status: ${bundle.status})` : ''}. Numbers can be bought once Twilio approves it.`);
-  if (!addressSid) throw new HttpError(409, 'No Australian address is saved on the Twilio account. Add the business address in Twilio (Phone Numbers → Addresses) first.');
+  const addressSid = await findBundleAddress(bundle.sid);
+  if (!addressSid) throw new HttpError(409, "Your approved bundle doesn't include an address in Twilio. Check the bundle in Twilio (Phone Numbers → Regulatory Compliance).");
 
   let bought;
   try {
