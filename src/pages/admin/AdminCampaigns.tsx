@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { formatPhone } from '../../../shared/phone';
 import type { AirtableClient, Campaign, CampaignStats, DialerUser, PhoneNumber } from '../../../shared/types';
 import { useAuth } from '../../auth/AuthProvider';
+import { ClientLogo } from '../../components/ClientLogo';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
@@ -11,6 +12,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/ui/States';
 import { api, must, useLoad } from '../../lib/api';
 import { removeAvatar, uploadAvatar, useAvatarUrls } from '../../lib/avatars';
+import { useClientLogos } from '../../lib/clientLogos';
 import { supabase } from '../../lib/supabase';
 
 type Row = Campaign & { campaign_members: { user_id: string }[] };
@@ -22,6 +24,7 @@ export default function AdminCampaigns() {
   const list = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false })) as Row[], []);
   const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
   const avatars = useAvatarUrls(users.data);
+  const logos = useClientLogos();
   const numbers = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
   // Same order as pickCallerNumber on the server: campaign's own pick, else the client's number, else the default.
   const callerLabel = (c: Campaign) => {
@@ -59,8 +62,8 @@ export default function AdminCampaigns() {
             <table className="w-full min-w-[820px]">
               <thead className="border-b border-line">
                 <tr>
-                  <th className="th">Campaign</th>
                   <th className="th">Client</th>
+                  <th className="th">Campaign</th>
                   <th className="th">Status</th>
                   <th className="th">Caller number</th>
                   <th className="th">Team</th>
@@ -73,12 +76,14 @@ export default function AdminCampaigns() {
                 ) : (
                   list.data.map((c) => (
                     <tr key={c.id}>
+                      <td className="td">
+                        <ClientLogo name={c.client_name} url={logos[c.airtable_client_id]} />
+                      </td>
                       <td className="td font-medium">
                         <Link to={`/campaigns/${c.id}`} className="hover:text-brand">
                           {c.name}
                         </Link>
                       </td>
-                      <td className="td">{c.client_name}</td>
                       <td className="td">
                         <Badge tone={c.status === 'active' ? 'green' : c.status === 'paused' ? 'amber' : 'grey'}>{c.status}</Badge>
                       </td>

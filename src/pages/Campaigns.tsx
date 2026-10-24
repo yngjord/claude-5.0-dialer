@@ -1,8 +1,9 @@
-import { ArrowRight, PhoneOutgoing } from 'lucide-react';
+import { ArrowRight, Info, PhoneOutgoing } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { CallStatsRow, Campaign, CampaignStats } from '../../shared/types';
 import { useAuth } from '../auth/AuthProvider';
+import { ClientLogo } from '../components/ClientLogo';
 import { DateRangeFilter } from '../components/DateRangeFilter';
 import { Badge } from '../components/ui/Badge';
 import { Metric } from '../components/ui/Metric';
@@ -10,10 +11,12 @@ import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/
 import { must, useLoad } from '../lib/api';
 import { defaultRange, rangeBounds, type DateRange } from '../lib/dateRange';
 import { formatTalkTime, percent } from '../lib/format';
+import { useClientLogos } from '../lib/clientLogos';
 import { supabase } from '../lib/supabase';
 
 export default function Campaigns() {
   const { isAdmin } = useAuth();
+  const logos = useClientLogos();
   const { data, error, loading, reload } = useLoad(async () => {
     const [campaigns, stats] = await Promise.all([
       supabase.from('dialer_campaigns').select('*').neq('status', 'archived').order('created_at', { ascending: false }),
@@ -50,9 +53,13 @@ export default function Campaigns() {
             <table className="w-full min-w-[760px]">
               <thead className="border-b border-line">
                 <tr>
-                  <th className="th">Campaign</th>
                   <th className="th">Client</th>
-                  <th className="th text-right">Left to call</th>
+                  <th className="th">Campaign</th>
+                  <th className="th">
+                    <span className="inline-flex items-center gap-1.5" title="Contacts that have been called and wrapped up, out of everyone in the campaign">
+                      Completed / Total contacts <Info size={14} className="text-ink-faint" />
+                    </span>
+                  </th>
                   <th className="th text-right">Dials today</th>
                   <th className="th text-right">Connect rate</th>
                   <th className="th" aria-label="Actions" />
@@ -64,38 +71,49 @@ export default function Campaigns() {
                     {isAdmin ? 'No campaigns yet. Create one in Manage campaigns.' : "You aren't assigned any campaigns yet."}
                   </EmptyRow>
                 ) : (
-                  data.map(({ campaign: c, stats: s }) => (
-                    <tr key={c.id} className="transition-colors hover:bg-neutral-50">
-                      <td className="td">
-                        <span className="inline-flex items-center gap-2">
-                          <Link to={`/campaigns/${c.id}`} className="font-medium hover:text-brand">
-                            {c.name}
-                          </Link>
-                          {c.status === 'paused' && <Badge tone="amber">Paused</Badge>}
-                        </span>
-                      </td>
-                      <td className="td text-ink-muted">{c.client_name}</td>
-                      <td className="td text-right tabular-nums">
-                        {(s?.contacts_remaining ?? 0).toLocaleString()} <span className="text-ink-faint">/ {(s?.contacts_total ?? 0).toLocaleString()}</span>
-                      </td>
-                      <td className="td text-right tabular-nums">{(s?.dials_today ?? 0).toLocaleString()}</td>
-                      <td className="td text-right tabular-nums">{percent(s?.connects_total ?? 0, s?.dials_total ?? 0)}</td>
-                      <td className="td">
-                        <div className="flex items-center justify-end gap-1">
-                          <Link to={`/campaigns/${c.id}`} className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium text-ink-muted hover:bg-black/[0.04] hover:text-ink">
-                            Contacts <ArrowRight size={14} />
-                          </Link>
-                          <Link
-                            to={`/campaigns/${c.id}/dial`}
-                            aria-disabled={c.status !== 'active'}
-                            className={`inline-flex h-9 items-center gap-1.5 rounded-full bg-brand px-4 text-sm font-medium text-white transition hover:bg-brand-hover ${c.status !== 'active' ? 'pointer-events-none opacity-50' : ''}`}
-                          >
-                            <PhoneOutgoing size={15} /> Dial
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                  data.map(({ campaign: c, stats: s }) => {
+                    const total = s?.contacts_total ?? 0;
+                    const completed = total - (s?.contacts_remaining ?? 0);
+                    return (
+                      <tr key={c.id} className="transition-colors hover:bg-neutral-50">
+                        <td className="td">
+                          <ClientLogo name={c.client_name} url={logos[c.airtable_client_id]} />
+                        </td>
+                        <td className="td">
+                          <span className="inline-flex items-center gap-2">
+                            <Link to={`/campaigns/${c.id}`} className="font-medium hover:text-brand">
+                              {c.name}
+                            </Link>
+                            {c.status === 'paused' && <Badge tone="amber">Paused</Badge>}
+                          </span>
+                        </td>
+                        <td className="td w-[220px]">
+                          <p className="text-sm tabular-nums text-ink-muted">
+                            {completed.toLocaleString()} / {total.toLocaleString()}
+                          </p>
+                          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
+                            <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${total ? (completed / total) * 100 : 0}%` }} />
+                          </div>
+                        </td>
+                        <td className="td text-right tabular-nums">{(s?.dials_today ?? 0).toLocaleString()}</td>
+                        <td className="td text-right tabular-nums">{percent(s?.connects_total ?? 0, s?.dials_total ?? 0)}</td>
+                        <td className="td">
+                          <div className="flex items-center justify-end gap-1">
+                            <Link to={`/campaigns/${c.id}`} className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium text-ink-muted hover:bg-black/[0.04] hover:text-ink">
+                              Contacts <ArrowRight size={14} />
+                            </Link>
+                            <Link
+                              to={`/campaigns/${c.id}/dial`}
+                              aria-disabled={c.status !== 'active'}
+                              className={`inline-flex h-9 items-center gap-1.5 rounded-full bg-brand px-4 text-sm font-medium text-white transition hover:bg-brand-hover ${c.status !== 'active' ? 'pointer-events-none opacity-50' : ''}`}
+                            >
+                              <PhoneOutgoing size={15} /> Dial
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
