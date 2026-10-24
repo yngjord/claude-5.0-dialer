@@ -330,8 +330,10 @@ alter table public.dialer_contacts enable row level security;
 alter table public.dialer_calls enable row level security;
 alter table public.dialer_sms_messages enable row level security;
 
+-- Only admins see the numbers; the server picks the caller number for calls and texts.
 drop policy if exists "Dialer users read numbers" on public.dialer_phone_numbers;
-create policy "Dialer users read numbers" on public.dialer_phone_numbers for select to authenticated using (is_dialer_user());
+drop policy if exists "Admins read numbers" on public.dialer_phone_numbers;
+create policy "Admins read numbers" on public.dialer_phone_numbers for select to authenticated using (is_dialer_admin());
 drop policy if exists "Admins manage numbers" on public.dialer_phone_numbers;
 create policy "Admins manage numbers" on public.dialer_phone_numbers for all to authenticated using (is_dialer_admin()) with check (is_dialer_admin());
 

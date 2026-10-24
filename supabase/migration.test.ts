@@ -313,6 +313,13 @@ describe('row level security', () => {
     });
   });
 
+  it("team members can't read clients' phone numbers; admins can", async () => {
+    await pg.exec(`insert into dialer_phone_numbers (e164, client_name) values ('+61400000097', 'Kintell')`);
+    expect(await as(TEAM1, () => rows('select * from dialer_phone_numbers'))).toEqual([]);
+    expect(await as(ADMIN, () => rows('select * from dialer_phone_numbers'))).toHaveLength(1);
+    await pg.exec(`delete from dialer_phone_numbers`);
+  });
+
   it('reps only see calls they made, even in a shared campaign; admins see all', async () => {
     await pg.exec(`
       insert into dialer_calls (campaign_id, user_id, agent_name, twilio_status) values
