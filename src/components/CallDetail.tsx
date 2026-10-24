@@ -1,5 +1,5 @@
-import { CheckCircle2 } from 'lucide-react';
-import { useEffect } from 'react';
+import { Check, CheckCircle2, Copy } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { formatPhone } from '../../shared/phone';
 import type { CallMediaResponse, CallRow } from '../../shared/types';
 import { useAuth } from '../auth/AuthProvider';
@@ -19,6 +19,19 @@ export function CallDetail({ callId }: { callId: string }) {
   const media = useLoad(() => api<CallMediaResponse>(`call-media?id=${encodeURIComponent(callId)}`), [callId]);
 
   const row = call.data;
+  const [copied, setCopied] = useState(false);
+  const transcriptText = media.data?.transcriptJson?.length
+    ? media.data.transcriptJson.map((t) => `${t.speaker}${t.start != null ? ` (${formatDuration(t.start)})` : ''}: ${t.text}`).join('\n')
+    : (media.data?.transcript ?? '');
+  const copyTranscript = async () => {
+    try {
+      await navigator.clipboard.writeText(transcriptText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard blocked by the browser: nothing to do
+    }
+  };
   useEffect(() => {
     if (row?.kind === 'voicemail' && !row.read_at && isAdmin) {
       supabase.from('dialer_calls').update({ read_at: new Date().toISOString() }).eq('id', row.id).then(() => window.dispatchEvent(new Event('inbox:changed')));
@@ -72,7 +85,14 @@ export function CallDetail({ callId }: { callId: string }) {
       </div>
 
       <div>
-        <h3 className="mb-2 font-display text-[13px] font-medium text-ink-muted">Transcript</h3>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h3 className="font-display text-[13px] font-medium text-ink-muted">Transcript</h3>
+          {transcriptText && (
+            <button onClick={copyTranscript} className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-sm text-ink-muted transition hover:bg-black/[0.04] hover:text-ink">
+              {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy'}
+            </button>
+          )}
+        </div>
         {media.data?.transcriptJson?.length ? (
           <ol className="max-h-[360px] space-y-3 overflow-y-auto rounded-2xl bg-neutral-50 p-4 text-[15px]">
             {media.data.transcriptJson.map((t, i) => (

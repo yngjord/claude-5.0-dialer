@@ -317,6 +317,25 @@ describe('custom fields', () => {
   });
 });
 
+describe('agent names', () => {
+  it('follow the rep when their profile name changes', async () => {
+    await pg.exec(`insert into dialer_calls (user_id, agent_name, twilio_status) values ('${TEAM1}', 't1@x', 'completed')`);
+    await pg.exec(`update profiles set display_name = 'Tom Moore' where id = '${TEAM1}'`);
+    const names = await rows<{ agent_name: string }>(`select distinct agent_name from dialer_calls where user_id = '${TEAM1}'`);
+    expect(names).toEqual([{ agent_name: 'Tom Moore' }]);
+    await pg.exec(`update profiles set display_name = null where id = '${TEAM1}'`);
+    const [after] = await rows<{ agent_name: string }>(`select distinct agent_name from dialer_calls where user_id = '${TEAM1}'`);
+    expect(after.agent_name).toBe('t1@x');
+    await pg.exec(`delete from dialer_calls where user_id = '${TEAM1}'`);
+  });
+
+  it('dialer_users includes profile pictures', async () => {
+    await pg.exec(`update profiles set avatar_url = 'https://i.imgur.com/x.png' where id = '${TEAM2}'`);
+    const users = await as(ADMIN, () => rows<{ id: string; avatar_url: string | null }>('select id, avatar_url from dialer_users()'));
+    expect(users.find((u) => u.id === TEAM2)?.avatar_url).toBe('https://i.imgur.com/x.png');
+  });
+});
+
 describe('stats', () => {
   it('campaign_stats and call_stats run', async () => {
     await pg.exec(`insert into dialer_calls (campaign_id, user_id, agent_name, twilio_status, answered_by) values ('${CAMPAIGN}', '${TEAM1}', 'T1', 'completed', 'human')`);

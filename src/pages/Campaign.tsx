@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { formatPhone } from '../../shared/phone';
 import type { Campaign, CampaignStats, Contact } from '../../shared/types';
-import { CallButton } from '../components/ClickToCall';
 import { ImportModal } from '../components/ImportModal';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -121,7 +120,6 @@ export default function CampaignPage() {
               <table className="w-full min-w-[900px]">
                 <thead className="border-b border-line">
                   <tr>
-                    <th className="th w-12" aria-label="Call" />
                     <th className="th">Contact</th>
                     <th className="th">Company</th>
                     <th className="th">Phone</th>
@@ -133,11 +131,10 @@ export default function CampaignPage() {
                 </thead>
                 <tbody className="divide-y divide-line">
                   {!list.data?.contacts.length ? (
-                    <EmptyRow colSpan={8}>{debounced || filter !== 'all' ? 'No contacts match.' : 'No contacts yet. Import a CSV to get started.'}</EmptyRow>
+                    <EmptyRow colSpan={7}>{debounced || filter !== 'all' ? 'No contacts match.' : 'No contacts yet. Import a CSV to get started.'}</EmptyRow>
                   ) : (
                     list.data.contacts.map((c) => (
                       <tr key={c.id} className="transition-colors hover:bg-neutral-50">
-                        <td className="td">{campaign && <CallButton contact={c} campaign={campaign} />}</td>
                         <td className="td">
                           <p className="font-medium">{c.full_name || '—'}</p>
                           {c.title && <p className="max-w-[220px] truncate text-xs text-ink-muted">{c.title}</p>}

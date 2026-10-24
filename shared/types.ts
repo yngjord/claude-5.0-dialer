@@ -17,6 +17,8 @@ export interface DialerUser {
   email: string;
   display_name: string | null;
   role: Role;
+  /** Hosted profile picture link (profiles.avatar_url). */
+  avatar_url?: string | null;
 }
 
 export interface PhoneNumber {

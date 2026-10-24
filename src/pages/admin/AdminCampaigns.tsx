@@ -84,9 +84,22 @@ export default function AdminCampaigns() {
                         {callerLabel(c)}
                       </td>
                       <td className="td max-w-[240px]">
-                        <button onClick={() => setMembers(c)} className="inline-flex max-w-full items-center gap-1.5 truncate text-brand hover:underline">
-                          <Users size={15} className="shrink-0" />
-                          <span className="truncate">{c.campaign_members.length ? c.campaign_members.map((m) => nameOf(m.user_id)).join(', ') : 'Assign people'}</span>
+                        <button
+                          onClick={() => setMembers(c)}
+                          className="inline-flex max-w-full items-center gap-1.5 text-brand hover:underline"
+                          title={c.campaign_members.map((m) => nameOf(m.user_id)).join(', ') || undefined}
+                        >
+                          {c.campaign_members.length ? (
+                            <span className="flex -space-x-2">
+                              {c.campaign_members.map((m) => (
+                                <Avatar key={m.user_id} user={users.data?.find((u) => u.id === m.user_id)} name={nameOf(m.user_id)} />
+                              ))}
+                            </span>
+                          ) : (
+                            <>
+                              <Users size={15} className="shrink-0" /> Assign people
+                            </>
+                          )}
                         </button>
                       </td>
                       <td className="td whitespace-nowrap text-right">
@@ -130,6 +143,24 @@ export default function AdminCampaigns() {
         />
       )}
     </>
+  );
+}
+
+/** A team member's profile picture, or their initials when they don't have one (or it doesn't load). */
+function Avatar({ user, name }: { user: DialerUser | undefined; name: string }) {
+  const [broken, setBroken] = useState(false);
+  const initials = name
+    .split(/[\s@.]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join('');
+  return user?.avatar_url && !broken ? (
+    <img src={user.avatar_url} alt={name} title={name} onError={() => setBroken(true)} className="h-8 w-8 rounded-full object-cover ring-2 ring-white" />
+  ) : (
+    <span title={name} className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-tint text-xs font-semibold text-brand ring-2 ring-white">
+      {initials}
+    </span>
   );
 }
 

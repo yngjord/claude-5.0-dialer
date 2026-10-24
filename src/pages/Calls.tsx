@@ -1,7 +1,7 @@
-import { PlayCircle } from 'lucide-react';
+import { FileText, Play } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
-import { DISPOSITIONS, PICKUP_STATUSES } from '../../shared/constants';
+import { DISPOSITIONS, PICKUP_STATUSES, type PickupStatus } from '../../shared/constants';
 import { DateRangeFilter } from '../components/DateRangeFilter';
 import { formatPhone } from '../../shared/phone';
 import type { CallRow, Campaign } from '../../shared/types';
@@ -17,6 +17,9 @@ import { supabase } from '../lib/supabase';
 import { DISPOSITION_TONES, PICKUP_TONES } from '../lib/tones';
 
 const PER_PAGE = 50;
+
+// Pickups where someone or something answered; the rest never connected.
+const CONNECTED: PickupStatus[] = ['Human Pickup', 'Machine Pickup', 'Unclassified Pickup'];
 
 export default function Calls() {
   const { isAdmin } = useAuth();
@@ -41,7 +44,9 @@ export default function Calls() {
   const list = useLoad(async () => {
     let q = supabase
       .from('dialer_calls')
-      .select('id, started_at, full_name, company, phone_e164, campaign_name, agent_name, pickup_status, disposition, duration_s, recording_path, recording_sid, source', { count: 'exact' })
+      .select('id, started_at, full_name, phone_e164, from_number, campaign_name, agent_name, pickup_status, disposition, notes, duration_s, recording_path, recording_sid, transcript_status', {
+        count: 'exact',
+      })
       .eq('direction', 'outbound');
     if (bounds.from) q = q.gte('started_at', bounds.from);
     if (bounds.to) q = q.lt('started_at', bounds.to);
@@ -98,48 +103,77 @@ export default function Calls() {
         ) : (
           <>
             <div className="relative -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-              <table className="w-full min-w-[960px]">
+              <table className="w-full min-w-[1180px]">
                 <thead className="border-b border-line">
                   <tr>
-                    <th className="th">Date</th>
                     <th className="th">Contact</th>
-                    <th className="th">Phone</th>
                     <th className="th">Campaign</th>
-                    <th className="th">Agent</th>
-                    <th className="th">Pickup</th>
+                    <th className="th">Agent name</th>
+                    <th className="th">Dialing number</th>
+                    <th className="th">Date &amp; time</th>
+                    <th className="th">Connection status</th>
+                    <th className="th">Connection details</th>
+                    <th className="th">Duration</th>
                     <th className="th">Disposition</th>
-                    <th className="th">Length</th>
-                    <th className="th" aria-label="Recording" />
+                    <th className="th">Notes</th>
+                    <th className="th text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
                   {!list.data?.calls.length ? (
-                    <EmptyRow colSpan={9}>No calls match these filters.</EmptyRow>
+                    <EmptyRow colSpan={11}>No calls match these filters.</EmptyRow>
                   ) : (
-                    list.data.calls.map((c) => (
-                      <tr key={c.id} className="cursor-pointer transition-colors hover:bg-neutral-50" onClick={() => setOpen(c.id)}>
-                        <td className="td tabular-nums text-ink-soft">{formatDateTime(c.started_at)}</td>
-                        <td className="td">
-                          <p className="font-medium">{c.full_name || '—'}</p>
-                          {c.company && <p className="max-w-[200px] truncate text-xs text-ink-muted">{c.company}</p>}
-                        </td>
-                        <td className="td tabular-nums">{formatPhone(c.phone_e164)}</td>
-                        <td className="td max-w-[170px] truncate text-ink-muted" title={c.campaign_name ?? undefined}>
-                          {c.campaign_name ?? '—'}
-                        </td>
-                        <td className="td">{c.agent_name ?? <span className="text-ink-faint">—</span>}</td>
-                        <td className="td">{c.pickup_status ? <Badge tone={PICKUP_TONES[c.pickup_status] ?? 'grey'}>{c.pickup_status}</Badge> : <span className="text-ink-faint">—</span>}</td>
-                        <td className="td">{c.disposition ? <Badge tone={DISPOSITION_TONES[c.disposition] ?? 'grey'}>{c.disposition}</Badge> : <span className="text-ink-faint">—</span>}</td>
-                        <td className="td tabular-nums text-ink-muted">{formatDuration(c.duration_s)}</td>
-                        <td className="td">
-                          {(c.recording_path || c.recording_sid) && (
-                            <span className="inline-flex items-center gap-1.5 text-brand">
-                              <PlayCircle size={16} /> Listen
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))
+                    list.data.calls.map((c) => {
+                      const hasRecording = !!(c.recording_path || c.recording_sid);
+                      const hasTranscript = c.transcript_status === 'completed';
+                      return (
+                        <tr key={c.id} className="cursor-pointer transition-colors hover:bg-neutral-50" onClick={() => setOpen(c.id)}>
+                          <td className="td">
+                            <p className="max-w-[200px] truncate font-medium">{c.full_name || '—'}</p>
+                            <p className="text-xs tabular-nums text-ink-muted">{formatPhone(c.phone_e164)}</p>
+                          </td>
+                          <td className="td max-w-[180px] truncate text-ink-muted" title={c.campaign_name ?? undefined}>
+                            {c.campaign_name ?? '—'}
+                          </td>
+                          <td className="td whitespace-nowrap">{c.agent_name ?? <span className="text-ink-faint">—</span>}</td>
+                          <td className="td whitespace-nowrap tabular-nums text-ink-muted">{c.from_number ? formatPhone(c.from_number) : '—'}</td>
+                          <td className="td whitespace-nowrap tabular-nums text-ink-soft">{formatDateTime(c.started_at)}</td>
+                          <td className="td">
+                            {c.pickup_status ? (
+                              CONNECTED.includes(c.pickup_status) ? (
+                                <Badge tone="green">Connected</Badge>
+                              ) : (
+                                <Badge tone="red">Not connected</Badge>
+                              )
+                            ) : (
+                              <span className="text-ink-faint">—</span>
+                            )}
+                          </td>
+                          <td className="td">{c.pickup_status ? <Badge tone={PICKUP_TONES[c.pickup_status] ?? 'grey'}>{c.pickup_status}</Badge> : <span className="text-ink-faint">—</span>}</td>
+                          <td className="td tabular-nums text-ink-muted">{formatDuration(c.duration_s)}</td>
+                          <td className="td">{c.disposition ? <Badge tone={DISPOSITION_TONES[c.disposition] ?? 'grey'}>{c.disposition}</Badge> : <span className="text-ink-faint">—</span>}</td>
+                          <td className="td max-w-[200px] truncate text-ink-soft" title={c.notes ?? undefined}>
+                            {c.notes || <span className="text-ink-faint">—</span>}
+                          </td>
+                          <td className="td">
+                            <div className="flex justify-end gap-1.5">
+                              <span
+                                className={`flex h-8 w-8 items-center justify-center rounded-lg border ${hasRecording ? 'border-line-strong text-ink' : 'border-line text-ink-faint opacity-50'}`}
+                                title={hasRecording ? 'Recording' : 'No recording'}
+                              >
+                                <Play size={14} />
+                              </span>
+                              <span
+                                className={`flex h-8 w-8 items-center justify-center rounded-lg border ${hasTranscript ? 'border-line-strong text-ink' : 'border-line text-ink-faint opacity-50'}`}
+                                title={hasTranscript ? 'Transcript' : 'No transcript'}
+                              >
+                                <FileText size={14} />
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

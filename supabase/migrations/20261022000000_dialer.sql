@@ -10,6 +10,8 @@
 -- ── Profiles ────────────────────────────────────────────────────────────────────────────────────────────────
 -- Shown as the agent name on calls ("Agent Name" in the portal). Falls back to the email when empty.
 alter table public.profiles add column if not exists display_name text;
+-- Profile picture (a hosted image link, e.g. imgur), shown on campaigns' team lists.
+alter table public.profiles add column if not exists avatar_url text;
 
 -- ── Helpers ─────────────────────────────────────────────────────────────────────────────────────────────────
 create or replace function public.is_dialer_user() returns boolean
@@ -271,6 +273,19 @@ create trigger dialer_contacts_updated_at before update on public.dialer_contact
 drop trigger if exists dialer_calls_updated_at on public.dialer_calls;
 create trigger dialer_calls_updated_at before update on public.dialer_calls for each row execute function public.dialer_set_updated_at();
 
+-- Calls keep the rep's name for the portal and stats; renaming someone renames them on all their calls.
+create or replace function public.dialer_sync_agent_name() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  update dialer_calls set agent_name = coalesce(nullif(trim(new.display_name), ''), new.email)
+  where user_id = new.id and agent_name is distinct from coalesce(nullif(trim(new.display_name), ''), new.email);
+  return new;
+end $$;
+revoke execute on function public.dialer_sync_agent_name() from public, anon, authenticated;
+drop trigger if exists dialer_profiles_agent_name on public.profiles;
+create trigger dialer_profiles_agent_name after update of display_name, email on public.profiles
+  for each row execute function public.dialer_sync_agent_name();
+
 -- ── Row level security ──────────────────────────────────────────────────────────────────────────────────────
 -- Writes that involve Twilio or Airtable (calls, wrap-ups, SMS) go through Netlify Functions with the service
 -- role key, which bypasses RLS. These policies cover what the browser does directly.
@@ -435,9 +450,10 @@ begin
 end $$;
 
 -- Team list for admin screens and agent names.
-create or replace function public.dialer_users() returns table (id uuid, email text, display_name text, role public.user_role)
+drop function if exists public.dialer_users();
+create function public.dialer_users() returns table (id uuid, email text, display_name text, role public.user_role, avatar_url text)
 language sql stable security definer set search_path = public as $$
-  select p.id, p.email, p.display_name, p.role from profiles p
+  select p.id, p.email, p.display_name, p.role, p.avatar_url from profiles p
   where p.role in ('team', 'admin') and is_dialer_user()
   order by coalesce(p.display_name, p.email)
 $$;
