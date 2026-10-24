@@ -224,7 +224,7 @@ export default function Dialer() {
         <>
           {total > 0 && (
             <div className="flex items-center gap-2.5 rounded-full border border-line bg-white py-1.5 pl-3.5 pr-3 text-sm" title="Contacts called and wrapped up in this campaign, out of everyone in it">
-              <span className="text-xs text-ink-muted">Campaign</span>
+              <span className="text-xs text-ink-muted">Contacts</span>
               <span className="tabular-nums">
                 <b className="font-display font-medium">{completed.toLocaleString()}</b> <span className="text-ink-muted">/ {total.toLocaleString()}</span>
               </span>

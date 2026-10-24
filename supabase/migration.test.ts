@@ -364,10 +364,10 @@ describe('row level security', () => {
     });
   });
 
-  it("team members can import into their campaigns but can't edit contacts or calls", async () => {
+  it("team members can't import, edit contacts or edit calls", async () => {
+    await as(ADMIN, () => pg.query(`insert into dialer_contacts (campaign_id, phone_e164) values ($1, '+61477777777')`, [CAMPAIGN]));
     await as(TEAM1, async () => {
-      await pg.query(`insert into dialer_contacts (campaign_id, phone_e164) values ($1, '+61477777777')`, [CAMPAIGN]);
-      await expect(pg.query(`insert into dialer_contacts (campaign_id, phone_e164) values ($1, '+61477777778')`, [OTHER_CAMPAIGN])).rejects.toThrow();
+      await expect(pg.query(`insert into dialer_contacts (campaign_id, phone_e164) values ($1, '+61477777778')`, [CAMPAIGN])).rejects.toThrow();
       const updated = await pg.query(`update dialer_contacts set status = 'done' where campaign_id = $1`, [CAMPAIGN]);
       expect(updated.affectedRows).toBe(0);
       await expect(pg.query(`update dialer_calls set disposition = 'Do Not Call'`)).rejects.toThrow(/permission denied/);

@@ -414,7 +414,8 @@ drop policy if exists "Members read contacts" on public.dialer_contacts;
 create policy "Members read contacts" on public.dialer_contacts for select to authenticated using (dialer_can_access_campaign(campaign_id));
 -- Members can import lists into their campaigns.
 drop policy if exists "Members add contacts" on public.dialer_contacts;
-create policy "Members add contacts" on public.dialer_contacts for insert to authenticated with check (dialer_can_access_campaign(campaign_id));
+drop policy if exists "Admins add contacts" on public.dialer_contacts;
+create policy "Admins add contacts" on public.dialer_contacts for insert to authenticated with check (is_dialer_admin());
 drop policy if exists "Admins edit contacts" on public.dialer_contacts;
 create policy "Admins edit contacts" on public.dialer_contacts for update to authenticated using (is_dialer_admin()) with check (is_dialer_admin());
 drop policy if exists "Admins delete contacts" on public.dialer_contacts;
@@ -443,7 +444,7 @@ revoke insert, update, delete on public.dialer_calls from anon, authenticated;
 grant update (read_at) on public.dialer_calls to authenticated;
 revoke insert, update, delete on public.dialer_sms_messages from anon, authenticated;
 grant update (read_at) on public.dialer_sms_messages to authenticated;
--- Contacts: the browser can insert (import) but only admins update; the queue columns change through the functions below.
+-- Contacts: admins insert (import) and update from the browser; the queue columns change through the functions below.
 revoke update on public.dialer_contacts from anon;
 
 -- ── Power dialer queue ──────────────────────────────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import { CAMPAIGN_STATUS, CONTACT_STATUS_LABELS, DISPOSITION_TONES } from '../li
 
 const PER_PAGE = 50;
 type Filter = 'all' | 'queue' | 'done' | 'removed';
+// Removed contacts (do not call, bad number) are admin-only; team members' "All" leaves them out.
 const FILTERS: Record<Filter, string[] | null> = { all: null, queue: ['new', 'callback'], done: ['done'], removed: ['do_not_call', 'bad_number'] };
 
 export default function CampaignPage() {
@@ -48,6 +49,7 @@ export default function CampaignPage() {
     let q = supabase.from('dialer_contacts').select('*', { count: 'exact' }).eq('campaign_id', id);
     const statuses = FILTERS[filter];
     if (statuses) q = q.in('status', statuses);
+    else if (!isAdmin) q = q.not('status', 'in', `(${FILTERS.removed!.join(',')})`);
     if (debounced) {
       const term = debounced.replace(/[%,()]/g, ' ');
       const digits = term.replace(/\D/g, '');
@@ -57,7 +59,7 @@ export default function CampaignPage() {
     }
     const res = await q.order('created_at').range(page * PER_PAGE, page * PER_PAGE + PER_PAGE - 1);
     return { contacts: must(res) as Contact[], total: res.count ?? 0 };
-  }, [id, filter, debounced, page]);
+  }, [id, filter, debounced, page, isAdmin]);
 
   const campaign = head.data?.campaign;
   const stats = head.data?.stats;
@@ -77,9 +79,11 @@ export default function CampaignPage() {
         subtitle={campaign ? `${campaign.client_name}${campaign.status !== 'active' ? ` · ${CAMPAIGN_STATUS[campaign.status].label}` : ''}` : undefined}
         actions={
           <>
-            <Button variant="outline" onClick={() => setImporting(true)}>
-              <Upload size={16} /> Import CSV
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" onClick={() => setImporting(true)}>
+                <Upload size={16} /> Import CSV
+              </Button>
+            )}
             <Link
               to={`/campaigns/${id}/dial`}
               className={`inline-flex h-10 items-center gap-2 rounded-full bg-brand px-5 text-[15px] font-medium text-white transition hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-btn ${campaign?.status !== 'active' ? 'pointer-events-none opacity-50' : ''}`}
@@ -112,7 +116,7 @@ export default function CampaignPage() {
               { value: 'all', label: 'All' },
               { value: 'queue', label: 'To call' },
               { value: 'done', label: 'Done' },
-              { value: 'removed', label: 'Removed' },
+              ...(isAdmin ? [{ value: 'removed' as const, label: 'Removed' }] : []),
             ]}
           />
           <SearchInput value={query} onChange={setQuery} placeholder="Search name, company, phone" />
@@ -139,7 +143,7 @@ export default function CampaignPage() {
                 </thead>
                 <tbody className="divide-y divide-line">
                   {!list.data?.contacts.length ? (
-                    <EmptyRow colSpan={7}>{debounced || filter !== 'all' ? 'No contacts match.' : 'No contacts yet. Import a CSV to get started.'}</EmptyRow>
+                    <EmptyRow colSpan={7}>{debounced || filter !== 'all' ? 'No contacts match.' : isAdmin ? 'No contacts yet. Import a CSV to get started.' : 'No contacts yet.'}</EmptyRow>
                   ) : (
                     list.data.contacts.map((c) => (
                       <tr key={c.id} className="transition-colors hover:bg-neutral-50">

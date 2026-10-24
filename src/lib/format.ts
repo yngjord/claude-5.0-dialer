@@ -1,14 +1,15 @@
 const TZ = 'Australia/Sydney';
 
-/** e.g. "10 Oct, 1:21 pm" (Sydney time); the year is added when it isn't this year. */
-export function formatDateTime(value: string | null | undefined): string {
+/** e.g. "10 Oct, 1:21 pm" (Sydney time), or "10 Oct, 1:21 pm AEDT" with `withZone`; the year is added when it isn't this year. */
+export function formatDateTime(value: string | null | undefined, { withZone = false } = {}): string {
   if (!value) return '—';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   const year = d.toLocaleDateString('en-AU', { timeZone: TZ, year: 'numeric' });
   const sameYear = year === new Date().toLocaleDateString('en-AU', { timeZone: TZ, year: 'numeric' });
   const date = d.toLocaleDateString('en-AU', { timeZone: TZ, day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) });
-  return `${date}, ${d.toLocaleTimeString('en-AU', { timeZone: TZ, hour: 'numeric', minute: '2-digit' })}`;
+  const time = d.toLocaleTimeString('en-AU', { timeZone: TZ, hour: 'numeric', minute: '2-digit', ...(withZone ? { timeZoneName: 'short' } : {}) });
+  return `${date}, ${time}`;
 }
 
 export function formatTime(value: string | null | undefined): string {

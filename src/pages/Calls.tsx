@@ -144,7 +144,7 @@ export default function Calls() {
                           </td>
                           <td className="td whitespace-nowrap">{c.agent_name ?? <span className="text-ink-faint">—</span>}</td>
                           <td className="td whitespace-nowrap tabular-nums text-ink-muted">{c.from_number ? formatPhone(c.from_number) : '—'}</td>
-                          <td className="td whitespace-nowrap tabular-nums text-ink-soft">{formatDateTime(c.started_at)}</td>
+                          <td className="td whitespace-nowrap tabular-nums text-ink-soft">{formatDateTime(c.started_at, { withZone: true })}</td>
                           <td className="td">
                             {c.pickup_status ? (
                               CONNECTED.includes(c.pickup_status) ? (
