@@ -562,6 +562,33 @@ language sql stable security invoker set search_path = public as $$
   order by 1 desc
 $$;
 
+-- Totals per rep and client for a date range (optionally one client or campaign), for the admin Performance page.
+-- Runs with the caller's access (RLS on calls applies: admins see every call).
+create or replace function public.dialer_performance_stats(p_from timestamptz, p_to timestamptz, p_client_name text default null, p_campaign_id uuid default null)
+returns table (user_id uuid, agent_name text, client_name text, dials int, connects int, machine int, unanswered int,
+               appointments int, follow_ups int, talk_seconds int, last_call_at timestamptz)
+language sql stable security invoker set search_path = public as $$
+  select x.user_id,
+         max(x.agent_name) as agent_name,
+         x.client_name,
+         count(*)::int as dials,
+         count(*) filter (where x.pickup_status = 'Human Pickup')::int as connects,
+         count(*) filter (where x.pickup_status = 'Machine Pickup')::int as machine,
+         count(*) filter (where x.pickup_status in ('Unanswered', 'Busy', 'Failed'))::int as unanswered,
+         count(*) filter (where x.disposition = 'Interested - Appointment Set')::int as appointments,
+         count(*) filter (where x.disposition = 'Interested - Needs Follow-Up')::int as follow_ups,
+         coalesce(sum(x.duration_s) filter (where x.pickup_status = 'Human Pickup'), 0)::int as talk_seconds,
+         max(x.started_at) as last_call_at
+  from dialer_calls x
+  where x.direction = 'outbound' and x.source = 'dialer'
+    and x.started_at >= p_from and x.started_at < p_to
+    and (p_client_name is null or x.client_name = p_client_name)
+    and (p_campaign_id is null or x.campaign_id = p_campaign_id)
+  group by x.user_id, x.client_name
+$$;
+revoke execute on function public.dialer_performance_stats(timestamptz, timestamptz, text, uuid) from public, anon;
+grant execute on function public.dialer_performance_stats(timestamptz, timestamptz, text, uuid) to authenticated, service_role;
+
 -- ── Realtime (live call status, new texts and voicemails) ───────────────────────────────────────────────────
 do $$
 begin

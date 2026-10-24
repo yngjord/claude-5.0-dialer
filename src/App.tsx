@@ -6,6 +6,7 @@ import Splash from './components/Splash';
 import { Button } from './components/ui/Button';
 import AdminCampaigns from './pages/admin/AdminCampaigns';
 import Numbers from './pages/admin/Numbers';
+import Performance from './pages/admin/Performance';
 import CallDetailPage from './pages/CallDetailPage';
 import Calls from './pages/Calls';
 import CampaignPage from './pages/Campaign';
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="/calls/:id" element={<CallDetailPage />} />
           {isAdmin && <Route path="/admin/campaigns" element={<AdminCampaigns />} />}
           {isAdmin && <Route path="/admin/numbers" element={<Numbers />} />}
+          {isAdmin && <Route path="/admin/performance" element={<Performance />} />}
         </Route>
         <Route path="*" element={<Navigate to="/campaigns" replace />} />
       </Routes>

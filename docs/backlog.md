@@ -1,6 +1,6 @@
 # Backlog
 
-## Admin performance view (requested 24 Oct 2026)
+## ~~Admin performance view (requested 24 Oct 2026)~~ Done: Admin → Performance (/admin/performance)
 A separate tab in the admin section for team and client performance (separate from the reps' Call logs):
 - Break down by team member and by client, optionally by campaign.
 - Time windows: This month, Last month, All time, plus the existing presets and custom dates.

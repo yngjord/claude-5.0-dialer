@@ -387,5 +387,8 @@ describe('stats', () => {
     const kintell = await as(TEAM1, () => rows<{ dials: number }>(`select * from dialer_call_stats(now() - interval '1 day', now() + interval '1 day', null, 'Kintell')`));
     expect(kintell[0]).toMatchObject({ dials: 1 });
     expect(await as(TEAM1, () => rows(`select * from dialer_call_stats(now() - interval '1 day', now() + interval '1 day', null, 'Morfless')`))).toEqual([]);
+    const perf = await as(ADMIN, () => rows<{ user_id: string; client_name: string; dials: number; connects: number }>(`select * from dialer_performance_stats(now() - interval '1 day', now() + interval '1 day')`));
+    expect(perf).toContainEqual(expect.objectContaining({ user_id: TEAM1, client_name: 'Kintell', dials: 1, connects: 1 }));
+    expect(await as(TEAM2, () => rows(`select * from dialer_performance_stats(now() - interval '1 day', now() + interval '1 day')`))).toEqual([]);
   });
 });
