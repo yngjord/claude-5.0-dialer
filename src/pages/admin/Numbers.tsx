@@ -1,7 +1,8 @@
-import { Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
-import { useState } from 'react';
+import { Activity, ChevronDown, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Fragment, useState } from 'react';
 import { formatPhone } from '../../../shared/phone';
 import type { AirtableClient, PhoneNumber } from '../../../shared/types';
+import { NumberHealth } from '../../components/NumberHealth';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
@@ -20,6 +21,7 @@ export default function Numbers() {
   const clients = useLoad(() => api<AirtableClient[]>('clients'), []);
   const [syncing, setSyncing] = useState(false);
   const [buying, setBuying] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,14 +113,16 @@ export default function Numbers() {
                   <th className="th">Client</th>
                   <th className="th">Default</th>
                   <th className="th">Voicemail greeting</th>
+                  <th className="th text-right">Health</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {!list.data?.length ? (
-                  <EmptyRow colSpan={5}>No numbers yet. Use Buy number, or Sync from Twilio if you bought them in Twilio directly.</EmptyRow>
+                  <EmptyRow colSpan={6}>No numbers yet. Use Buy number, or Sync from Twilio if you bought them in Twilio directly.</EmptyRow>
                 ) : (
                   list.data.map((n) => (
-                    <tr key={n.id}>
+                    <Fragment key={n.id}>
+                    <tr>
                       <td className="td font-medium tabular-nums">{formatPhone(n.e164)}</td>
                       <td className="td">
                         <input
@@ -174,7 +178,24 @@ export default function Numbers() {
                           </label>
                         </div>
                       </td>
+                      <td className="td text-right">
+                        <button
+                          onClick={() => setOpen(open === n.id ? null : n.id)}
+                          aria-expanded={open === n.id}
+                          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-brand hover:bg-brand-tint"
+                        >
+                          <Activity size={15} /> Pickup rate <ChevronDown size={15} className={`transition-transform ${open === n.id ? 'rotate-180' : ''}`} />
+                        </button>
+                      </td>
                     </tr>
+                    {open === n.id && (
+                      <tr>
+                        <td colSpan={6} className="bg-neutral-50/60 px-4 py-5 sm:px-6">
+                          <NumberHealth e164={n.e164} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))
                 )}
               </tbody>

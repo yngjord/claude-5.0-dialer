@@ -469,6 +469,23 @@ describe('campaign completion', () => {
   });
 });
 
+describe('number health', () => {
+  it('counts dials and human pickups per week for one number, leaving out failed calls', async () => {
+    await pg.exec(`
+      insert into dialer_calls (from_number, twilio_status, answered_by, user_id) values
+        ('+61400000077', 'completed', 'human', '${TEAM1}'),
+        ('+61400000077', 'completed', 'machine_start', '${TEAM1}'),
+        ('+61400000077', 'no-answer', null, '${TEAM1}'),
+        ('+61400000077', 'failed', null, '${TEAM1}'),
+        ('+61400000066', 'completed', 'human', '${TEAM1}');
+    `);
+    const weeks = await as(ADMIN, () => rows<{ dials: number; answered: number; human: number }>(`select dials, answered, human from dialer_number_health('+61400000077', 'week', 4)`));
+    expect(weeks).toEqual([{ dials: 3, answered: 2, human: 1 }]);
+    expect(await as(TEAM2, () => rows(`select * from dialer_number_health('+61400000077')`))).toEqual([]);
+    await pg.exec(`delete from dialer_calls where from_number in ('+61400000077', '+61400000066')`);
+  });
+});
+
 describe('agent names', () => {
   it('follow the rep when their profile name changes', async () => {
     await pg.exec(`insert into dialer_calls (user_id, agent_name, twilio_status) values ('${TEAM1}', 't1@x', 'completed')`);

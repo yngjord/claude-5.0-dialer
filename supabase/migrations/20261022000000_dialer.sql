@@ -785,6 +785,26 @@ $$;
 revoke execute on function public.dialer_performance_stats(timestamptz, timestamptz, text, uuid) from public, anon;
 grant execute on function public.dialer_performance_stats(timestamptz, timestamptz, text, uuid) to authenticated, service_role;
 
+-- Number health: dials from one of our numbers per day or week (Sydney time), and how many were answered by a
+-- person, for spotting a number that's being flagged as spam (its human pickup rate drops). Failed calls never
+-- reached the phone network, so they're left out. Runs with the caller's access (admins see every call).
+create or replace function public.dialer_number_health(p_e164 text, p_bucket text default 'week', p_periods int default 12)
+returns table (bucket date, dials int, answered int, human int)
+language sql stable security invoker set search_path = public as $$
+  select date_trunc(p_bucket, x.started_at at time zone 'Australia/Sydney')::date as bucket,
+         count(*)::int as dials,
+         count(*) filter (where x.pickup_status in ('Human Pickup', 'Machine Pickup', 'Unclassified Pickup'))::int as answered,
+         count(*) filter (where x.pickup_status = 'Human Pickup')::int as human
+  from dialer_calls x
+  where x.direction = 'outbound' and x.source = 'dialer' and x.from_number = p_e164
+    and x.pickup_status is distinct from 'Failed'
+    and x.started_at >= (date_trunc(p_bucket, now() at time zone 'Australia/Sydney') - (p_periods - 1) * ('1 ' || p_bucket)::interval) at time zone 'Australia/Sydney'
+  group by 1
+  order by 1
+$$;
+revoke execute on function public.dialer_number_health(text, text, int) from public, anon;
+grant execute on function public.dialer_number_health(text, text, int) to authenticated, service_role;
+
 -- ── Realtime (live call status, new texts and voicemails) ───────────────────────────────────────────────────
 do $$
 begin
