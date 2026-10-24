@@ -93,7 +93,14 @@ export default function Calls() {
               ))}
             </select>
           </div>
-          <SearchInput value={query} onChange={setQuery} placeholder="Search name, company, phone" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <SearchInput value={query} onChange={setQuery} placeholder="Search name, company, phone" />
+            {/* How many calls match the filters (all pages). Fades while a new filter loads. */}
+            <p className={`text-sm text-ink-muted transition-opacity ${list.loading ? 'opacity-50' : ''}`} aria-live="polite">
+              <b className="font-display text-base font-medium tabular-nums text-ink">{(list.data?.total ?? 0).toLocaleString()}</b> call
+              {list.data?.total === 1 ? '' : 's'}
+            </p>
+          </div>
         </div>
 
         {list.error ? (
