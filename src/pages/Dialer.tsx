@@ -1,4 +1,4 @@
-import { LogOut, Pause, Phone, PhoneOutgoing, SkipForward, Square } from 'lucide-react';
+import { CheckCircle2, LogOut, Pause, Phone, PhoneOutgoing, SkipForward, Square } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { APPOINTMENT_SET, CONNECTED_PICKUP_STATUS, NEEDS_FOLLOW_UP } from '../../shared/constants';
@@ -73,6 +73,8 @@ export default function Dialer() {
   const myCall = active && active.mode === 'power' && active.campaign.id === id ? active : null;
 
   // `dialAfter` overrides the auto-dial setting for this contact (0 = dial straight away).
+  const reloadCampaign = campaignQuery.reload;
+  const reloadProgress = progress.reload;
   const claimNext = useCallback(async (dialAfter?: number) => {
     setStage('claiming');
     setError(null);
@@ -81,6 +83,9 @@ export default function Dialer() {
       if (!rows.length) {
         setContact(null);
         setStage('empty');
+        // The last wrap-up may have just completed the campaign.
+        reloadCampaign({ quiet: true });
+        reloadProgress({ quiet: true });
         return;
       }
       setContact(rows[0]);
@@ -88,10 +93,19 @@ export default function Dialer() {
       const wait = dialAfter ?? delay;
       setCountdown(wait >= 0 ? wait : null);
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not get the next contact.';
+      // Completed or paused since this page loaded: show the end-of-session screen rather than an error.
+      if (/^This campaign is /.test(message)) {
+        setContact(null);
+        setStage('empty');
+        reloadCampaign({ quiet: true });
+        reloadProgress({ quiet: true });
+        return;
+      }
       setStage('idle');
-      setError(err instanceof Error ? err.message : 'Could not get the next contact.');
+      setError(message);
     }
-  }, [id, delay]);
+  }, [id, delay, reloadCampaign, reloadProgress]);
 
   const callNow = useCallback(async () => {
     if (!contact || !campaign) return;
@@ -248,12 +262,35 @@ export default function Dialer() {
                 <Spinner className="text-brand" size={24} />
                 <p className="text-ink-muted">Getting the next contact…</p>
               </>
-            ) : stage === 'empty' ? (
+            ) : stage === 'empty' || (campaign && campaign.status !== 'active') ? (
               <>
-                <p className="font-display text-xl">No one left to call</p>
-                <p className="max-w-md text-ink-muted">Everyone in this campaign has been called. An admin can re-run it for contacts by disposition (e.g. No Answer), or import more contacts.</p>
-                <Button variant="outline" onClick={() => claimNext()}>
-                  Check again
+                {campaign?.status === 'completed' ? (
+                  <>
+                    <span className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                      <CheckCircle2 size={30} />
+                    </span>
+                    <p className="font-display text-xl">Campaign complete</p>
+                    <p className="max-w-md text-ink-muted">
+                      Every contact in this campaign has been called and wrapped up.
+                      {session.dials > 0 && ` You made ${session.dials} dial${session.dials === 1 ? '' : 's'} this session.`}
+                    </p>
+                  </>
+                ) : campaign && campaign.status !== 'active' ? (
+                  <>
+                    <p className="font-display text-xl">This campaign is {CAMPAIGN_STATUS[campaign.status].label.toLowerCase()}</p>
+                    <p className="max-w-md text-ink-muted">It can't be dialed right now. Check back once an admin makes it active again.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-display text-xl">No one left to call right now</p>
+                    <p className="max-w-md text-ink-muted">Your teammates are on the last few contacts. Once they wrap up, the campaign is complete.</p>
+                    <Button variant="outline" onClick={() => claimNext()}>
+                      Check again
+                    </Button>
+                  </>
+                )}
+                <Button size="md" onClick={() => navigate('/campaigns')}>
+                  <LogOut size={18} /> End dialling session
                 </Button>
               </>
             ) : (
@@ -263,10 +300,9 @@ export default function Dialer() {
                 <p className="max-w-md text-ink-muted">
                   Calls go out from your browser. Use a headset, and allow microphone access when your browser asks. After each call, fill in the wrap-up and move on to the next contact.
                 </p>
-                <Button size="md" onClick={begin} disabled={deviceState === 'starting' || campaign?.status !== 'active'}>
+                <Button size="md" onClick={begin} disabled={deviceState === 'starting'}>
                   {deviceState === 'starting' ? <Spinner /> : <Phone size={18} />} {stage === 'paused' ? 'Resume dialing' : 'Start dialing'}
                 </Button>
-                {campaign && campaign.status !== 'active' && <p className="text-sm text-amber-700">This campaign is {CAMPAIGN_STATUS[campaign.status].label.toLowerCase()}, so it can't be dialed.</p>}
               </>
             )}
           </div>
