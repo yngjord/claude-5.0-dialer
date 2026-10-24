@@ -1,5 +1,5 @@
 import type { Config } from '@netlify/functions';
-import { isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
+import { CALLBACK, isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
 import { buildLeadFields, todayInSydney, validateLead } from '../../shared/leads';
 import { contactOutcome } from '../../shared/outcomes';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
@@ -15,8 +15,9 @@ const REFUSALS: Record<string, [number, string]> = {
 };
 
 /**
- * POST /api/wrap-up: the post-call form. One database round trip (dialer_wrap_up) saves pickup status (as
- * corrected by the rep), disposition and notes, and moves the contact on. For the two "Interested" dispositions it
+ * POST /api/wrap-up: the post-call form. One database round trip (dialer_save_wrap_up) saves pickup status (as
+ * corrected by the rep), disposition and notes, and moves the contact on (or, for Callback, holds it for this rep
+ * until the callback time). For the two "Interested" dispositions it
  * then creates the lead in the CRM (Airtable), so only those saves wait on Airtable.
  *
  * Safe to submit again: the contact's attempt count only goes up once, and a lead is only created once. If
@@ -27,6 +28,15 @@ export default handler(async (req) => {
   if (!isPickupStatus(body.pickupStatus)) throw new HttpError(400, 'Choose a pickup status.');
   if (!isDisposition(body.disposition)) throw new HttpError(400, 'Choose a disposition.');
 
+  // Callback: when to call back (any time from now on).
+  let callbackAt: string | null = null;
+  if (body.disposition === CALLBACK) {
+    const at = body.callbackAt ? new Date(body.callbackAt) : null;
+    if (!at || Number.isNaN(at.getTime())) throw new HttpError(400, 'Choose when to call back.');
+    if (at.getTime() < Date.now() - 5 * 60_000) throw new HttpError(400, 'The callback time is in the past.');
+    callbackAt = at.toISOString();
+  }
+
   const needsLead = LEAD_DISPOSITIONS.includes(body.disposition);
   if (needsLead) {
     if (!body.lead) throw new HttpError(400, 'Fill in the lead details.');
@@ -35,7 +45,7 @@ export default handler(async (req) => {
   }
 
   const saved = must(
-    await db().rpc('dialer_wrap_up', {
+    await db().rpc('dialer_save_wrap_up', {
       p_call_id: body.callId,
       p_user_id: user.id,
       p_pickup: body.pickupStatus,
@@ -44,6 +54,7 @@ export default handler(async (req) => {
       p_contact_status: contactOutcome(body.disposition),
       p_lead_name: needsLead ? (body.lead?.fullName ?? null) : null,
       p_lead_email: needsLead ? (body.lead?.email ?? null) : null,
+      p_callback_at: callbackAt,
     }),
   ) as {
     error?: string;

@@ -72,6 +72,8 @@ export interface Contact {
   website: string | null;
   custom: Record<string, string>;
   status: ContactStatus;
+  /** Callback: the rep who booked it (only they get the contact back). The time is next_attempt_at. */
+  callback_user_id: string | null;
   attempts: number;
   last_called_at: string | null;
   next_attempt_at: string | null;
@@ -167,6 +169,8 @@ export interface WrapUpRequest {
   pickupStatus: PickupStatus;
   disposition: Disposition;
   notes: string;
+  /** Callback only: when to call back (ISO timestamp). */
+  callbackAt?: string | null;
   lead?: LeadInput;
 }
 

@@ -141,6 +141,10 @@ create index if not exists dialer_contacts_phone on public.dialer_contacts (phon
 alter table public.dialer_contacts add column if not exists airtable_client_id text, add column if not exists client_name text;
 create index if not exists dialer_contacts_client_phone on public.dialer_contacts (airtable_client_id, phone_e164);
 
+-- Callback: the rep who booked it. Only they get the contact back, from its callback time (next_attempt_at).
+alter table public.dialer_contacts add column if not exists callback_user_id uuid references auth.users(id) on delete set null;
+create index if not exists dialer_contacts_callbacks on public.dialer_contacts (callback_user_id, next_attempt_at) where status = 'callback';
+
 -- ── Calls: the one call log (dialer calls, inbound voicemails, JustCall history) ───────────────────────────
 create table if not exists public.dialer_calls (
   id uuid primary key default gen_random_uuid(),
@@ -176,8 +180,8 @@ create table if not exists public.dialer_calls (
   pickup_status text check (pickup_status in ('Human Pickup', 'Machine Pickup', 'Unanswered', 'Unclassified Pickup', 'Busy', 'Failed')),
   -- 'twilio' = set from Twilio's result; 'agent' = corrected by the rep at wrap-up.
   pickup_source text not null default 'twilio' check (pickup_source in ('twilio', 'agent', 'import')),
-  disposition text check (disposition in ('Interested - Appointment Set', 'Interested - Needs Follow-Up', 'Not Interested', 'Left Voicemail',
-                                          'No Answer', 'Unqualified Lead', 'Wrong Number', 'Do Not Call', 'Disconnected Number')),
+  -- Checked by dialer_calls_disposition_check (below the table) so the list can grow.
+  disposition text,
   notes text,
   wrapped_up_at timestamptz,
   -- Recording (file in the 'dialer-recordings' bucket) and transcript
@@ -199,6 +203,10 @@ create table if not exists public.dialer_calls (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table public.dialer_calls drop constraint if exists dialer_calls_disposition_check;
+alter table public.dialer_calls add constraint dialer_calls_disposition_check check (disposition in (
+  'Interested - Appointment Set', 'Interested - Needs Follow-Up', 'Callback', 'Not Interested', 'Left Voicemail', 'No Answer',
+  'Unqualified Lead', 'Wrong Number', 'Do Not Call', 'Disconnected Number'));
 create index if not exists dialer_calls_client on public.dialer_calls (client_name, started_at desc);
 create index if not exists dialer_calls_campaign on public.dialer_calls (campaign_id, started_at desc);
 create index if not exists dialer_calls_user on public.dialer_calls (user_id, started_at desc);
@@ -460,9 +468,12 @@ begin
     and status in ('new', 'callback')
     and (next_attempt_at is null or next_attempt_at <= now())
     and (locked_by is null or locked_at < now() - interval '30 minutes')
+    -- A callback only goes back to the rep who booked it.
+    and (status <> 'callback' or callback_user_id = auth.uid())
     -- Do Not Call follows the number into lists imported later.
     and not exists (select 1 from dialer_contacts d where d.phone_e164 = dialer_contacts.phone_e164 and d.status = 'do_not_call')
-  order by coalesce(next_attempt_at, created_at), created_at
+  -- Due callbacks first, then everyone else oldest first.
+  order by (status = 'callback') desc, coalesce(next_attempt_at, created_at), created_at
   limit 1
   for update skip locked;
 
@@ -523,11 +534,14 @@ begin
   return jsonb_build_object('from', caller, 'to', c.phone_e164);
 end $$;
 
--- Called by /api/wrap-up: saves the rep's pickup status, disposition and notes, and moves the contact on (status
+-- Called by /api/wrap-up (dialer_save_wrap_up): saves the rep's pickup status, disposition and notes, and moves the contact on (status
 -- worked out by the app). Do Not Call blocks the number in every campaign. Safe to repeat: attempts only go up on
 -- the first save. Returns what's needed to create a CRM lead, or {error}.
-create or replace function public.dialer_wrap_up(p_call_id uuid, p_user_id uuid, p_pickup text, p_disposition text, p_notes text,
-                                                 p_contact_status text, p_lead_name text default null, p_lead_email text default null)
+-- Replaces dialer_wrap_up (which had no callback time).
+drop function if exists public.dialer_wrap_up(uuid, uuid, text, text, text, text, text, text);
+create or replace function public.dialer_save_wrap_up(p_call_id uuid, p_user_id uuid, p_pickup text, p_disposition text, p_notes text,
+                                                 p_contact_status text, p_lead_name text default null, p_lead_email text default null,
+                                                 p_callback_at timestamptz default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   role_name text;
@@ -565,7 +579,9 @@ begin
       last_called_at = x.started_at,
       last_disposition = p_disposition,
       status = p_contact_status,
-      next_attempt_at = null,
+      -- Callback: due at the booked time, for this rep only. Any other outcome clears it.
+      next_attempt_at = case when p_contact_status = 'callback' then p_callback_at end,
+      callback_user_id = case when p_contact_status = 'callback' then p_user_id end,
       locked_by = null,
       locked_at = null,
       -- Keep corrections the rep made in the lead form.
@@ -589,9 +605,9 @@ begin
   );
 end $$;
 
-revoke execute on function public.dialer_start_call(uuid, uuid, uuid, text), public.dialer_wrap_up(uuid, uuid, text, text, text, text, text, text)
+revoke execute on function public.dialer_start_call(uuid, uuid, uuid, text), public.dialer_save_wrap_up(uuid, uuid, text, text, text, text, text, text, timestamptz)
   from public, anon, authenticated;
-grant execute on function public.dialer_start_call(uuid, uuid, uuid, text), public.dialer_wrap_up(uuid, uuid, text, text, text, text, text, text)
+grant execute on function public.dialer_start_call(uuid, uuid, uuid, text), public.dialer_save_wrap_up(uuid, uuid, text, text, text, text, text, text, timestamptz)
   to service_role;
 
 -- Gives a contact back to the queue without a call (Skip / Stop). Skip moves it to the back of the queue.
@@ -728,8 +744,9 @@ from dialer_campaigns c;
 
 -- Retry rules were removed: every call takes a contact out of the queue, and admins re-run by disposition.
 alter table public.dialer_campaigns drop column if exists max_attempts, drop column if exists retry_after_minutes;
--- Contacts the old retry rules had scheduled for another try count as called; re-run brings them back.
-update public.dialer_contacts set status = 'done', next_attempt_at = null where status = 'callback';
+-- Contacts the old retry rules had scheduled for another try count as called; re-run brings them back. (Real
+-- callbacks, booked with the Callback disposition, have a callback_user_id and are left alone.)
+update public.dialer_contacts set status = 'done', next_attempt_at = null where status = 'callback' and callback_user_id is null;
 
 -- Daily totals of the caller's own calls (optionally for one campaign or one client), for the Campaigns page
 -- metrics. Admins see only their own here too; the team-wide view is dialer_performance_stats.

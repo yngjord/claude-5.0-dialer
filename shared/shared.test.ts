@@ -5,6 +5,7 @@ import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
 import { shouldTranscribe } from './pickup';
+import { zonedTimeToUtc } from './time';
 
 describe('normalizePhone', () => {
   it.each([
@@ -175,5 +176,20 @@ describe('numberSearchPattern', () => {
     expect(matchesNumberSearch('+61488123456', '488', 'start')).toBe(true);
     expect(matchesNumberSearch('+61412488000', '488', 'start')).toBe(false);
     expect(matchesNumberSearch('+61412488000', null, 'start')).toBe(true);
+  });
+});
+
+describe('zonedTimeToUtc', () => {
+  it('turns a local date and time into the right instant, daylight saving included', () => {
+    expect(zonedTimeToUtc('2026-10-30', '14:30', 'Australia/Sydney').toISOString()).toBe('2026-10-30T03:30:00.000Z'); // AEDT +11
+    expect(zonedTimeToUtc('2026-07-01', '09:00', 'Australia/Sydney').toISOString()).toBe('2026-06-30T23:00:00.000Z'); // AEST +10
+    expect(zonedTimeToUtc('2026-10-30', '14:30', 'Australia/Perth').toISOString()).toBe('2026-10-30T06:30:00.000Z'); // AWST +8
+    expect(zonedTimeToUtc('2026-10-30', '14:30', 'Pacific/Auckland').toISOString()).toBe('2026-10-30T01:30:00.000Z'); // NZDT +13
+  });
+});
+
+describe('contactOutcome: callback', () => {
+  it('keeps the contact for a callback', () => {
+    expect(contactOutcome('Callback')).toBe('callback');
   });
 });

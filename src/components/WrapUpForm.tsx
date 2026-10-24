@@ -1,7 +1,8 @@
-import { AlertTriangle, CheckCircle2, Phone } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CheckCircle2, Phone } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { APPOINTMENT_SET, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, type Disposition, type PickupStatus } from '../../shared/constants';
+import { APPOINTMENT_SET, CALLBACK, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, type Disposition, type PickupStatus } from '../../shared/constants';
 import { validateLead } from '../../shared/leads';
+import { zonedTimeToUtc } from '../../shared/time';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { api } from '../lib/api';
 import type { ActiveCall } from '../voice/VoiceProvider';
@@ -61,6 +62,23 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
   const [error, setError] = useState<string | null>(null);
   const [leadError, setLeadError] = useState<string | null>(null);
   const [dialNext, setDialNext] = useState(false);
+  // Callback: when to call back, in the prospect's time zone.
+  const [cbDate, setCbDate] = useState('');
+  const [cbTime, setCbTime] = useState('');
+  const callbackAt = disposition === CALLBACK && cbDate && cbTime ? zonedTimeToUtc(cbDate, cbTime, tz) : null;
+  const preset = (hoursFromNow: number | 'tomorrow9') => {
+    const at = hoursFromNow === 'tomorrow9' ? null : new Date(Date.now() + hoursFromNow * 3_600_000);
+    const parts = (d: Date) => Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(d).map((x) => [x.type, x.value]));
+    if (at) {
+      const p = parts(at);
+      setCbDate(`${p.year}-${p.month}-${p.day}`);
+      setCbTime(`${p.hour}:${p.minute}`);
+    } else {
+      const p = parts(new Date(Date.now() + 86_400_000));
+      setCbDate(`${p.year}-${p.month}-${p.day}`);
+      setCbTime('09:00');
+    }
+  };
 
   // Twilio's result can land a second or two after hang-up: keep following it until the rep changes it.
   useEffect(() => {
@@ -91,16 +109,26 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
       const problems = validateLead(disposition, lead);
       if (problems.length) return setError(problems.join(' '));
     }
+    if (disposition === CALLBACK && !callbackAt) return setError('Choose when to call back.');
+    if (callbackAt && callbackAt.getTime() < Date.now()) return setError('The callback time is in the past.');
     setSubmitting(true);
     setError(null);
     try {
-      const body: WrapUpRequest = { callId: call.callId, pickupStatus: pickup, disposition, notes, ...(needsLead ? { lead } : {}) };
+      const body: WrapUpRequest = {
+        callId: call.callId,
+        pickupStatus: pickup,
+        disposition,
+        notes,
+        ...(needsLead ? { lead } : {}),
+        ...(callbackAt ? { callbackAt: callbackAt.toISOString() } : {}),
+      };
       const res = await api<WrapUpResponse>('wrap-up', { method: 'POST', body: JSON.stringify(body) });
       if (res.leadError) {
         setLeadError(res.leadError);
         setSubmitting(false);
         return;
       }
+      window.dispatchEvent(new Event('callbacks:changed'));
       onDone({ disposition, pickup, dialNext: next });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save.');
@@ -200,11 +228,56 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
         </div>
       )}
 
+      {disposition === CALLBACK && (
+        <div className="space-y-4 rounded-card border-2 border-purple-200 bg-purple-50/60 p-4 sm:p-5">
+          <p className="flex items-center gap-2 font-display text-[15px] font-medium text-purple-800">
+            <CalendarClock size={18} /> Call back on
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ['In 1 hour', 1],
+                ['In 2 hours', 2],
+                ['Tomorrow 9am', 'tomorrow9'],
+              ] as const
+            ).map(([label, h]) => (
+              <button key={label} type="button" onClick={() => preset(h)} className="rounded-full border border-purple-200 bg-white px-3 py-1.5 text-sm text-purple-800 hover:border-purple-400">
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+            <input aria-label="Callback date" type="date" className="field" value={cbDate} onChange={(e) => setCbDate(e.target.value)} />
+            <input aria-label="Callback time" type="time" className="field" value={cbTime} onChange={(e) => setCbTime(e.target.value)} />
+            <select aria-label="Time zone" className="field !w-auto" value={tz} onChange={(e) => setTz(e.target.value)}>
+              {ZONES.map((z) => (
+                <option key={z.tz} value={z.tz}>
+                  {z.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="text-xs text-purple-900/70">Only you will get this contact back, first in your queue once it's due. You'll see it under Callbacks.</p>
+        </div>
+      )}
+
       <div>
         <label htmlFor="notes" className="mb-2 block text-sm font-medium text-ink-soft">
-          Notes {needsLead && <span className="font-normal text-ink-faint">(saved to the lead's notes)</span>}
+          Notes{' '}
+          {needsLead ? (
+            <span className="font-normal text-ink-faint">(saved to the lead's notes)</span>
+          ) : disposition === CALLBACK ? (
+            <span className="font-normal text-ink-faint">(shown to you when you call back)</span>
+          ) : null}
         </label>
-        <textarea id="notes" rows={3} className="field resize-y" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What happened on the call?" />
+        <textarea
+          id="notes"
+          rows={3}
+          className="field resize-y"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder={disposition === CALLBACK ? 'What to remember: who you spoke to, what they asked for, why to call back' : 'What happened on the call?'}
+        />
       </div>
 
       {error && (

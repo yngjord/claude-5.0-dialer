@@ -7,6 +7,7 @@ export type PickupStatus = (typeof PICKUP_STATUSES)[number];
 export const DISPOSITIONS = [
   'Interested - Appointment Set',
   'Interested - Needs Follow-Up',
+  'Callback',
   'Not Interested',
   'Left Voicemail',
   'No Answer',
@@ -19,6 +20,8 @@ export type Disposition = (typeof DISPOSITIONS)[number];
 
 export const APPOINTMENT_SET: Disposition = 'Interested - Appointment Set';
 export const NEEDS_FOLLOW_UP: Disposition = 'Interested - Needs Follow-Up';
+/** Not a lead yet: the rep books a time to call back, and the contact waits for them (see dialer_claim_next). */
+export const CALLBACK: Disposition = 'Callback';
 
 /** Dispositions that create a record in Airtable Leads. */
 export const LEAD_DISPOSITIONS: readonly Disposition[] = [APPOINTMENT_SET, NEEDS_FOLLOW_UP];

@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { APPOINTMENT_SET, CONNECTED_PICKUP_STATUS, NEEDS_FOLLOW_UP } from '../../shared/constants';
 import { formatPhone } from '../../shared/phone';
 import type { Campaign, CampaignStats, Contact } from '../../shared/types';
+import { CallbackContext } from '../components/CallbackContext';
 import { CallControls } from '../components/CallControls';
 import { ContactCard } from '../components/ContactCard';
 import LoadingBar from '../components/LoadingBar';
@@ -308,7 +309,9 @@ export default function Dialer() {
                 ) : (
                   <>
                     <p className="font-display text-xl">No one left to call right now</p>
-                    <p className="max-w-md text-ink-muted">Your teammates are on the last few contacts. Once they wrap up, the campaign is complete.</p>
+                    <p className="max-w-md text-ink-muted">
+                      The rest are booked callbacks that aren't due yet, or are with a teammate. Due callbacks come up here first; you'll see them under Callbacks.
+                    </p>
                     <Button variant="outline" onClick={() => claimNext()}>
                       Check again
                     </Button>
@@ -335,6 +338,7 @@ export default function Dialer() {
           <div className="animate-appear space-y-6">
             <section className="card p-5 sm:p-8">
               <ContactCard key={shown.id} contact={shown} centered history={false} sms={false}>
+                {shown.status === 'callback' && <CallbackContext contact={shown} />}
                 {myCall ? (
                   <div className="border-t border-line pt-6">
                     <CallControls call={myCall} />

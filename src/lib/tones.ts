@@ -5,6 +5,7 @@ import type { Tone } from '../components/ui/Badge';
 export const DISPOSITION_TONES: Record<string, Tone> = {
   'Interested - Appointment Set': 'greenSolid',
   'Interested - Needs Follow-Up': 'green',
+  Callback: 'purple',
   'Not Interested': 'orange',
   'Left Voicemail': 'sky',
   'No Answer': 'grey',

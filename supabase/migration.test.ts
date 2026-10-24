@@ -193,11 +193,11 @@ describe('server call steps', () => {
   const start = (callId: string, contact: string, user: string) =>
     asServer(async () => (await rows<{ r: Record<string, string> }>('select dialer_start_call($1, $2, $3, $4) as r', [callId, contact, user, `CA-${callId}`]))[0].r);
   const wrapUp = (callId: string, user: string, disposition: string, status: string, pickup = 'Human Pickup') =>
-    asServer(async () => (await rows<{ r: Record<string, string> }>('select dialer_wrap_up($1, $2, $3, $4, $5, $6) as r', [callId, user, pickup, disposition, ' notes ', status]))[0].r);
+    asServer(async () => (await rows<{ r: Record<string, string> }>('select dialer_save_wrap_up($1, $2, $3, $4, $5, $6) as r', [callId, user, pickup, disposition, ' notes ', status]))[0].r);
 
   it('only the server can call them', async () => {
     await expect(as(TEAM1, () => pg.query('select dialer_start_call($1, $2, $3, $4)', [CALL, CALL, TEAM1, 'CA1']))).rejects.toThrow(/permission denied/);
-    await expect(as(TEAM1, () => pg.query('select dialer_wrap_up($1, $2, $3, $4, $5, $6)', [CALL, TEAM1, 'x', 'x', 'x', 'done']))).rejects.toThrow(/permission denied/);
+    await expect(as(TEAM1, () => pg.query('select dialer_save_wrap_up($1, $2, $3, $4, $5, $6)', [CALL, TEAM1, 'x', 'x', 'x', 'done']))).rejects.toThrow(/permission denied/);
   });
 
   it('starts a call: checks the rep, picks the caller number and logs the call', async () => {
@@ -230,6 +230,29 @@ describe('server call steps', () => {
     await pg.exec(`insert into dialer_contacts (campaign_id, full_name, phone_e164) values ('${OTHER_CAMPAIGN}', 'A elsewhere', '+61411111111')`);
     await wrapUp(CALL, TEAM1, 'Do Not Call', 'do_not_call');
     expect(await rows(`select status from dialer_contacts where phone_e164 = '+61411111111'`)).toEqual([{ status: 'do_not_call' }, { status: 'do_not_call' }]);
+  });
+
+  it('a Callback keeps the contact for the rep who booked it, first in their queue once it is due', async () => {
+    const b = await contactId('B');
+    const call = '20000000-0000-0000-0000-0000000000c1';
+    await start(call, b, TEAM1);
+    const book = (at: string) =>
+      asServer(() => pg.query(`select dialer_save_wrap_up($1, $2, 'Human Pickup', 'Callback', 'Wants a call Tuesday', 'callback', null, null, ${at})`, [call, TEAM1]));
+    await book(`now() + interval '1 day'`);
+    const [booked] = await rows<Record<string, unknown>>(`select status, callback_user_id, next_attempt_at > now() as later from dialer_contacts where id = $1`, [b]);
+    expect(booked).toEqual({ status: 'callback', callback_user_id: TEAM1, later: true });
+    const names = async (user: string) => (await as(user, () => rows<{ full_name: string }>('select full_name from dialer_claim_next($1, null)', [CAMPAIGN])))[0]?.full_name;
+    // Not due yet: nobody gets it.
+    expect(await names(TEAM1)).not.toBe('B');
+    // Due: the booking rep gets it before anyone else in the queue; a teammate never does.
+    await book(`now() - interval '1 minute'`);
+    await as(null, () => pg.exec(`update dialer_contacts set locked_by = null, locked_at = null`));
+    expect(await names(TEAM2)).not.toBe('B');
+    await as(null, () => pg.exec(`update dialer_contacts set locked_by = null, locked_at = null`));
+    expect(await names(TEAM1)).toBe('B');
+    // The callback call's outcome replaces it.
+    await asServer(() => pg.query(`select dialer_save_wrap_up($1, $2, 'Human Pickup', 'Not Interested', '', 'done')`, [call, TEAM1]));
+    expect(await rows(`select status, callback_user_id, next_attempt_at from dialer_contacts where id = $1`, [b])).toEqual([{ status: 'done', callback_user_id: null, next_attempt_at: null }]);
   });
 
   it('fetching the next contact can keep the one being wrapped up', async () => {

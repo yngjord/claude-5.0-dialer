@@ -1,4 +1,4 @@
-import { Contact as ContactIcon, LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
+import { CalendarClock, Contact as ContactIcon, LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
@@ -6,11 +6,13 @@ import { useVoice } from '../voice/VoiceProvider';
 import Brand from './Brand';
 import { ClickToCallBar } from './ClickToCall';
 import LoadingBar from './LoadingBar';
+import { useDueCallbacks } from '../lib/useDueCallbacks';
 
 // Everyone gets Campaigns (with their numbers) and Call logs; admins also get ADMIN_NAV.
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/campaigns', label: 'Campaigns', icon: LayoutList },
   { to: '/calls', label: 'Call logs', icon: PhoneCall },
+  { to: '/callbacks', label: 'Callbacks', icon: CalendarClock },
 ];
 const ADMIN_NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/admin/performance', label: 'Performance', icon: TrendingUp },
@@ -44,6 +46,7 @@ export default function AppShell() {
   const { me, error, signOut, isAdmin } = useAuth();
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const dueCallbacks = useDueCallbacks(me?.userId);
 
   useEffect(() => setOpen(false), [location.pathname]);
 
@@ -59,6 +62,7 @@ export default function AppShell() {
         </NavLink>
         <button className="relative flex h-10 w-10 items-center justify-center rounded-xl text-white hover:bg-white/10" aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(true)}>
           <Menu size={22} />
+          {dueCallbacks > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-white ring-2 ring-brand" aria-label="Callbacks due" />}
         </button>
       </header>
 
@@ -80,6 +84,11 @@ export default function AppShell() {
             <NavLink key={to} to={to} className={navClass}>
               <Icon size={20} strokeWidth={1.75} />
               {label}
+              {to === '/callbacks' && dueCallbacks > 0 && (
+                <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-semibold tabular-nums text-brand" aria-label={`${dueCallbacks} due`}>
+                  {dueCallbacks}
+                </span>
+              )}
             </NavLink>
           ))}
           {isAdmin && (
