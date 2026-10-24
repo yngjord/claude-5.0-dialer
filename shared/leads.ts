@@ -1,4 +1,4 @@
-import { APPOINTMENT_SET, NEEDS_FOLLOW_UP, type Disposition } from './constants';
+import { APPOINTMENT_SET, type Disposition } from './constants';
 
 /** The extra fields the wrap-up form shows for the two "Interested" dispositions. */
 export interface LeadInput {
@@ -6,8 +6,6 @@ export interface LeadInput {
   email: string;
   phone: string;
   notes: string;
-  /** YYYY-MM-DD. Needs Follow-Up only (optional). */
-  nextFollowUp?: string | null;
   /** YYYY-MM-DD. Appointment Set only (required). */
   bookedFor?: string | null;
   /** Free text, e.g. "2:30pm AEDT". Appointment Set only (required). */
@@ -41,7 +39,6 @@ export function validateLead(disposition: Disposition, lead: LeadInput): string[
   const errors: string[] = [];
   if (!lead.fullName.trim()) errors.push('Prospect full name is required.');
   if (lead.email.trim() && !EMAIL.test(lead.email.trim())) errors.push('Email address looks wrong.');
-  if (disposition === NEEDS_FOLLOW_UP && lead.nextFollowUp && !DATE.test(lead.nextFollowUp)) errors.push('Follow-up date is invalid.');
   if (disposition === APPOINTMENT_SET) {
     if (!lead.bookedFor || !DATE.test(lead.bookedFor)) errors.push('Booked for date is required.');
     if (!lead.timeBookedFor?.trim()) errors.push('Time booked for is required.');
@@ -77,8 +74,9 @@ export function buildLeadFields(
     fields['Time Booked for (plain text)'] = lead.timeBookedFor?.trim() ?? '';
     fields['Date Booked'] = ctx.todaySydney;
   } else {
+    // Needs Follow-Up leads are always due for follow-up from today.
     fields.Stage = 'Nurture';
-    fields['Next follow up'] = lead.nextFollowUp ?? '';
+    fields['Next follow up'] = ctx.todaySydney;
   }
 
   return Object.fromEntries(

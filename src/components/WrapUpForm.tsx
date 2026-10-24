@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, Phone } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { APPOINTMENT_SET, DISPOSITIONS, LEAD_DISPOSITIONS, NEEDS_FOLLOW_UP, PICKUP_STATUSES, type Disposition, type PickupStatus } from '../../shared/constants';
+import { APPOINTMENT_SET, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, type Disposition, type PickupStatus } from '../../shared/constants';
 import { validateLead } from '../../shared/leads';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { api } from '../lib/api';
@@ -54,7 +54,6 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
   const [fullName, setFullName] = useState(call.contact.full_name ?? '');
   const [email, setEmail] = useState(call.contact.email ?? '');
   const [phone, setPhone] = useState(call.contact.phone_e164);
-  const [nextFollowUp, setNextFollowUp] = useState('');
   const [bookedFor, setBookedFor] = useState('');
   const [time, setTime] = useState('');
   const [tz, setTz] = useState(call.contact.phone_e164.startsWith('+64') ? 'Pacific/Auckland' : 'Australia/Sydney');
@@ -76,11 +75,10 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
       email,
       phone,
       notes,
-      nextFollowUp: disposition === NEEDS_FOLLOW_UP ? nextFollowUp || null : null,
       bookedFor: disposition === APPOINTMENT_SET ? bookedFor || null : null,
       timeBookedFor: disposition === APPOINTMENT_SET ? timeBookedText(bookedFor, time, tz) : null,
     }),
-    [fullName, email, phone, notes, disposition, nextFollowUp, bookedFor, time, tz],
+    [fullName, email, phone, notes, disposition, bookedFor, time, tz],
   );
 
   const submit = async (e?: FormEvent, next = dialNext) => {
@@ -171,13 +169,12 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
       {needsLead && (
         <div className="space-y-4 rounded-card border-2 border-brand/20 bg-brand-tint/50 p-4 sm:p-5">
           <p className="flex items-center gap-2 font-display text-[15px] font-medium text-brand">
-            <CheckCircle2 size={18} /> Creates a Lead in Airtable ({disposition === APPOINTMENT_SET ? 'Booking' : 'Nurture'})
+            <CheckCircle2 size={18} /> Creates a new lead inside the CRM
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field id="lead-name" label="Prospect full name" value={fullName} onChange={setFullName} required />
             <Field id="lead-email" label="Email address" type="email" value={email} onChange={setEmail} />
             <Field id="lead-phone" label="Phone number" type="tel" value={phone} onChange={setPhone} />
-            {disposition === NEEDS_FOLLOW_UP && <Field id="lead-follow-up" label="Next follow-up" type="date" value={nextFollowUp} onChange={setNextFollowUp} />}
             {disposition === APPOINTMENT_SET && (
               <>
                 <Field id="lead-booked-for" label="Booked for" type="date" value={bookedFor} onChange={setBookedFor} required />
@@ -205,7 +202,7 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
 
       <div>
         <label htmlFor="notes" className="mb-2 block text-sm font-medium text-ink-soft">
-          Notes {needsLead && <span className="font-normal text-ink-faint">(saved to the Lead's Notes (Maronly))</span>}
+          Notes {needsLead && <span className="font-normal text-ink-faint">(saved to the lead's notes)</span>}
         </label>
         <textarea id="notes" rows={3} className="field resize-y" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What happened on the call?" />
       </div>
@@ -218,7 +215,7 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
       {leadError && (
         <div role="alert" className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="flex items-center gap-2 font-medium">
-            <AlertTriangle size={16} /> The call was saved, but the Lead couldn't be created in Airtable.
+            <AlertTriangle size={16} /> The call was saved, but the lead couldn't be created in the CRM.
           </p>
           <p className="mt-1 text-amber-800">{leadError}</p>
           <div className="mt-3 flex gap-2">

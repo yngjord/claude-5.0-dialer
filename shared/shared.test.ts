@@ -57,7 +57,7 @@ describe('contactOutcome', () => {
 });
 
 describe('leads', () => {
-  const lead: LeadInput = { fullName: ' Jane Doe ', email: 'jane@acme.com', phone: '+61412345678', notes: 'Call back Tues', nextFollowUp: '2026-10-28' };
+  const lead: LeadInput = { fullName: ' Jane Doe ', email: 'jane@acme.com', phone: '+61412345678', notes: 'Call back Tues' };
   const ctx = { airtableClientId: 'recABC', campaignName: 'Kintell Oct', linkedin: 'https://linkedin.com/in/jane', website: null, todaySydney: '2026-10-22' };
 
   it('builds a Nurture lead for Needs Follow-Up', () => {
@@ -72,7 +72,7 @@ describe('leads', () => {
       'Linkedin Profile': 'https://linkedin.com/in/jane',
       'Record Status': 'Open',
       Stage: 'Nurture',
-      'Next follow up': '2026-10-28',
+      'Next follow up': '2026-10-22',
     });
   });
 

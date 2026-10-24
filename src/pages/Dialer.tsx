@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 import { APPOINTMENT_SET, CONNECTED_PICKUP_STATUS, NEEDS_FOLLOW_UP } from '../../shared/constants';
 import { formatPhone } from '../../shared/phone';
-import type { Campaign, Contact } from '../../shared/types';
+import type { Campaign, CampaignStats, Contact } from '../../shared/types';
 import { CallControls } from '../components/CallControls';
 import { ContactCard } from '../components/ContactCard';
 import LoadingBar from '../components/LoadingBar';
@@ -46,6 +46,12 @@ export default function Dialer() {
   const { active, dial, clear, start, deviceState, deviceError } = useVoice();
   const campaignQuery = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*').eq('id', id).maybeSingle()) as Campaign | null, [id]);
   const campaign = campaignQuery.data;
+  const progress = useLoad(
+    async () => must(await supabase.from('dialer_campaign_stats').select('contacts_total, contacts_remaining').eq('campaign_id', id).maybeSingle()) as Pick<CampaignStats, 'contacts_total' | 'contacts_remaining'> | null,
+    [id],
+  );
+  const total = progress.data?.contacts_total ?? 0;
+  const completed = total - (progress.data?.contacts_remaining ?? 0);
 
   const [stage, setStage] = useState<Stage>('idle');
   const [contact, setContact] = useState<Contact | null>(null);
@@ -141,6 +147,7 @@ export default function Dialer() {
     }));
     clear();
     setContact(null);
+    progress.reload({ quiet: true });
     claimNext(result.dialNext ? 0 : undefined);
   };
 
@@ -175,6 +182,18 @@ export default function Dialer() {
       endBlocked={endBlocked}
       toolbar={
         <>
+          {total > 0 && (
+            <div className="flex items-center gap-2.5 rounded-full border border-line bg-white py-1.5 pl-3.5 pr-3 text-sm" title="Contacts called and wrapped up in this campaign, out of everyone in it">
+              <span className="text-xs text-ink-muted">Campaign</span>
+              <span className="tabular-nums">
+                <b className="font-display font-medium">{completed.toLocaleString()}</b> <span className="text-ink-muted">/ {total.toLocaleString()}</span>
+              </span>
+              <span className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-100">
+                <span className={`block h-full rounded-full transition-[width] ${completed === total ? 'bg-emerald-500' : 'bg-brand'}`} style={{ width: `${(completed / total) * 100}%` }} />
+              </span>
+              <span className="text-xs tabular-nums text-ink-muted">{(total - completed).toLocaleString()} left</span>
+            </div>
+          )}
           <div className="flex items-center gap-1 rounded-full border border-line bg-white py-1 pl-3.5 pr-1 text-sm" aria-label="This session">
             <span className="mr-1 text-xs text-ink-muted">This session</span>
             {(
