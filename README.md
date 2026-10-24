@@ -116,17 +116,14 @@ Netlify scheduled functions (`sweep`) run on production deploys only.
 
 ### 4. Moving off JustCall
 
-1. Dial a few test calls (your own mobile: answer, let it ring out, let it go to voicemail).
-2. Copy the history into Supabase. Use `--dry-run` first; re-running only adds what's new:
-   ```bash
-   AIRTABLE_API_KEY=… AIRTABLE_BASE_ID=appD9XqU0PeqPm3Mj SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… \
-     npm run backfill:justcall -- --dry-run
-   ```
-   Transcripts are matched to calls via their Lead's phone number, since their `JustCall Call ID` isn't filled in.
-3. Deploy the portal change that reads Cold Call Logs from Supabase, and check a client's numbers match.
-4. Turn off whatever writes JustCall calls into Airtable, then run the backfill once more.
-5. Only then delete `JustCall Storage` and `Cold Call Transcripts` in Airtable, along with the fields that link to
-   them: Leads → `Cold Call Transcripts` and `JustCall Dialer Link`; Clients → `JustCall Storage`.
+The dialer starts fresh: JustCall's call history isn't imported (it's archived outside the app). Once the team has
+finished dialling in JustCall:
+
+1. Export and archive JustCall's call log, plus the Airtable `JustCall Storage` and `Cold Call Transcripts` tables.
+2. Turn off whatever writes JustCall calls into Airtable.
+3. Delete those two tables and the fields that link to them: Leads → `Cold Call Transcripts` and
+   `JustCall Dialer Link`; Clients → `JustCall Storage`.
+4. Cancel JustCall.
 
 ## Local development
 

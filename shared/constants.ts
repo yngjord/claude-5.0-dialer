@@ -1,5 +1,5 @@
 // Option names match the Airtable selects JustCall used ('JustCall Storage' → Pickup Status / Disposition) exactly,
-// so the portal's badges and the backfilled history read the same as new calls.
+// so the portal's badges and reports read the same as they did for JustCall calls.
 
 export const PICKUP_STATUSES = ['Human Pickup', 'Machine Pickup', 'Unanswered', 'Unclassified Pickup', 'Busy', 'Failed'] as const;
 export type PickupStatus = (typeof PICKUP_STATUSES)[number];

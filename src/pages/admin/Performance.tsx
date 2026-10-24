@@ -62,7 +62,7 @@ const sortValue = (l: Line, key: SortKey): string | number => (key === 'name' ? 
 
 /**
  * Admin-only: how each team member and each client is performing over a date range, optionally narrowed to one
- * client or campaign. Counts dialer calls only (not the JustCall history), like the Campaigns metrics.
+ * client or campaign. Counts calls made in the dialer, like the Campaigns metrics.
  */
 export default function Performance() {
   const [range, setRange] = useState<DateRange>(() => defaultRange('month'));
@@ -121,7 +121,7 @@ export default function Performance() {
 
   return (
     <>
-      <PageHeader title="Performance" subtitle="How each team member and client is tracking. Dialer calls only, not the JustCall history." />
+      <PageHeader title="Performance" subtitle="How each team member and client is tracking." />
 
       <div className="mb-5 flex animate-appear flex-wrap items-center gap-2">
         <DateRangeFilter value={range} onChange={setRange} presets={['month', 'lastMonth', 'today', '7', '30', '90', 'all', 'custom']} />

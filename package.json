@@ -11,7 +11,6 @@
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview",
-    "backfill:justcall": "tsx scripts/backfill-justcall.ts",
     "setup:twilio": "tsx scripts/setup-twilio.ts"
   },
   "dependencies": {
