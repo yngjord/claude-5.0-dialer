@@ -46,7 +46,7 @@ export default function Campaigns() {
     <>
       <PageHeader
         title="Campaigns"
-        subtitle={isAdmin ? "The team's numbers and every campaign." : 'Your numbers and the call lists assigned to you.'}
+        subtitle={isAdmin ? 'Your numbers, and every campaign. Team-wide numbers are in Performance.' : 'Your numbers and the call lists assigned to you.'}
         actions={
           isAdmin && (
             <Link to="/admin/campaigns" className="inline-flex h-10 items-center rounded-full border border-line-border bg-white/70 px-5 text-[15px] font-medium hover:border-brand hover:text-brand">
@@ -170,8 +170,8 @@ export default function Campaigns() {
 }
 
 /**
- * Dials, connects, connect rate, appointments, follow-ups and talk time for a date range, client and campaign. Reps only
- * ever count their own calls (RLS on dialer_calls), and the campaign list only holds campaigns they're assigned to.
+ * Dials, connects, connect rate, appointments, leads and talk time for a date range, client and campaign: always the
+ * logged-in user's own calls, admins included (dialer_call_stats). The team-wide view is the admin Performance page.
  */
 function CallMetrics({ campaigns }: { campaigns: Pick<Campaign, 'id' | 'name' | 'client_name'>[] }) {
   const [range, setRange] = useState<DateRange>(() => defaultRange('month'));

@@ -684,8 +684,8 @@ alter table public.dialer_campaigns drop column if exists max_attempts, drop col
 -- Contacts the old retry rules had scheduled for another try count as called; re-run brings them back.
 update public.dialer_contacts set status = 'done', next_attempt_at = null where status = 'callback';
 
--- Daily totals per rep (optionally for one campaign or one client), for the Campaigns page metrics. Runs with the caller's access (RLS on
--- calls applies). One row per day per rep keeps it well under PostgREST's 1000-row limit.
+-- Daily totals of the caller's own calls (optionally for one campaign or one client), for the Campaigns page
+-- metrics. Admins see only their own here too; the team-wide view is dialer_performance_stats.
 drop function if exists public.dialer_call_stats(timestamptz, timestamptz, uuid);
 create or replace function public.dialer_call_stats(p_from timestamptz, p_to timestamptz, p_campaign_id uuid default null, p_client_name text default null)
 returns table (day date, user_id uuid, agent_name text, dials int, connects int, machine int, unanswered int,
@@ -706,6 +706,7 @@ language sql stable security invoker set search_path = public as $$
     and x.started_at >= p_from and x.started_at < p_to
     and (p_campaign_id is null or x.campaign_id = p_campaign_id)
     and (p_client_name is null or x.client_name = p_client_name)
+    and x.user_id = auth.uid()
   group by 1, 2
   order by 1 desc
 $$;
