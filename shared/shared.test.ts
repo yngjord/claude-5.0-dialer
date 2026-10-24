@@ -5,6 +5,7 @@ import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
 import { shouldTranscribe } from './pickup';
+import { decodeEntities } from './text';
 import { zonedTimeToUtc } from './time';
 
 describe('normalizePhone', () => {
@@ -191,5 +192,13 @@ describe('zonedTimeToUtc', () => {
 describe('contactOutcome: callback', () => {
   it('keeps the contact for a callback', () => {
     expect(contactOutcome('Callback')).toBe('callback');
+  });
+});
+
+describe('decodeEntities', () => {
+  it('decodes named and numeric HTML entities', () => {
+    expect(decodeEntities('Shane O&#039;Dea')).toBe("Shane O'Dea");
+    expect(decodeEntities('A &amp; B &lt;3 &quot;hi&quot; &#x27;x&#x27;')).toBe('A & B <3 "hi" \'x\'');
+    expect(decodeEntities('no entities & stuff')).toBe('no entities & stuff');
   });
 });

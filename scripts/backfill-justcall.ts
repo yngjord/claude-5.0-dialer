@@ -7,6 +7,7 @@
  *     npm run backfill:justcall -- [--dry-run] [--skip-recordings]
  */
 import { isDisposition, isPickupStatus } from '../shared/constants';
+import { decodeEntities } from '../shared/text';
 import { normalizePhone } from '../shared/phone';
 import { listAll } from '../netlify/functions/_lib/airtable';
 import { db, must } from '../netlify/functions/_lib/db';
@@ -46,9 +47,6 @@ interface TranscriptFields {
   'Associated Lead': string[];
 }
 
-/** Campaign names arrive with HTML entities from JustCall (e.g. "&lt;"). Same as the portal. */
-const decodeEntities = (s: string) =>
-  s.replace(/&(lt|gt|amp|quot|#39|apos);/g, (m, e: string) => ({ lt: '<', gt: '>', amp: '&', quot: '"', '#39': "'", apos: "'" })[e] ?? m);
 const text = (v: string | undefined) => (v && v.trim() ? v.trim() : null);
 
 /** Created time when it's on the Call Date (Sydney), otherwise midnight Sydney on the Call Date. */

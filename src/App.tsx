@@ -5,6 +5,7 @@ import AppShell from './components/AppShell';
 import Splash from './components/Splash';
 import { Button } from './components/ui/Button';
 import Callbacks from './pages/Callbacks';
+import Leads from './pages/Leads';
 import Contacts from './pages/admin/Contacts';
 import Numbers from './pages/admin/Numbers';
 import Performance from './pages/admin/Performance';
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/campaigns/:id" element={<CampaignPage />} />
           <Route path="/calls" element={<Calls />} />
+          <Route path="/leads" element={<Leads />} />
           <Route path="/callbacks" element={<Callbacks />} />
           <Route path="/calls/:id" element={<CallDetailPage />} />
           {/* Campaign management moved onto the Campaigns page. */}

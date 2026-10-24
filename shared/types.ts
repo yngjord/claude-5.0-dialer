@@ -241,3 +241,22 @@ export interface TwilioSetupResponse {
   numbersUpdated: string[];
   log: string[];
 }
+
+/** A lead in Airtable Leads that the logged-in rep created (Leads → Attributed to = their email). */
+export interface MyLead {
+  id: string;
+  fullName: string | null;
+  email: string | null;
+  phone: string | null;
+  linkedin: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  clientLogo: string | null;
+  stage: string | null;
+  /** YYYY-MM-DD */
+  bookedFor: string | null;
+  timeBookedFor: string | null;
+  /** When the lead was created (Leads → Opened), ISO timestamp. */
+  opened: string;
+  notes: string | null;
+}

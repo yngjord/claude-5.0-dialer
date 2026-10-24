@@ -1,4 +1,4 @@
-import { CalendarClock, Contact as ContactIcon, LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
+import { CalendarCheck, CalendarClock, Contact as ContactIcon, LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
@@ -12,6 +12,7 @@ import { useDueCallbacks } from '../lib/useDueCallbacks';
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/campaigns', label: 'Campaigns', icon: LayoutList },
   { to: '/calls', label: 'Call logs', icon: PhoneCall },
+  { to: '/leads', label: 'Leads', icon: CalendarCheck },
   { to: '/callbacks', label: 'Callbacks', icon: CalendarClock },
 ];
 const ADMIN_NAV: { to: string; label: string; icon: LucideIcon }[] = [

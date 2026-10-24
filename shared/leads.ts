@@ -37,6 +37,8 @@ export interface LeadFields {
  * renaming the field in Airtable (e.g. fixing the spelling) doesn't break it.
  */
 export const ATTRIBUTED_TO_FIELD = 'fldKG3QEhKosSdvxc';
+/** Its current name, for Airtable formulas (which can't use field ids). Update this if the field is renamed. */
+export const ATTRIBUTED_TO_FIELD_NAME = 'Attirbuted to - new dialer';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
