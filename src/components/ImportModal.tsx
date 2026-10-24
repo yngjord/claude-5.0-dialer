@@ -21,14 +21,15 @@ import { Spinner } from './ui/Spinner';
 
 const BATCH = 500;
 
-async function existingPhones(campaignId: string): Promise<Set<string>> {
-  const phones = new Set<string>();
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from('dialer_contacts').select('phone_e164').eq('campaign_id', campaignId).range(from, from + 999);
+/** Which of these numbers the campaign's client already has as contacts, in any of its campaigns. */
+async function existingPhones(campaignId: string, phones: string[]): Promise<Set<string>> {
+  const found = new Set<string>();
+  for (let i = 0; i < phones.length; i += 1000) {
+    const { data, error } = await supabase.rpc('dialer_existing_phones', { p_campaign_id: campaignId, p_phones: phones.slice(i, i + 1000) });
     if (error) throw new Error(error.message);
-    data.forEach((r) => phones.add(r.phone_e164 as string));
-    if (data.length < 1000) return phones;
+    (data as string[]).forEach((p) => found.add(p));
   }
+  return found;
 }
 
 // <select> values for a column target: "field:phone", "custom:industry", "new", "skip".
@@ -41,8 +42,8 @@ function parseTarget(value: string, header: string): ColumnTarget {
 }
 
 /**
- * CSV upload → map columns → check numbers → add to the campaign. Numbers repeated in the file or already in the
- * campaign are flagged, and left out unless the user unticks "Remove duplicates".
+ * CSV upload → map columns → check numbers → add to the campaign. Numbers repeated in the file or already a contact
+ * for this client (in any of its campaigns) are flagged, and left out unless the user unticks "Remove duplicates".
  * Extra columns become saved custom fields; the headers used are remembered so the next file maps itself.
  */
 export function ImportModal({ campaignId, onClose, onImported }: { campaignId: string; onClose: () => void; onImported: () => void }) {
@@ -73,6 +74,20 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
   }, []);
 
   const hasPhone = mapping.some((t) => t.kind === 'field' && t.field === 'phone');
+  // The client's existing contacts, looked up for the numbers in the column mapped as the phone.
+  const phonesKey = useMemo(() => (rows && hasPhone ? [...new Set(buildImport(rows, mapping).valid.map((c) => c.phone_e164))].join(',') : null), [rows, mapping, hasPhone]);
+  useEffect(() => {
+    setExisting(phonesKey === '' ? new Set() : null);
+    if (!phonesKey) return;
+    let cancelled = false;
+    existingPhones(campaignId, phonesKey.split(','))
+      .then((found) => !cancelled && setExisting(found))
+      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : 'Could not check for duplicates.'));
+    return () => {
+      cancelled = true;
+    };
+  }, [phonesKey, campaignId]);
+
   const preview = useMemo(() => (rows && existing && hasPhone ? buildImport(rows, mapping, existing) : null), [rows, mapping, existing, hasPhone]);
   const toImport = preview ? (dedupe ? preview.unique : preview.valid) : null;
   const newFields = new Set(mapping.flatMap((t) => (t.kind === 'new' ? [columnCustomKey(t)!] : [])).filter((k) => !customFields.some((f) => f.key === k)));
@@ -91,7 +106,6 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
       setRows(parsed);
       setMapping(guessMapping(parsed[0], saved as CustomField[]));
       setFileName(file.name);
-      setExisting(await existingPhones(campaignId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not read that file.');
     } finally {
@@ -254,7 +268,7 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
           {preview && preview.duplicates.length > 0 && (
             <div className="space-y-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <p>
-                {preview.duplicates.length.toLocaleString()} row{preview.duplicates.length === 1 ? ' has' : 's have'} a phone number that's already in this file or campaign, e.g. row {preview.duplicates[0].row}{' '}
+                {preview.duplicates.length.toLocaleString()} row{preview.duplicates.length === 1 ? ' has' : 's have'} a phone number that's already in this file or already a contact for this client, e.g. row {preview.duplicates[0].row}{' '}
                 ({preview.duplicates[0].name || preview.duplicates[0].phone}): {preview.duplicates[0].reason.toLowerCase()}.{' '}
                 <button onClick={() => downloadRows('duplicates', preview.duplicates)} className="font-medium text-brand hover:underline">
                   Download duplicate rows

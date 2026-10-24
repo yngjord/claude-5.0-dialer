@@ -58,6 +58,9 @@ export interface CampaignStats {
 export interface Contact {
   id: string;
   campaign_id: string;
+  /** The campaign's client (set by the database). Duplicates are checked per client. */
+  airtable_client_id: string | null;
+  client_name: string | null;
   full_name: string | null;
   first_name: string | null;
   company: string | null;

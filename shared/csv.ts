@@ -146,7 +146,7 @@ export interface ImportPreview {
   /** `valid` without the duplicates: what's imported when de-duplicating. */
   unique: ImportContact[];
   invalid: ImportRowIssue[];
-  /** Rows whose number already appears earlier in the file, or in `existingPhones`. */
+  /** Rows whose number already appears earlier in the file, or in `existingPhones` (the client's contacts). */
   duplicates: ImportRowIssue[];
 }
 
@@ -195,7 +195,7 @@ export function buildImport(rows: string[][], mapping: ColumnMapping, existingPh
       seen.set(phone.e164, i + 2);
       preview.unique.push(contact);
     } else {
-      preview.duplicates.push({ row: i + 2, phone: rawPhone, name: fullName ?? '', reason: firstRow === 0 ? 'Already in this campaign' : `Same number as row ${firstRow}` });
+      preview.duplicates.push({ row: i + 2, phone: rawPhone, name: fullName ?? '', reason: firstRow === 0 ? 'Already a contact for this client' : `Same number as row ${firstRow}` });
     }
   });
 

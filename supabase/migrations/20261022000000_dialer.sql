@@ -136,6 +136,11 @@ alter table public.dialer_contacts drop constraint if exists dialer_contacts_cam
 create index if not exists dialer_contacts_queue on public.dialer_contacts (campaign_id, status, next_attempt_at);
 create index if not exists dialer_contacts_phone on public.dialer_contacts (phone_e164);
 
+-- Every contact belongs to its campaign's client, so duplicates are checked per client (the same person can be a
+-- contact for two different clients). Filled in from the campaign; see dialer_contact_client.
+alter table public.dialer_contacts add column if not exists airtable_client_id text, add column if not exists client_name text;
+create index if not exists dialer_contacts_client_phone on public.dialer_contacts (airtable_client_id, phone_e164);
+
 -- ── Calls: the one call log (dialer calls, inbound voicemails, JustCall history) ───────────────────────────
 create table if not exists public.dialer_calls (
   id uuid primary key default gen_random_uuid(),
@@ -323,6 +328,34 @@ update public.dialer_campaigns c set status = 'completed'
 where c.status = 'active'
   and exists (select 1 from dialer_contacts k where k.campaign_id = c.id)
   and not exists (select 1 from dialer_contacts k where k.campaign_id = c.id and k.status in ('new', 'callback'));
+
+-- Contacts take their client from their campaign, on insert and whenever the campaign's client changes.
+create or replace function public.dialer_contact_client() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  select airtable_client_id, client_name into new.airtable_client_id, new.client_name from dialer_campaigns where id = new.campaign_id;
+  return new;
+end $$;
+revoke execute on function public.dialer_contact_client() from public, anon, authenticated;
+drop trigger if exists dialer_contacts_client on public.dialer_contacts;
+create trigger dialer_contacts_client before insert or update of campaign_id on public.dialer_contacts
+  for each row execute function public.dialer_contact_client();
+
+create or replace function public.dialer_campaign_client_changed() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  update dialer_contacts set airtable_client_id = new.airtable_client_id, client_name = new.client_name where campaign_id = new.id;
+  return null;
+end $$;
+revoke execute on function public.dialer_campaign_client_changed() from public, anon, authenticated;
+drop trigger if exists dialer_campaigns_client on public.dialer_campaigns;
+create trigger dialer_campaigns_client after update of airtable_client_id, client_name on public.dialer_campaigns
+  for each row when (old.airtable_client_id is distinct from new.airtable_client_id or old.client_name is distinct from new.client_name)
+  execute function public.dialer_campaign_client_changed();
+
+update public.dialer_contacts k set airtable_client_id = c.airtable_client_id, client_name = c.client_name
+from public.dialer_campaigns c
+where c.id = k.campaign_id and (k.airtable_client_id is distinct from c.airtable_client_id or k.client_name is distinct from c.client_name);
 
 -- Calls keep the rep's name for the portal and stats; renaming someone renames them on all their calls.
 create or replace function public.dialer_sync_agent_name() returns trigger
@@ -572,6 +605,20 @@ begin
   where c.id = p_contact_id and c.locked_by = auth.uid();
 end $$;
 
+-- CSV import duplicate check: which of these numbers the campaign's client already has as contacts (in any of its
+-- campaigns). Only answers for numbers in the file being imported.
+create or replace function public.dialer_existing_phones(p_campaign_id uuid, p_phones text[]) returns setof text
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not dialer_can_access_campaign(p_campaign_id) then
+    raise exception 'You are not assigned to this campaign' using errcode = '42501';
+  end if;
+  return query
+    select distinct k.phone_e164 from dialer_contacts k
+    join dialer_campaigns c on c.id = p_campaign_id
+    where k.airtable_client_id = c.airtable_client_id and k.phone_e164 = any(p_phones);
+end $$;
+
 -- Re-run: how many called contacts there are per last disposition, then copy the chosen ones into a new campaign.
 -- Admins only. Do Not Call numbers (here or in any campaign) are never put back.
 create or replace function public.dialer_rerun_counts(p_campaign_id uuid) returns table (disposition text, contacts int)
@@ -658,11 +705,11 @@ grant execute on function public.dialer_set_avatar(uuid, text) to authenticated,
 
 -- Only signed-in users may call the dialer's functions (they also check the caller's role themselves).
 revoke execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
-  public.dialer_claim_next_contact(uuid), public.dialer_claim_next(uuid, uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
+  public.dialer_claim_next_contact(uuid), public.dialer_claim_next(uuid, uuid), public.dialer_existing_phones(uuid, text[]), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
   public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[], text, text),
   public.dialer_save_custom_fields(jsonb) from public, anon;
 grant execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
-  public.dialer_claim_next_contact(uuid), public.dialer_claim_next(uuid, uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
+  public.dialer_claim_next_contact(uuid), public.dialer_claim_next(uuid, uuid), public.dialer_existing_phones(uuid, text[]), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
   public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[], text, text),
   public.dialer_save_custom_fields(jsonb) to authenticated, service_role;
 

@@ -414,6 +414,27 @@ describe('custom fields', () => {
   });
 });
 
+describe('contacts belong to a client', () => {
+  it('take their client from the campaign, and follow it if the campaign changes client', async () => {
+    const [a] = await rows<{ airtable_client_id: string; client_name: string }>(`select airtable_client_id, client_name from dialer_contacts where full_name = 'A'`);
+    expect(a).toEqual({ airtable_client_id: 'recKintell', client_name: 'Kintell' });
+    await pg.exec(`update dialer_campaigns set airtable_client_id = 'recOther', client_name = 'Other co' where id = '${OTHER_CAMPAIGN}'`);
+    expect(await rows(`select client_name from dialer_contacts where full_name = 'Elsewhere'`)).toEqual([{ client_name: 'Other co' }]);
+    await pg.exec(`update dialer_campaigns set airtable_client_id = 'recMorfless', client_name = 'Morfless' where id = '${OTHER_CAMPAIGN}'`);
+  });
+
+  it('flags numbers the same client already has, in any of its campaigns, but not other clients', async () => {
+    const second = '10000000-0000-0000-0000-0000000000b1';
+    await pg.exec(`insert into dialer_campaigns (id, name, client_name, airtable_client_id) values ('${second}', 'Kintell Nov', 'Kintell', 'recKintell')`);
+    await pg.exec(`insert into dialer_campaign_members (campaign_id, user_id) values ('${second}', '${TEAM1}')`);
+    // +61411111111 is A in Kintell Oct; +64211234567 is Elsewhere, a Morfless contact.
+    const found = await as(TEAM1, () => rows<{ dialer_existing_phones: string }>('select * from dialer_existing_phones($1, $2)', [second, ['+61411111111', '+64211234567', '+61499000000']]));
+    expect(found.map((r) => r.dialer_existing_phones)).toEqual(['+61411111111']);
+    await expect(as(TEAM1, () => pg.query('select * from dialer_existing_phones($1, $2)', [OTHER_CAMPAIGN, ['+61411111111']]))).rejects.toThrow(/not assigned/);
+    await pg.exec(`delete from dialer_campaigns where id = '${second}'`);
+  });
+});
+
 describe('campaign assignment', () => {
   it('allows one team member per campaign, plus admins', async () => {
     const id = '10000000-0000-0000-0000-0000000000a1';

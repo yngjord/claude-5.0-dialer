@@ -139,7 +139,7 @@ describe('csv import', () => {
     expect(preview.invalid).toEqual([{ row: 3, phone: '02 9876 5432', name: 'Bob', reason: 'Looks like an AU landline (use +64 for NZ mobiles)' }]);
     expect(preview.duplicates).toEqual([
       { row: 4, phone: '+61412345678', name: 'Jane again', reason: 'Same number as row 2' },
-      { row: 6, phone: '0499 999 999', name: 'Old', reason: 'Already in this campaign' },
+      { row: 6, phone: '0499 999 999', name: 'Old', reason: 'Already a contact for this client' },
     ]);
   });
 });
