@@ -8,6 +8,15 @@ import { env, HttpError } from './http';
  * Only Maronly staff (profiles.role = team or admin) can use the dialer; portal clients are refused.
  */
 export async function requireDialerUser(req: Request): Promise<Me> {
+  const user = await requireSignedIn(req);
+  return loadDialerUser(user.id, user.email);
+}
+
+/**
+ * Just the logged-in user's id and email, without loading their profile. For endpoints whose database function
+ * checks the role itself (saves a round trip).
+ */
+export async function requireSignedIn(req: Request): Promise<{ id: string; email: string }> {
   const token = req.headers.get('authorization')?.match(/^Bearer (.+)$/i)?.[1];
   if (!token) throw new HttpError(401, 'Not signed in');
 
@@ -16,8 +25,7 @@ export async function requireDialerUser(req: Request): Promise<Me> {
   });
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) throw new HttpError(401, 'Session expired. Please sign in again.');
-
-  return loadDialerUser(data.user.id, data.user.email ?? '');
+  return { id: data.user.id, email: data.user.email ?? '' };
 }
 
 export async function loadDialerUser(userId: string, email?: string): Promise<Me> {

@@ -1,7 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { db, must } from './_lib/db';
 import { handler, json } from './_lib/http';
-import { verifyTwilioWebhook } from './_lib/twilio';
+import { verifyTwilioWebhook } from './_lib/webhook';
 
 /** POST /api/twilio/amd?callId=…: answering machine detection result (human / machine_* / fax / unknown). */
 export default handler(async (req) => {

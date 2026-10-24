@@ -10,6 +10,7 @@ const SUPABASE_STUBS = `
   create schema auth;
   create table auth.users (id uuid primary key, email text);
   create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+  create function auth.role() returns text language sql stable as $$ select nullif(current_setting('request.jwt.claim.role', true), '') $$;
   create schema storage;
   create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
   create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text);
@@ -43,6 +44,16 @@ async function as<T>(userId: string | null, fn: () => Promise<T>): Promise<T> {
 }
 
 const rows = async <T>(sql: string, params: unknown[] = []) => (await pg.query<T>(sql, params)).rows;
+
+/** As the Netlify functions: the service role. */
+async function asServer<T>(fn: () => Promise<T>): Promise<T> {
+  await pg.exec(`set role service_role; set request.jwt.claim.role = 'service_role';`);
+  try {
+    return await fn();
+  } finally {
+    await pg.exec(`reset role; set request.jwt.claim.role = '';`);
+  }
+}
 
 beforeAll(async () => {
   pg = new PGlite();
@@ -170,6 +181,73 @@ describe('claim_next_contact', () => {
     const [next] = await as(TEAM1, () => rows<{ id: string }>('select id from dialer_claim_next_contact($1)', [CAMPAIGN]));
     expect(next.id).not.toBe(c.id);
     await as(null, () => pg.exec(`update dialer_contacts set locked_by = null, locked_at = null, next_attempt_at = null`));
+  });
+});
+
+describe('server call steps', () => {
+  const CALL = '20000000-0000-0000-0000-000000000001';
+  const contactId = async (name: string) => (await rows<{ id: string }>('select id from dialer_contacts where full_name = $1', [name]))[0].id;
+  const start = (callId: string, contact: string, user: string) =>
+    asServer(async () => (await rows<{ r: Record<string, string> }>('select dialer_start_call($1, $2, $3, $4) as r', [callId, contact, user, `CA-${callId}`]))[0].r);
+  const wrapUp = (callId: string, user: string, disposition: string, status: string, pickup = 'Human Pickup') =>
+    asServer(async () => (await rows<{ r: Record<string, string> }>('select dialer_wrap_up($1, $2, $3, $4, $5, $6) as r', [callId, user, pickup, disposition, ' notes ', status]))[0].r);
+
+  it('only the server can call them', async () => {
+    await expect(as(TEAM1, () => pg.query('select dialer_start_call($1, $2, $3, $4)', [CALL, CALL, TEAM1, 'CA1']))).rejects.toThrow(/permission denied/);
+    await expect(as(TEAM1, () => pg.query('select dialer_wrap_up($1, $2, $3, $4, $5, $6)', [CALL, TEAM1, 'x', 'x', 'x', 'done']))).rejects.toThrow(/permission denied/);
+  });
+
+  it('starts a call: checks the rep, picks the caller number and logs the call', async () => {
+    await pg.exec(`insert into dialer_phone_numbers (e164, client_name) values ('+61400000099', 'Kintell'), ('+61400000098', null)`);
+    await pg.exec(`update dialer_phone_numbers set is_default = true where e164 = '+61400000098'`);
+    const a = await contactId('A');
+    expect(await start(CALL, a, TEAM1)).toEqual({ from: '+61400000099', to: '+61411111111' });
+    const [call] = await rows<Record<string, unknown>>('select user_id, agent_name, client_name, campaign_name, full_name, from_number, twilio_status, twilio_call_sid from dialer_calls where id = $1', [CALL]);
+    expect(call).toEqual({ user_id: TEAM1, agent_name: 't1@x', client_name: 'Kintell', campaign_name: 'Kintell Oct', full_name: 'A', from_number: '+61400000099', twilio_status: 'initiated', twilio_call_sid: `CA-${CALL}` });
+
+    expect(await start('20000000-0000-0000-0000-000000000002', await contactId('Elsewhere'), TEAM1)).toEqual({ error: 'member' });
+    expect(await start('20000000-0000-0000-0000-000000000003', a, CLIENT)).toEqual({ error: 'user' });
+    expect(await start('20000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-0000000000ff', TEAM1)).toEqual({ error: 'contact' });
+    // Admins can call any campaign; Morfless has no number of its own, so the default is used.
+    expect(await start('20000000-0000-0000-0000-000000000005', await contactId('Elsewhere'), ADMIN)).toEqual({ from: '+61400000098', to: '+64211234567' });
+  });
+
+  it('saves a wrap-up once, moves the contact on, and only lets the rep (or an admin) do it', async () => {
+    expect(await wrapUp(CALL, TEAM2, 'No Answer', 'done')).toEqual({ error: 'forbidden' });
+    expect(await wrapUp(CALL, TEAM1, 'Not Interested', 'done', 'Machine Pickup')).toMatchObject({ campaign_name: 'Kintell Oct', airtable_client_id: 'recKintell' });
+    await wrapUp(CALL, TEAM1, 'Not Interested', 'done', 'Machine Pickup');
+    const [call] = await rows<Record<string, unknown>>('select disposition, notes, pickup_status, pickup_source, wrapped_up_at is not null as saved from dialer_calls where id = $1', [CALL]);
+    expect(call).toEqual({ disposition: 'Not Interested', notes: 'notes', pickup_status: 'Machine Pickup', pickup_source: 'agent', saved: true });
+    const [contact] = await rows<Record<string, unknown>>(`select status, attempts, last_disposition, locked_by from dialer_contacts where full_name = 'A'`);
+    expect(contact).toEqual({ status: 'done', attempts: 1, last_disposition: 'Not Interested', locked_by: null });
+    expect(await wrapUp('20000000-0000-0000-0000-0000000000ff', TEAM1, 'No Answer', 'done')).toEqual({ error: 'not_found' });
+  });
+
+  it('Do Not Call blocks the number in every campaign', async () => {
+    await pg.exec(`insert into dialer_contacts (campaign_id, full_name, phone_e164) values ('${OTHER_CAMPAIGN}', 'A elsewhere', '+61411111111')`);
+    await wrapUp(CALL, TEAM1, 'Do Not Call', 'do_not_call');
+    expect(await rows(`select status from dialer_contacts where phone_e164 = '+61411111111'`)).toEqual([{ status: 'do_not_call' }, { status: 'do_not_call' }]);
+  });
+
+  it('fetching the next contact can keep the one being wrapped up', async () => {
+    await pg.exec(`
+      delete from dialer_contacts where full_name = 'A elsewhere';
+      update dialer_contacts set status = 'new', attempts = 0, last_disposition = null, locked_by = null, locked_at = null, next_attempt_at = null where full_name in ('A', 'B', 'C');
+    `);
+    const claim = (keep: string | null) => as(TEAM1, () => rows<{ full_name: string }>('select full_name from dialer_claim_next($1, $2)', [CAMPAIGN, keep]));
+    expect((await claim(null))[0].full_name).toBe('A');
+    const a = await contactId('A');
+    expect((await claim(a))[0].full_name).toBe('B');
+    expect(await rows(`select full_name from dialer_contacts where locked_by = '${TEAM1}' order by full_name`)).toEqual([{ full_name: 'A' }, { full_name: 'B' }]);
+    // Without keep, claiming lets go of everything held.
+    expect((await claim(null))[0].full_name).toBe('A');
+    expect(await rows(`select full_name from dialer_contacts where locked_by = '${TEAM1}'`)).toEqual([{ full_name: 'A' }]);
+
+    await pg.exec(`
+      update dialer_contacts set locked_by = null, locked_at = null;
+      delete from dialer_calls where id::text like '20000000-%';
+      delete from dialer_phone_numbers;
+    `);
   });
 });
 

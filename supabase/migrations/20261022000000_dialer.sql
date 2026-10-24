@@ -384,7 +384,7 @@ revoke update on public.dialer_contacts from anon;
 -- ── Power dialer queue ──────────────────────────────────────────────────────────────────────────────────────
 -- Hands the caller the next contact to dial and locks it to them. `skip locked` means two reps can never get the
 -- same contact. A lock older than 30 minutes is treated as abandoned (closed tab, lost connection).
-create or replace function public.dialer_claim_next_contact(p_campaign_id uuid) returns setof public.dialer_contacts
+create or replace function public.dialer_claim_next(p_campaign_id uuid, p_keep_contact_id uuid default null) returns setof public.dialer_contacts
 language plpgsql security definer set search_path = public as $$
 declare
   camp public.dialer_campaigns;
@@ -398,8 +398,10 @@ begin
     raise exception 'This campaign is %', camp.status using errcode = 'P0001';
   end if;
 
-  -- Let go of anything this rep was still holding in this campaign.
-  update dialer_contacts set locked_by = null, locked_at = null where campaign_id = p_campaign_id and locked_by = auth.uid();
+  -- Let go of anything this rep was still holding in this campaign, except the contact they're on a call with
+  -- (p_keep_contact_id: the dialer fetches the next contact while the current call is being wrapped up).
+  update dialer_contacts set locked_by = null, locked_at = null
+  where campaign_id = p_campaign_id and locked_by = auth.uid() and id is distinct from p_keep_contact_id;
 
   select id into picked from dialer_contacts
   where campaign_id = p_campaign_id
@@ -418,6 +420,127 @@ begin
 
   return query update dialer_contacts set locked_by = auth.uid(), locked_at = now() where id = picked returning *;
 end $$;
+
+create or replace function public.dialer_claim_next_contact(p_campaign_id uuid) returns setof public.dialer_contacts
+language sql security definer set search_path = public as $$
+  select * from dialer_claim_next(p_campaign_id, null)
+$$;
+
+-- ── Server-side call steps (Netlify functions only) ─────────────────────────────────────────────────────────
+-- Each does in one round trip what used to take several queries, to keep starting and saving calls fast.
+
+-- Called by /api/twilio/voice when a rep's browser starts a call: checks the rep may call this contact, picks the
+-- caller number (campaign's, else the client's, else the default) and logs the call. Returns {from, to} or {error}.
+create or replace function public.dialer_start_call(p_call_id uuid, p_contact_id uuid, p_user_id uuid, p_twilio_call_sid text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  prof public.profiles;
+  c public.dialer_contacts;
+  camp public.dialer_campaigns;
+  caller text;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Only the server can start calls' using errcode = '42501';
+  end if;
+  select * into prof from profiles where id = p_user_id;
+  if prof.id is null or prof.role::text not in ('team', 'admin') then
+    return jsonb_build_object('error', 'user');
+  end if;
+  select * into c from dialer_contacts where id = p_contact_id;
+  if c.id is null then
+    return jsonb_build_object('error', 'contact');
+  end if;
+  select * into camp from dialer_campaigns where id = c.campaign_id;
+  if prof.role::text <> 'admin' and not exists (select 1 from dialer_campaign_members where campaign_id = camp.id and user_id = p_user_id) then
+    return jsonb_build_object('error', 'member');
+  end if;
+
+  caller := coalesce(
+    (select e164 from dialer_phone_numbers where id = camp.caller_number_id),
+    (select e164 from dialer_phone_numbers where client_name = camp.client_name order by created_at limit 1),
+    (select e164 from dialer_phone_numbers where is_default order by created_at limit 1)
+  );
+
+  insert into dialer_calls (id, direction, campaign_id, contact_id, user_id, agent_name, client_name, campaign_name, full_name, email,
+                            company, linkedin, website, phone_e164, from_number, to_number, twilio_call_sid, twilio_status)
+  values (p_call_id, 'outbound', camp.id, c.id, p_user_id, coalesce(nullif(trim(prof.display_name), ''), prof.email), camp.client_name,
+          camp.name, c.full_name, c.email, c.company, c.linkedin, c.website, c.phone_e164, caller, c.phone_e164, p_twilio_call_sid,
+          case when caller is null then 'failed' else 'initiated' end)
+  on conflict (id) do nothing;
+
+  return jsonb_build_object('from', caller, 'to', c.phone_e164);
+end $$;
+
+-- Called by /api/wrap-up: saves the rep's pickup status, disposition and notes, and moves the contact on (status
+-- worked out by the app). Do Not Call blocks the number in every campaign. Safe to repeat: attempts only go up on
+-- the first save. Returns what's needed to create a CRM lead, or {error}.
+create or replace function public.dialer_wrap_up(p_call_id uuid, p_user_id uuid, p_pickup text, p_disposition text, p_notes text,
+                                                 p_contact_status text, p_lead_name text default null, p_lead_email text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  role_name text;
+  x public.dialer_calls;
+  camp public.dialer_campaigns;
+  first_save boolean;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Only the server can save calls' using errcode = '42501';
+  end if;
+  select role::text into role_name from profiles where id = p_user_id;
+  if role_name is null or role_name not in ('team', 'admin') then
+    return jsonb_build_object('error', 'user');
+  end if;
+  select * into x from dialer_calls where id = p_call_id for update;
+  if x.id is null then
+    return jsonb_build_object('error', 'not_found');
+  end if;
+  if x.user_id is distinct from p_user_id and role_name <> 'admin' then
+    return jsonb_build_object('error', 'forbidden');
+  end if;
+  first_save := x.wrapped_up_at is null;
+
+  update dialer_calls set
+    disposition = p_disposition,
+    notes = nullif(trim(p_notes), ''),
+    wrapped_up_at = coalesce(wrapped_up_at, now()),
+    pickup_source = case when p_pickup is distinct from pickup_status then 'agent' else pickup_source end,
+    pickup_status = p_pickup
+  where id = x.id;
+
+  if x.contact_id is not null then
+    update dialer_contacts set
+      attempts = attempts + case when first_save then 1 else 0 end,
+      last_called_at = x.started_at,
+      last_disposition = p_disposition,
+      status = p_contact_status,
+      next_attempt_at = null,
+      locked_by = null,
+      locked_at = null,
+      -- Keep corrections the rep made in the lead form.
+      full_name = coalesce(nullif(trim(p_lead_name), ''), full_name),
+      email = coalesce(nullif(trim(p_lead_email), ''), email)
+    where id = x.contact_id;
+  end if;
+
+  if p_disposition = 'Do Not Call' and x.phone_e164 is not null then
+    update dialer_contacts set status = 'do_not_call', locked_by = null, locked_at = null where phone_e164 = x.phone_e164;
+  end if;
+
+  select * into camp from dialer_campaigns where id = x.campaign_id;
+  return jsonb_build_object(
+    'contact_id', x.contact_id,
+    'airtable_lead_id', x.airtable_lead_id,
+    'campaign_name', camp.name,
+    'airtable_client_id', camp.airtable_client_id,
+    'linkedin', x.linkedin,
+    'website', x.website
+  );
+end $$;
+
+revoke execute on function public.dialer_start_call(uuid, uuid, uuid, text), public.dialer_wrap_up(uuid, uuid, text, text, text, text, text, text)
+  from public, anon, authenticated;
+grant execute on function public.dialer_start_call(uuid, uuid, uuid, text), public.dialer_wrap_up(uuid, uuid, text, text, text, text, text, text)
+  to service_role;
 
 -- Gives a contact back to the queue without a call (Skip / Stop). Skip moves it to the back of the queue.
 create or replace function public.dialer_release_contact(p_contact_id uuid, p_skip boolean default false) returns void
@@ -510,11 +633,11 @@ grant execute on function public.dialer_set_avatar(uuid, text) to authenticated,
 
 -- Only signed-in users may call the dialer's functions (they also check the caller's role themselves).
 revoke execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
-  public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
+  public.dialer_claim_next_contact(uuid), public.dialer_claim_next(uuid, uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
   public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[], text, text),
   public.dialer_save_custom_fields(jsonb) from public, anon;
 grant execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
-  public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
+  public.dialer_claim_next_contact(uuid), public.dialer_claim_next(uuid, uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
   public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[], text, text),
   public.dialer_save_custom_fields(jsonb) to authenticated, service_role;
 

@@ -3,7 +3,7 @@ import { normalizePhone } from '../../shared/phone';
 import { db, must } from './_lib/db';
 import { handler, twiml } from './_lib/http';
 import { routeInbound } from './_lib/routing';
-import { verifyTwilioWebhook } from './_lib/twilio';
+import { verifyTwilioWebhook } from './_lib/webhook';
 
 /** POST /api/twilio/inbound-sms: the Messaging URL on each of our numbers. Saves the text; no auto-reply. */
 export default handler(async (req) => {

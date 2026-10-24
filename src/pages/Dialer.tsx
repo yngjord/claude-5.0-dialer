@@ -63,23 +63,45 @@ export default function Dialer() {
   // The contact we hold a queue lock on but haven't called yet, so leaving the page can give it back.
   const heldRef = useRef<string | null>(null);
   heldRef.current = stage === 'ready' && contact ? contact.id : null;
+  // The next contact, fetched while the current call is being wrapped up (see below).
+  const nextRef = useRef<{ callId: string; next: Promise<Contact | null>; contactId: string | null } | null>(null);
   useEffect(
     () => () => {
-      if (heldRef.current) supabase.rpc('dialer_release_contact', { p_contact_id: heldRef.current, p_skip: false });
+      for (const held of [heldRef.current, nextRef.current?.contactId]) {
+        if (held) supabase.rpc('dialer_release_contact', { p_contact_id: held, p_skip: false });
+      }
     },
     [],
   );
 
   const myCall = active && active.mode === 'power' && active.campaign.id === id ? active : null;
 
+  // As soon as a call ends, fetch (and lock) the next contact while the rep fills in the wrap-up, keeping the lock on
+  // the contact just called. Saving then moves on without waiting for the queue.
+  const endedCallId = myCall?.phase === 'ended' && myCall.row ? myCall.callId : null;
+  const endedContactId = myCall?.contact.id;
+  useEffect(() => {
+    if (!endedCallId || nextRef.current?.callId === endedCallId) return;
+    const entry: { callId: string; next: Promise<Contact | null>; contactId: string | null } = { callId: endedCallId, contactId: null, next: Promise.resolve(null) };
+    entry.next = (async () => {
+      const { data, error } = await supabase.rpc('dialer_claim_next', { p_campaign_id: id, p_keep_contact_id: endedContactId });
+      const next = !error && Array.isArray(data) && data.length ? (data[0] as Contact) : null;
+      entry.contactId = next?.id ?? null;
+      return next;
+    })();
+    nextRef.current = entry;
+  }, [endedCallId, endedContactId, id]);
+
   // `dialAfter` overrides the auto-dial setting for this contact (0 = dial straight away).
   const reloadCampaign = campaignQuery.reload;
   const reloadProgress = progress.reload;
-  const claimNext = useCallback(async (dialAfter?: number) => {
+  // `prefetched`: the contact fetched during the wrap-up, used if there was one.
+  const claimNext = useCallback(async (dialAfter?: number, prefetched?: Promise<Contact | null>) => {
     setStage('claiming');
     setError(null);
     try {
-      const rows = must(await supabase.rpc('dialer_claim_next_contact', { p_campaign_id: id })) as Contact[];
+      const ready = prefetched ? await prefetched : null;
+      const rows = ready ? [ready] : (must(await supabase.rpc('dialer_claim_next', { p_campaign_id: id, p_keep_contact_id: null })) as Contact[]);
       if (!rows.length) {
         setContact(null);
         setStage('empty');
@@ -162,7 +184,10 @@ export default function Dialer() {
     clear();
     setContact(null);
     progress.reload({ quiet: true });
-    claimNext(result.dialNext ? 0 : undefined);
+    // Do Not Call: the next contact was fetched before this number was blocked, so get a fresh one.
+    const prefetched = nextRef.current?.callId === myCall?.callId && result.disposition !== 'Do Not Call' ? nextRef.current?.next : undefined;
+    nextRef.current = null;
+    claimNext(result.dialNext ? 0 : undefined, prefetched);
   };
 
   // The call never reached Twilio (connection error): nothing to wrap up, let the rep retry or move on.

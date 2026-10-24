@@ -9,3 +9,7 @@ A separate tab in the admin section for team and client performance (separate fr
 - Likely approach: a `dialer_performance_stats(p_from, p_to, p_client_name, p_campaign_id)` RPC grouped by
   user and client (security invoker, so RLS still applies), plus an `/admin/performance` page with filters
   and sortable tables.
+
+## Batch deploys via `main` (agreed 24 Oct 2026)
+Each production deploy costs 15 Netlify credits. Make `main` the dialer's production branch; work continues on
+feature branches (free deploy previews) and is merged into `main` in batches.

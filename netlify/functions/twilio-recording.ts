@@ -2,7 +2,7 @@ import type { Config } from '@netlify/functions';
 import { db, must } from './_lib/db';
 import { handler, json } from './_lib/http';
 import { loadMediaCall, processRecording } from './_lib/media';
-import { verifyTwilioWebhook } from './_lib/twilio';
+import { verifyTwilioWebhook } from './_lib/webhook';
 
 /**
  * POST /api/twilio/recording?callId=…: a call recording or voicemail is ready. Saves it to Supabase Storage and

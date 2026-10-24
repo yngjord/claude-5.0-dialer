@@ -1,6 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { handler, twiml } from './_lib/http';
-import { verifyTwilioWebhook } from './_lib/twilio';
+import { verifyTwilioWebhook } from './_lib/webhook';
 
 /** POST /api/twilio/hangup: ends the call after a voicemail has been recorded. */
 export default handler(async (req) => {

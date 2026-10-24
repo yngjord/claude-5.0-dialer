@@ -2,28 +2,30 @@ import type { Config } from '@netlify/functions';
 import { isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
 import { buildLeadFields, todayInSydney, validateLead } from '../../shared/leads';
 import { contactOutcome } from '../../shared/outcomes';
-import type { CallRow, Campaign, Contact, WrapUpRequest, WrapUpResponse } from '../../shared/types';
+import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { createRecord } from './_lib/airtable';
-import { requireDialerUser } from './_lib/auth';
+import { requireSignedIn } from './_lib/auth';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json, readJson } from './_lib/http';
 
+const REFUSALS: Record<string, [number, string]> = {
+  user: [403, 'The dialer is only available to the Maronly team.'],
+  not_found: [404, "This call wasn't logged. Check your connection and try the next one."],
+  forbidden: [403, 'This is not your call.'],
+};
+
 /**
- * POST /api/wrap-up: the post-call form. Saves pickup status (as corrected by the rep), disposition and notes,
- * moves the contact on in the queue, and for the two "Interested" dispositions creates a Lead in Airtable.
+ * POST /api/wrap-up: the post-call form. One database round trip (dialer_wrap_up) saves pickup status (as
+ * corrected by the rep), disposition and notes, and moves the contact on. For the two "Interested" dispositions it
+ * then creates the lead in the CRM (Airtable), so only those saves wait on Airtable.
  *
- * Safe to submit again: the contact's attempt count only goes up once, and a Lead is only created once. If
+ * Safe to submit again: the contact's attempt count only goes up once, and a lead is only created once. If
  * Airtable fails, the call is still saved and `leadError` is returned so the rep can retry.
  */
 export default handler(async (req) => {
-  const me = await requireDialerUser(req);
-  const body = await readJson<WrapUpRequest>(req);
+  const [user, body] = await Promise.all([requireSignedIn(req), readJson<WrapUpRequest>(req)]);
   if (!isPickupStatus(body.pickupStatus)) throw new HttpError(400, 'Choose a pickup status.');
   if (!isDisposition(body.disposition)) throw new HttpError(400, 'Choose a disposition.');
-
-  const call = must(await db().from('dialer_calls').select('*').eq('id', body.callId).maybeSingle()) as CallRow | null;
-  if (!call) throw new HttpError(404, "This call wasn't logged. Check your connection and try the next one.");
-  if (call.user_id !== me.userId && me.role !== 'admin') throw new HttpError(403, 'This is not your call.');
 
   const needsLead = LEAD_DISPOSITIONS.includes(body.disposition);
   if (needsLead) {
@@ -32,69 +34,54 @@ export default handler(async (req) => {
     if (problems.length) throw new HttpError(400, problems.join(' '));
   }
 
-  const firstWrapUp = !call.wrapped_up_at;
-  const pickupChanged = body.pickupStatus !== call.pickup_status;
-  must(
-    await db()
-      .from('dialer_calls')
-      .update({
-        disposition: body.disposition,
-        notes: body.notes?.trim() || null,
-        wrapped_up_at: call.wrapped_up_at ?? new Date().toISOString(),
-        ...(pickupChanged ? { pickup_status: body.pickupStatus, pickup_source: 'agent' } : {}),
-      })
-      .eq('id', call.id),
-  );
-
-  const contact = call.contact_id ? (must(await db().from('dialer_contacts').select('*').eq('id', call.contact_id).maybeSingle()) as Contact | null) : null;
-  const campaign = call.campaign_id ? (must(await db().from('dialer_campaigns').select('*').eq('id', call.campaign_id).maybeSingle()) as Campaign | null) : null;
-
-  if (contact && campaign) {
-    const attempts = firstWrapUp ? contact.attempts + 1 : contact.attempts;
-    must(
-      await db()
-        .from('dialer_contacts')
-        .update({
-          attempts,
-          last_called_at: call.started_at,
-          last_disposition: body.disposition,
-          status: contactOutcome(body.disposition),
-          next_attempt_at: null,
-          locked_by: null,
-          locked_at: null,
-          // Keep corrections the rep made in the lead form.
-          ...(needsLead && body.lead ? { full_name: body.lead.fullName.trim() || contact.full_name, email: body.lead.email.trim() || contact.email } : {}),
-        })
-        .eq('id', contact.id),
-    );
+  const saved = must(
+    await db().rpc('dialer_wrap_up', {
+      p_call_id: body.callId,
+      p_user_id: user.id,
+      p_pickup: body.pickupStatus,
+      p_disposition: body.disposition,
+      p_notes: body.notes ?? '',
+      p_contact_status: contactOutcome(body.disposition),
+      p_lead_name: needsLead ? (body.lead?.fullName ?? null) : null,
+      p_lead_email: needsLead ? (body.lead?.email ?? null) : null,
+    }),
+  ) as {
+    error?: string;
+    contact_id: string | null;
+    airtable_lead_id: string | null;
+    campaign_name: string | null;
+    airtable_client_id: string | null;
+    linkedin: string | null;
+    website: string | null;
+  };
+  if (saved.error) {
+    const [status, message] = REFUSALS[saved.error] ?? [400, 'Could not save this call.'];
+    throw new HttpError(status, message);
   }
 
-  // Do Not Call applies to the number everywhere, not just this campaign.
-  if (body.disposition === 'Do Not Call' && call.phone_e164) {
-    must(await db().from('dialer_contacts').update({ status: 'do_not_call', locked_by: null, locked_at: null }).eq('phone_e164', call.phone_e164));
-  }
-
-  let leadId = call.airtable_lead_id;
+  let leadId = saved.airtable_lead_id;
   let leadError: string | null = null;
   if (needsLead && body.lead && !leadId) {
-    if (!campaign) throw new HttpError(400, "This call's campaign no longer exists, so a Lead can't be created.");
+    if (!saved.airtable_client_id) throw new HttpError(400, "This call's campaign no longer exists, so a lead can't be created.");
     try {
       leadId = await createRecord(
         'Leads',
         buildLeadFields(body.disposition, body.lead, {
-          airtableClientId: campaign.airtable_client_id,
-          campaignName: campaign.name,
-          linkedin: call.linkedin,
-          website: call.website,
+          airtableClientId: saved.airtable_client_id,
+          campaignName: saved.campaign_name ?? '',
+          linkedin: saved.linkedin,
+          website: saved.website,
           todaySydney: todayInSydney(),
         }),
       );
-      must(await db().from('dialer_calls').update({ airtable_lead_id: leadId, lead_sync_error: null }).eq('id', call.id));
-      if (contact) must(await db().from('dialer_contacts').update({ airtable_lead_id: leadId }).eq('id', contact.id));
+      await Promise.all([
+        db().from('dialer_calls').update({ airtable_lead_id: leadId, lead_sync_error: null }).eq('id', body.callId).then(must),
+        saved.contact_id ? db().from('dialer_contacts').update({ airtable_lead_id: leadId }).eq('id', saved.contact_id).then(must) : null,
+      ]);
     } catch (err) {
-      leadError = err instanceof Error ? err.message : 'Could not create the Lead in Airtable.';
-      console.error('Lead creation failed for call', call.id, err);
-      must(await db().from('dialer_calls').update({ lead_sync_error: leadError }).eq('id', call.id));
+      leadError = err instanceof Error ? err.message : 'Could not create the lead in the CRM.';
+      console.error('Lead creation failed for call', body.callId, err);
+      must(await db().from('dialer_calls').update({ lead_sync_error: leadError }).eq('id', body.callId));
     }
   }
 

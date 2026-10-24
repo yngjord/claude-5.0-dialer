@@ -3,7 +3,7 @@ import { normalizePhone } from '../../shared/phone';
 import { db, must } from './_lib/db';
 import { handler, twiml, xml } from './_lib/http';
 import { routeInbound } from './_lib/routing';
-import { callbackUrl, verifyTwilioWebhook } from './_lib/twilio';
+import { callbackUrl, verifyTwilioWebhook } from './_lib/webhook';
 
 const DEFAULT_GREETING = "Hi, sorry we can't take your call right now. Please leave a message after the tone and we'll get back to you.";
 

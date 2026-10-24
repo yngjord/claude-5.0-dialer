@@ -1,7 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { db, must } from './_lib/db';
 import { handler, json } from './_lib/http';
-import { verifyTwilioWebhook } from './_lib/twilio';
+import { verifyTwilioWebhook } from './_lib/webhook';
 
 /** POST /api/twilio/sms-status: delivery updates for texts we sent (sent, delivered, undelivered, failed). */
 export default handler(async (req) => {
