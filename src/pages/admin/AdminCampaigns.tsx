@@ -413,7 +413,7 @@ function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onCl
               Save as draft
             </Button>
             <Button onClick={() => run('active')} disabled={saving || total === 0 || !name.trim()}>
-              {saving ? <Spinner /> : <Plus size={15} />} Save &amp; launch ({total.toLocaleString()} contact{total === 1 ? '' : 's'})
+              {saving ? <Spinner /> : <Plus size={15} />} Save &amp; launch
             </Button>
           </>
         )
@@ -457,7 +457,12 @@ function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onCl
                 </li>
               ))}
             </ul>
-            <p className="mt-1 text-xs text-ink-faint">Do Not Call numbers are never included.</p>
+            <p className="mt-1 text-xs text-ink-faint">
+              <b className="font-medium text-ink-soft">
+                {total.toLocaleString()} contact{total === 1 ? '' : 's'}
+              </b>{' '}
+              will be copied into the new campaign. Do Not Call numbers are never included.
+            </p>
           </div>
           <div>
             <label htmlFor="rerun-name" className="mb-2 block text-sm font-medium text-ink-soft">
