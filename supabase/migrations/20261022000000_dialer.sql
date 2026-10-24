@@ -72,6 +72,23 @@ create table if not exists public.dialer_campaign_members (
 );
 create index if not exists dialer_campaign_members_user on public.dialer_campaign_members (user_id);
 
+-- One team member per campaign (there's no way yet to split a campaign's contacts between reps). Admins can dial
+-- every campaign without being members. Checked on new assignments only.
+create or replace function public.dialer_one_team_member() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from profiles where id = new.user_id and role::text = 'team')
+     and exists (select 1 from dialer_campaign_members m join profiles p on p.id = m.user_id
+                 where m.campaign_id = new.campaign_id and m.user_id <> new.user_id and p.role::text = 'team') then
+    raise exception 'A campaign can only be assigned to one team member' using errcode = 'P0001';
+  end if;
+  return new;
+end $$;
+revoke execute on function public.dialer_one_team_member() from public, anon, authenticated;
+drop trigger if exists dialer_campaign_members_one_team on public.dialer_campaign_members;
+create trigger dialer_campaign_members_one_team before insert or update on public.dialer_campaign_members
+  for each row execute function public.dialer_one_team_member();
+
 -- Statuses were active / paused / archived; archived campaigns become completed.
 alter table public.dialer_campaigns drop constraint if exists dialer_campaigns_status_check;
 update public.dialer_campaigns set status = 'completed' where status = 'archived';
@@ -598,8 +615,14 @@ begin
   values (trim(p_name), src.client_name, src.airtable_client_id, src.caller_number_id, p_status, auth.uid())
   returning id into new_id;
 
+  -- The team member (only one, even if the original has more from before that rule), plus any admins.
   insert into dialer_campaign_members (campaign_id, user_id)
-  select new_id, m.user_id from dialer_campaign_members m where m.campaign_id = p_campaign_id;
+  select new_id, m.user_id from dialer_campaign_members m join profiles p on p.id = m.user_id
+  where m.campaign_id = p_campaign_id
+    and (p.role::text <> 'team'
+         or m.user_id = (select m2.user_id from dialer_campaign_members m2 join profiles p2 on p2.id = m2.user_id
+                         where m2.campaign_id = p_campaign_id and p2.role::text = 'team'
+                         order by coalesce(nullif(trim(p2.display_name), ''), p2.email) limit 1));
 
   insert into dialer_contacts (campaign_id, full_name, first_name, company, title, email, phone_e164, phone_raw, linkedin, website, custom, source)
   select new_id, c.full_name, c.first_name, c.company, c.title, c.email, c.phone_e164, c.phone_raw, c.linkedin, c.website, c.custom, c.source

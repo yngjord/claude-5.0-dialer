@@ -69,7 +69,10 @@ beforeAll(async () => {
     insert into dialer_campaigns (id, name, client_name, airtable_client_id) values
       ('${CAMPAIGN}', 'Kintell Oct', 'Kintell', 'recKintell'),
       ('${OTHER_CAMPAIGN}', 'Other', 'Morfless', 'recMorfless');
+    -- Two team members on one campaign, as campaigns assigned before the one-team-member rule can still have.
+    alter table dialer_campaign_members disable trigger dialer_campaign_members_one_team;
     insert into dialer_campaign_members (campaign_id, user_id) values ('${CAMPAIGN}', '${TEAM1}'), ('${CAMPAIGN}', '${TEAM2}');
+    alter table dialer_campaign_members enable trigger dialer_campaign_members_one_team;
     insert into dialer_contacts (campaign_id, full_name, phone_e164, created_at) values
       ('${CAMPAIGN}', 'A', '+61411111111', now() - interval '3 hours'),
       ('${CAMPAIGN}', 'B', '+61422222222', now() - interval '2 hours'),
@@ -275,8 +278,9 @@ describe('re-run by disposition', () => {
       { full_name: 'NA1', status: 'new', attempts: 0, custom: { industry: 'SaaS' } },
       { full_name: 'NA2', status: 'new', attempts: 0, custom: {} },
     ]);
+    // The original has two team members from before the one-team-member rule; the copy gets one.
     const members = await rows('select user_id from dialer_campaign_members where campaign_id = $1', [made.campaign_id]);
-    expect(members).toHaveLength(2);
+    expect(members).toEqual([{ user_id: TEAM1 }]);
     // The original campaign is untouched.
     const [orig] = await rows<{ status: string }>(`select status from dialer_contacts where campaign_id = '${CAMPAIGN}' and full_name = 'NA1'`);
     expect(orig.status).toBe('done');
@@ -407,6 +411,19 @@ describe('custom fields', () => {
       await pg.exec('reset role');
     }
     await expect(as(TEAM1, () => pg.query(`insert into dialer_custom_fields (key, label) values ('sneaky', 'S')`))).rejects.toThrow();
+  });
+});
+
+describe('campaign assignment', () => {
+  it('allows one team member per campaign, plus admins', async () => {
+    const id = '10000000-0000-0000-0000-0000000000a1';
+    await pg.exec(`insert into dialer_campaigns (id, name, client_name, airtable_client_id) values ('${id}', 'Solo', 'Kintell', 'recKintell')`);
+    await pg.exec(`insert into dialer_campaign_members (campaign_id, user_id) values ('${id}', '${TEAM1}'), ('${id}', '${ADMIN}')`);
+    await expect(pg.exec(`insert into dialer_campaign_members (campaign_id, user_id) values ('${id}', '${TEAM2}')`)).rejects.toThrow(/one team member/);
+    // Swapping: remove the old one first, then add the new one.
+    await pg.exec(`delete from dialer_campaign_members where campaign_id = '${id}' and user_id = '${TEAM1}'`);
+    await pg.exec(`insert into dialer_campaign_members (campaign_id, user_id) values ('${id}', '${TEAM2}')`);
+    await pg.exec(`delete from dialer_campaigns where id = '${id}'`);
   });
 });
 

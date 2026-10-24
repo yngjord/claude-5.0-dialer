@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { CallRow, Campaign, Contact } from '../../shared/types';
 import { api } from '../lib/api';
 import { supabase } from '../lib/supabase';
-import { startRingback } from './ringback';
+import { playDialChime, startRingback } from './ringback';
 import { callStatusLabel } from './status';
 
 export type CallPhase = 'connecting' | 'ringing' | 'live' | 'ended';
@@ -71,6 +71,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           closeProtection: 'You are on a call. Leaving will hang up.',
           logLevel: 'error',
         });
+        // The chime plays when the rep presses Call instead of when the prospect answers (see dial).
+        device.audio?.outgoing(false);
         device.on('tokenWillExpire', async () => device.updateToken(await fetchToken()));
         device.on('error', (err: { message?: string }) => setDeviceError(err.message ?? 'Phone connection error'));
         deviceRef.current = device;
@@ -98,6 +100,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       await start();
       const device = deviceRef.current!;
       const callId = crypto.randomUUID();
+      playDialChime();
       setActive({ callId, contact, campaign, mode, phase: 'connecting', muted: false, answeredAt: null, row: null, error: null });
 
       try {

@@ -72,6 +72,7 @@ export default handler(async (req) => {
           linkedin: saved.linkedin,
           website: saved.website,
           todaySydney: todayInSydney(),
+          attributedTo: user.email,
         }),
       );
       await Promise.all([

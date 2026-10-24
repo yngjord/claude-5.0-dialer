@@ -58,7 +58,7 @@ describe('contactOutcome', () => {
 
 describe('leads', () => {
   const lead: LeadInput = { fullName: ' Jane Doe ', email: 'jane@acme.com', phone: '+61412345678', notes: 'Call back Tues' };
-  const ctx = { airtableClientId: 'recABC', campaignName: 'Kintell Oct', linkedin: 'https://linkedin.com/in/jane', website: null, todaySydney: '2026-10-22' };
+  const ctx = { airtableClientId: 'recABC', campaignName: 'Kintell Oct', linkedin: 'https://linkedin.com/in/jane', website: null, todaySydney: '2026-10-22', attributedTo: 'tom@maronly.com' };
 
   it('builds a Nurture lead for Needs Follow-Up', () => {
     expect(buildLeadFields('Interested - Needs Follow-Up', lead, ctx)).toEqual({
@@ -73,6 +73,7 @@ describe('leads', () => {
       'Record Status': 'Open',
       Stage: 'Nurture',
       'Next follow up': '2026-10-22',
+      fldKG3QEhKosSdvxc: 'tom@maronly.com',
     });
   });
 

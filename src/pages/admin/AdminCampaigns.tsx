@@ -510,19 +510,21 @@ function MembersModal({
       setPhotoBusy(null);
     }
   };
-  const [selected, setSelected] = useState(() => new Set(campaign.campaign_members.map((m) => m.user_id)));
+  // One team member per campaign (admins can dial every campaign anyway).
+  const teamIds = new Set(users.filter((u) => u.role === 'team').map((u) => u.id));
+  const before = campaign.campaign_members.map((m) => m.user_id).filter((id) => teamIds.has(id));
+  const [assignee, setAssignee] = useState<string | null>(before[0] ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const save = async () => {
     setSaving(true);
     setError(null);
-    const before = new Set(campaign.campaign_members.map((m) => m.user_id));
-    const add = [...selected].filter((id) => !before.has(id));
-    const remove = [...before].filter((id) => !selected.has(id));
+    const remove = before.filter((id) => id !== assignee);
     try {
-      if (add.length) must(await supabase.from('dialer_campaign_members').insert(add.map((user_id) => ({ campaign_id: campaign.id, user_id }))));
+      // Remove first: the database allows only one team member per campaign.
       if (remove.length) must(await supabase.from('dialer_campaign_members').delete().eq('campaign_id', campaign.id).in('user_id', remove));
+      if (assignee && !before.includes(assignee)) must(await supabase.from('dialer_campaign_members').insert({ campaign_id: campaign.id, user_id: assignee }));
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save.');
@@ -545,25 +547,31 @@ function MembersModal({
         </>
       }
     >
-      <p className="mb-4 text-sm text-ink-muted">Admins can dial every campaign. Team members only see the ones they're ticked for here. Use the camera button to add someone's profile picture.</p>
+      <p className="mb-4 text-sm text-ink-muted">
+        Pick the one team member who dials this campaign; only they will see it. Admins can dial every campaign. Use the camera button to add someone's profile picture.
+      </p>
+      {before.length > 1 && (
+        <p className="mb-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          This campaign has {before.length} team members from before. Saving keeps only the one selected below.
+        </p>
+      )}
       <ul className="divide-y divide-line">
         {users.map((u) => (
           <li key={u.id} className="flex items-center gap-2">
             <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-3">
-              <input
-                type="checkbox"
-                className="h-4 w-4 accent-brand"
-                checked={u.role === 'admin' || selected.has(u.id)}
-                disabled={u.role === 'admin'}
-                onChange={(e) =>
-                  setSelected((s) => {
-                    const next = new Set(s);
-                    if (e.target.checked) next.add(u.id);
-                    else next.delete(u.id);
-                    return next;
-                  })
-                }
-              />
+              {u.role === 'admin' ? (
+                <input type="checkbox" className="h-4 w-4 accent-brand" checked disabled aria-label="Admins can dial every campaign" />
+              ) : (
+                <input
+                  type="radio"
+                  name="assignee"
+                  className="h-4 w-4 accent-brand"
+                  checked={assignee === u.id}
+                  onChange={() => setAssignee(u.id)}
+                  // Clicking the selected person again unassigns them.
+                  onClick={() => assignee === u.id && setAssignee(null)}
+                />
+              )}
               <Avatar url={avatars.get(u.id)} name={u.display_name || u.email} size="h-9 w-9" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{u.display_name || u.email}</span>

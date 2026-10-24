@@ -39,3 +39,18 @@ export function startRingback(): () => void {
     ctx.close().catch(() => undefined);
   };
 }
+
+// Twilio's own "outgoing" chime (the SDK plays it when a call is answered; we turn that off and play it on dial).
+const DIAL_CHIME = 'https://sdk.twilio.com/js/client/sounds/releases/1.0.0/outgoing.mp3';
+let chime: HTMLAudioElement | null = null;
+
+/** Plays the dial chime the moment a call is started, so the rep knows it's dialing. */
+export function playDialChime(): void {
+  try {
+    chime ??= new Audio(DIAL_CHIME);
+    chime.currentTime = 0;
+    void chime.play().catch(() => undefined);
+  } catch {
+    // no audio available: dialing works without it
+  }
+}

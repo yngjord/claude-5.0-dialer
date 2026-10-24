@@ -29,7 +29,14 @@ export interface LeadFields {
   'Booked For': string;
   'Time Booked for (plain text)': string;
   'Date Booked': string;
+  [ATTRIBUTED_TO_FIELD]: string;
 }
+
+/**
+ * Leads → "Attirbuted to - new dialer" (text): the email of the rep who created the lead. Written by field id, so
+ * renaming the field in Airtable (e.g. fixing the spelling) doesn't break it.
+ */
+export const ATTRIBUTED_TO_FIELD = 'fldKG3QEhKosSdvxc';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -53,7 +60,7 @@ export function validateLead(disposition: Disposition, lead: LeadInput): string[
 export function buildLeadFields(
   disposition: Disposition,
   lead: LeadInput,
-  ctx: { airtableClientId: string; campaignName: string; linkedin: string | null; website: string | null; todaySydney: string },
+  ctx: { airtableClientId: string; campaignName: string; linkedin: string | null; website: string | null; todaySydney: string; attributedTo: string },
 ): Partial<LeadFields> {
   const fields: Partial<LeadFields> = {
     'Prospect Full Name': lead.fullName.trim(),
@@ -66,6 +73,7 @@ export function buildLeadFields(
     'Linkedin Profile': ctx.linkedin?.trim() ?? '',
     Website: ctx.website?.trim() ?? '',
     'Record Status': 'Open',
+    [ATTRIBUTED_TO_FIELD]: ctx.attributedTo.trim(),
   };
 
   if (disposition === APPOINTMENT_SET) {
