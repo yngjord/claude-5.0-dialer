@@ -12,7 +12,7 @@ type Attachment = { url: string; thumbnails?: { large?: { url: string } } };
 const STAGES = ['Booking', 'Closed'];
 
 /**
- * GET /api/my-leads: the Airtable Leads the logged-in rep created through the dialer (Leads → "Attirbuted to - new
+ * GET /api/my-leads: the Airtable Leads the logged-in rep created through the dialer (Leads → "Attributed to - new
  * dialer" = their login email), Booking and Closed only, newest first, with each client's name and logo.
  */
 export default handler(async (req) => {
