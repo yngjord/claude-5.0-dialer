@@ -174,29 +174,36 @@ describe('claim_next_contact', () => {
 });
 
 describe('re-run by disposition', () => {
-  it('admins put chosen contacts back in the queue, never Do Not Call numbers; team members cannot', async () => {
+  it('admins copy chosen contacts into a new campaign, never Do Not Call numbers; team members cannot', async () => {
     await pg.exec(`
-      insert into dialer_contacts (campaign_id, full_name, phone_e164, status, last_disposition) values
-        ('${CAMPAIGN}', 'NA1', '+61470000001', 'done', 'No Answer'),
-        ('${CAMPAIGN}', 'NA2', '+61470000002', 'done', 'No Answer'),
-        ('${CAMPAIGN}', 'NI', '+61470000003', 'done', 'Not Interested'),
-        ('${CAMPAIGN}', 'NA but DNC', '+61470000004', 'done', 'No Answer'),
-        ('${OTHER_CAMPAIGN}', 'DNC', '+61470000004', 'do_not_call', 'Do Not Call');
+      insert into dialer_contacts (campaign_id, full_name, phone_e164, status, last_disposition, attempts, custom) values
+        ('${CAMPAIGN}', 'NA1', '+61470000001', 'done', 'No Answer', 1, '{"industry":"SaaS"}'),
+        ('${CAMPAIGN}', 'NA2', '+61470000002', 'done', 'No Answer', 1, '{}'),
+        ('${CAMPAIGN}', 'NI', '+61470000003', 'done', 'Not Interested', 1, '{}'),
+        ('${CAMPAIGN}', 'NA but DNC', '+61470000004', 'done', 'No Answer', 1, '{}'),
+        ('${OTHER_CAMPAIGN}', 'DNC', '+61470000004', 'do_not_call', 'Do Not Call', 1, '{}');
     `);
     const counts = await as(ADMIN, () => rows<{ disposition: string; contacts: number }>('select * from dialer_rerun_counts($1)', [CAMPAIGN]));
     expect(counts).toContainEqual({ disposition: 'No Answer', contacts: 2 });
     expect(await as(TEAM1, () => rows('select * from dialer_rerun_counts($1)', [CAMPAIGN]))).toEqual([]);
-    await expect(as(TEAM1, () => pg.query('select dialer_rerun_campaign($1, $2)', [CAMPAIGN, ['No Answer']]))).rejects.toThrow(/Only admins/);
+    await expect(as(TEAM1, () => pg.query('select * from dialer_rerun_as_new_campaign($1, $2, $3)', [CAMPAIGN, ['No Answer'], 'Again']))).rejects.toThrow(/Only admins/);
 
-    const [{ n }] = await as(ADMIN, () => rows<{ n: number }>('select dialer_rerun_campaign($1, $2) as n', [CAMPAIGN, ['No Answer']]));
-    expect(n).toBe(2);
-    const statuses = await rows<{ full_name: string; status: string }>(`select full_name, status from dialer_contacts where full_name in ('NA1', 'NA2', 'NI', 'NA but DNC') order by full_name`);
-    expect(statuses).toEqual([
-      { full_name: 'NA but DNC', status: 'done' },
-      { full_name: 'NA1', status: 'new' },
-      { full_name: 'NA2', status: 'new' },
-      { full_name: 'NI', status: 'done' },
+    const [made] = await as(ADMIN, () => rows<{ campaign_id: string; contacts: number }>('select * from dialer_rerun_as_new_campaign($1, $2, $3)', [CAMPAIGN, ['No Answer'], ' Kintell re-run ']));
+    expect(made.contacts).toBe(2);
+    const [camp] = await rows<{ name: string; client_name: string; status: string }>('select name, client_name, status from dialer_campaigns where id = $1', [made.campaign_id]);
+    expect(camp).toEqual({ name: 'Kintell re-run', client_name: 'Kintell', status: 'active' });
+    const copied = await rows<{ full_name: string; status: string; attempts: number; custom: unknown }>('select full_name, status, attempts, custom from dialer_contacts where campaign_id = $1 order by full_name', [made.campaign_id]);
+    expect(copied).toEqual([
+      { full_name: 'NA1', status: 'new', attempts: 0, custom: { industry: 'SaaS' } },
+      { full_name: 'NA2', status: 'new', attempts: 0, custom: {} },
     ]);
+    const members = await rows('select user_id from dialer_campaign_members where campaign_id = $1', [made.campaign_id]);
+    expect(members).toHaveLength(2);
+    // The original campaign is untouched.
+    const [orig] = await rows<{ status: string }>(`select status from dialer_contacts where campaign_id = '${CAMPAIGN}' and full_name = 'NA1'`);
+    expect(orig.status).toBe('done');
+
+    await pg.exec(`delete from dialer_campaigns where id = '${made.campaign_id}'`);
     await pg.exec(`delete from dialer_contacts where full_name in ('NA1', 'NA2', 'NI', 'NA but DNC', 'DNC')`);
   });
 });
@@ -253,7 +260,7 @@ describe('row level security', () => {
     try {
       await expect(pg.query('select * from dialer_claim_next_contact($1)', [CAMPAIGN])).rejects.toThrow(/permission denied/);
       await expect(pg.query('select * from dialer_users()')).rejects.toThrow(/permission denied/);
-      await expect(pg.query('select dialer_rerun_campaign($1, $2)', [CAMPAIGN, ['No Answer']])).rejects.toThrow(/permission denied/);
+      await expect(pg.query('select * from dialer_rerun_as_new_campaign($1, $2, $3)', [CAMPAIGN, ['No Answer'], 'x'])).rejects.toThrow(/permission denied/);
     } finally {
       await pg.exec('reset role');
     }

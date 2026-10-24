@@ -381,7 +381,7 @@ begin
   where c.id = p_contact_id and c.locked_by = auth.uid();
 end $$;
 
--- Re-run: how many called contacts there are per last disposition, then put the chosen ones back in the queue.
+-- Re-run: how many called contacts there are per last disposition, then copy the chosen ones into a new campaign.
 -- Admins only. Do Not Call numbers (here or in any campaign) are never put back.
 create or replace function public.dialer_rerun_counts(p_campaign_id uuid) returns table (disposition text, contacts int)
 language sql stable security definer set search_path = public as $$
@@ -392,19 +392,46 @@ language sql stable security definer set search_path = public as $$
   order by count(*) desc
 $$;
 
-create or replace function public.dialer_rerun_campaign(p_campaign_id uuid, p_dispositions text[]) returns int
+-- The first version re-queued contacts in place; re-runs now make a new campaign.
+drop function if exists public.dialer_rerun_campaign(uuid, text[]);
+
+-- Copies the chosen contacts (fresh, never called) into a new active campaign for the same client, caller number
+-- and team. The original campaign is left as it is.
+create or replace function public.dialer_rerun_as_new_campaign(p_campaign_id uuid, p_dispositions text[], p_name text)
+returns table (campaign_id uuid, contacts int)
 language plpgsql security definer set search_path = public as $$
 declare
+  src public.dialer_campaigns;
+  new_id uuid;
   n int;
 begin
   if not is_dialer_admin() then
     raise exception 'Only admins can re-run campaigns' using errcode = '42501';
   end if;
-  update dialer_contacts c set status = 'new', next_attempt_at = null, locked_by = null, locked_at = null
+  if coalesce(trim(p_name), '') = '' then
+    raise exception 'Give the new campaign a name' using errcode = 'P0001';
+  end if;
+  select * into src from dialer_campaigns where id = p_campaign_id;
+  if src.id is null then
+    raise exception 'Campaign not found' using errcode = 'P0002';
+  end if;
+
+  insert into dialer_campaigns (name, client_name, airtable_client_id, caller_number_id, status, created_by)
+  values (trim(p_name), src.client_name, src.airtable_client_id, src.caller_number_id, 'active', auth.uid())
+  returning id into new_id;
+
+  insert into dialer_campaign_members (campaign_id, user_id)
+  select new_id, m.user_id from dialer_campaign_members m where m.campaign_id = p_campaign_id;
+
+  insert into dialer_contacts (campaign_id, full_name, first_name, company, title, email, phone_e164, phone_raw, linkedin, website, custom, source)
+  select new_id, c.full_name, c.first_name, c.company, c.title, c.email, c.phone_e164, c.phone_raw, c.linkedin, c.website, c.custom, c.source
+  from dialer_contacts c
   where c.campaign_id = p_campaign_id and c.status in ('done', 'bad_number') and c.last_disposition = any(p_dispositions)
-    and not exists (select 1 from dialer_contacts d where d.phone_e164 = c.phone_e164 and d.status = 'do_not_call');
+    and not exists (select 1 from dialer_contacts d where d.phone_e164 = c.phone_e164 and d.status = 'do_not_call')
+  order by c.created_at;
   get diagnostics n = row_count;
-  return n;
+
+  return query select new_id, n;
 end $$;
 
 -- Team list for admin screens and agent names.
@@ -418,11 +445,11 @@ $$;
 -- Only signed-in users may call the dialer's functions (they also check the caller's role themselves).
 revoke execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
   public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
-  public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[]),
+  public.dialer_rerun_counts(uuid), public.dialer_rerun_as_new_campaign(uuid, text[], text),
   public.dialer_save_custom_fields(jsonb) from public, anon;
 grant execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
   public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
-  public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[]),
+  public.dialer_rerun_counts(uuid), public.dialer_rerun_as_new_campaign(uuid, text[], text),
   public.dialer_save_custom_fields(jsonb) to authenticated, service_role;
 
 -- ── Stats ───────────────────────────────────────────────────────────────────────────────────────────────────

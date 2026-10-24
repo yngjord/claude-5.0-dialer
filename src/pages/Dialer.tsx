@@ -5,7 +5,7 @@ import { APPOINTMENT_SET, CONNECTED_PICKUP_STATUS, NEEDS_FOLLOW_UP } from '../..
 import { formatPhone } from '../../shared/phone';
 import type { Campaign, Contact } from '../../shared/types';
 import { CallControls } from '../components/CallControls';
-import { ContactCard, PreviousCalls } from '../components/ContactCard';
+import { ContactCard } from '../components/ContactCard';
 import LoadingBar from '../components/LoadingBar';
 import { Button } from '../components/ui/Button';
 import { Spinner } from '../components/ui/Spinner';
@@ -167,29 +167,33 @@ export default function Dialer() {
   const shown = myCall?.contact ?? contact;
 
   return (
-    <FocusLayout title={campaign?.name ?? 'Power dialer'} subtitle={campaign?.client_name} onEnd={endSession} endBlocked={endBlocked}>
-      <div className="mx-auto max-w-3xl">
-        <div className="mb-6 flex animate-appear flex-wrap items-center justify-center gap-3">
-          <dl className="flex gap-2 text-center text-sm">
+    <FocusLayout
+      title={campaign?.name ?? 'Power dialer'}
+      subtitle={campaign?.client_name}
+      onEnd={endSession}
+      endBlocked={endBlocked}
+      toolbar={
+        <>
+          <div className="flex items-center gap-1 rounded-full border border-line bg-white py-1 pl-3.5 pr-1 text-sm" aria-label="This session">
+            <span className="mr-1 text-xs text-ink-muted">This session</span>
             {(
               [
-                ['Dials', session.dials],
-                ['Connects', session.connects],
-                ['Leads', session.leads],
+                ['dials', session.dials],
+                ['connects', session.connects],
+                ['leads', session.leads],
               ] as const
             ).map(([label, n]) => (
-              <div key={label} className="rounded-2xl border border-line bg-white px-4 py-2">
-                <dt className="text-[11px] text-ink-muted">{label}</dt>
-                <dd className="font-display text-lg font-medium tabular-nums">{n}</dd>
-              </div>
+              <span key={label} className="rounded-full bg-neutral-100 px-2.5 py-1">
+                <b className="font-display font-medium tabular-nums">{n}</b> <span className="text-ink-muted">{label}</span>
+              </span>
             ))}
-          </dl>
+          </div>
           <label className="sr-only" htmlFor="auto-delay">
             Auto-dial
           </label>
           <select
             id="auto-delay"
-            className="field !w-auto !py-2.5 text-sm"
+            className="field !w-auto !py-2 text-sm"
             value={delay}
             onChange={(e) => {
               const v = Number(e.target.value);
@@ -207,8 +211,10 @@ export default function Dialer() {
               </option>
             ))}
           </select>
-        </div>
-
+        </>
+      }
+    >
+      <div className="mx-auto max-w-3xl">
         {(error || deviceError) && (
           <p role="alert" className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
             {error ?? deviceError}
@@ -247,7 +253,7 @@ export default function Dialer() {
         ) : (
           <div className="animate-appear space-y-6">
             <section className="card p-5 sm:p-8">
-              <ContactCard key={shown.id} contact={shown} centered history={false}>
+              <ContactCard key={shown.id} contact={shown} centered history={false} sms={false}>
                 {myCall ? (
                   <div className="border-t border-line pt-6">
                     <CallControls call={myCall} />
@@ -300,10 +306,6 @@ export default function Dialer() {
                 <WrapUpForm key={myCall.callId} call={myCall} onDone={afterWrapUp} dialNextOption />
               </section>
             )}
-
-            <section className="card p-5 sm:p-8">
-              <PreviousCalls key={shown.id} contact={shown} />
-            </section>
           </div>
         )}
       </div>
@@ -315,17 +317,32 @@ export default function Dialer() {
  * The dialer runs full screen with no sidebar, so reps aren't distracted. "End dialling session" is the way back
  * to Campaigns (the browser's back button works too).
  */
-function FocusLayout({ title, subtitle, onEnd, endBlocked, children }: { title: string; subtitle?: string; onEnd: () => void; endBlocked: boolean; children: ReactNode }) {
+function FocusLayout({
+  title,
+  subtitle,
+  toolbar,
+  onEnd,
+  endBlocked,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  toolbar?: ReactNode;
+  onEnd: () => void;
+  endBlocked: boolean;
+  children: ReactNode;
+}) {
   return (
     <div className="min-h-screen">
       <LoadingBar />
       <header className="sticky top-0 z-30 border-b border-line bg-white/90 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-4 px-4 sm:px-6 lg:px-10">
+        <div className="mx-auto flex min-h-16 max-w-[1400px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 sm:px-6 lg:px-10">
           <img src="/maronly-mark.png" alt="Maronly" className="h-8 w-8" />
           <div className="min-w-0 flex-1">
             <p className="truncate font-display text-[17px] font-medium leading-tight">{title}</p>
             {subtitle && <p className="truncate text-xs text-ink-muted">{subtitle}</p>}
           </div>
+          {toolbar && <div className="order-last flex w-full flex-wrap items-center gap-2 md:order-none md:w-auto">{toolbar}</div>}
           <Button variant="outline" onClick={onEnd} disabled={endBlocked} title={endBlocked ? 'Hang up and save the wrap-up first' : undefined}>
             <LogOut size={16} /> End dialling session
           </Button>

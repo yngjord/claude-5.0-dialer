@@ -110,18 +110,11 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
     }
   };
 
-  // Keyboard: 1–9 picks a disposition, Enter saves (Ctrl/⌘+Enter inside the notes box).
+  // Keyboard: Enter saves (Ctrl/⌘+Enter inside the notes box).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const typing = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
-      if (!typing && /^[1-9]$/.test(e.key)) {
-        const d = DISPOSITIONS[Number(e.key) - 1];
-        if (d) {
-          setDisposition(d);
-          setDispositionTouched(true);
-        }
-      }
       if (e.key === 'Enter' && (!typing || e.metaKey || e.ctrlKey) && target.tagName !== 'BUTTON') {
         e.preventDefault();
         submit(undefined, false);
@@ -135,7 +128,7 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
     <form onSubmit={submit} className="space-y-5" noValidate>
       <div>
         <label htmlFor="pickup" className="mb-2 block text-sm font-medium text-ink-soft">
-          Pickup status {!pickupTouched && livePickup && <span className="font-normal text-ink-faint">(from Twilio)</span>}
+          Pickup status
         </label>
         <select
           id="pickup"
@@ -153,31 +146,27 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
         </select>
       </div>
 
-      <fieldset>
-        <legend className="mb-2 block text-sm font-medium text-ink-soft">Disposition</legend>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {DISPOSITIONS.map((d, i) => (
-            <label
-              key={d}
-              className={`flex cursor-pointer items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-[14px] transition ${disposition === d ? 'border-brand bg-brand-tint text-brand' : 'border-line-strong hover:border-brand'}`}
-            >
-              <input
-                type="radio"
-                name="disposition"
-                value={d}
-                checked={disposition === d}
-                onChange={() => {
-                  setDisposition(d);
-                  setDispositionTouched(true);
-                }}
-                className="sr-only"
-              />
-              <kbd className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border text-xs ${disposition === d ? 'border-brand/40' : 'border-line-strong text-ink-faint'}`}>{i + 1}</kbd>
+      <div>
+        <label htmlFor="disposition" className="mb-2 block text-sm font-medium text-ink-soft">
+          Disposition
+        </label>
+        <select
+          id="disposition"
+          className="field"
+          value={disposition}
+          onChange={(e) => {
+            setDisposition(e.target.value as Disposition);
+            setDispositionTouched(true);
+          }}
+        >
+          {!disposition && <option value="">Choose…</option>}
+          {DISPOSITIONS.map((d) => (
+            <option key={d} value={d}>
               {d}
-            </label>
+            </option>
           ))}
-        </div>
-      </fieldset>
+        </select>
+      </div>
 
       {needsLead && (
         <div className="space-y-4 rounded-card border-2 border-brand/20 bg-brand-tint/50 p-4 sm:p-5">

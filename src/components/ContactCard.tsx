@@ -11,9 +11,22 @@ import { Badge } from './ui/Badge';
 
 /**
  * Everything the rep needs on screen while dialing: who it is, links and custom fields, then `children` (the call
- * button or controls), then past calls to this number unless `history` is off. `centered` is the power dialer's layout.
+ * button or controls), then past calls to this number unless `history` is off. `centered` (and no history or Text
+ * button) is the power dialer's layout.
  */
-export function ContactCard({ contact, centered = false, history = true, children }: { contact: Contact; centered?: boolean; history?: boolean; children?: ReactNode }) {
+export function ContactCard({
+  contact,
+  centered = false,
+  history = true,
+  sms: canText = true,
+  children,
+}: {
+  contact: Contact;
+  centered?: boolean;
+  history?: boolean;
+  sms?: boolean;
+  children?: ReactNode;
+}) {
   const [sms, setSms] = useState(false);
   // Custom values are stored under field keys (dialer_custom_fields); show each field's name.
   const fieldNames = useLoad(
@@ -51,13 +64,15 @@ export function ContactCard({ contact, centered = false, history = true, childre
             {domainOf(contact.website)} <ExternalLink size={12} />
           </a>
         )}
-        <button onClick={() => setSms(true)} className="inline-flex items-center gap-1.5 rounded-full border border-line-strong px-3 py-1.5 hover:border-brand hover:text-brand">
-          <MessageSquare size={14} /> Text
-        </button>
+        {canText && (
+          <button onClick={() => setSms(true)} className="inline-flex items-center gap-1.5 rounded-full border border-line-strong px-3 py-1.5 hover:border-brand hover:text-brand">
+            <MessageSquare size={14} /> Text
+          </button>
+        )}
       </div>
 
       {custom.length > 0 && (
-        <dl className={`mt-5 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 ${centered ? 'mx-auto max-w-xl' : ''}`}>
+        <dl className={`mt-5 grid grid-cols-1 gap-x-6 gap-y-2 text-sm ${custom.length > 1 ? 'sm:grid-cols-2' : ''} ${centered ? 'mx-auto max-w-xl' : ''}`}>
           {custom.map(([k, v]) => (
             <div key={k} className="min-w-0">
               <dt className="text-xs text-ink-faint">{k}</dt>

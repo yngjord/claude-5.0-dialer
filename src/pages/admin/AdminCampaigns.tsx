@@ -90,7 +90,7 @@ export default function AdminCampaigns() {
                         </button>
                       </td>
                       <td className="td whitespace-nowrap text-right">
-                        <Button variant="ghost" onClick={() => setRerun(c)} title="Put called contacts back in the queue">
+                        <Button variant="ghost" onClick={() => setRerun(c)} title="Make a new campaign from contacts already called">
                           <RotateCcw size={15} /> Re-run
                         </Button>
                         <Button variant="ghost" onClick={() => setEditing(c)}>
@@ -117,7 +117,7 @@ export default function AdminCampaigns() {
           }}
         />
       )}
-      {rerun && <RerunModal campaign={rerun} onClose={() => setRerun(null)} />}
+      {rerun && <RerunModal campaign={rerun} onClose={() => setRerun(null)} onCreated={() => list.reload({ quiet: true })} />}
       {members && (
         <MembersModal
           campaign={members}
@@ -313,25 +313,33 @@ function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Camp
 }
 
 /**
- * Puts contacts that have been called back in the queue, picked by their last disposition, so the campaign can be
- * dialed again (e.g. every No Answer). Do Not Call numbers are never put back.
+ * Re-run: pick last dispositions (e.g. No Answer), name the new campaign, and the matching contacts are copied into it
+ * as fresh contacts, with the same client, caller number and team. The original campaign is left as it is.
+ * Do Not Call numbers are never copied.
  */
-function RerunModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
+function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onClose: () => void; onCreated: () => void }) {
   const counts = useLoad(async () => must(await supabase.rpc('dialer_rerun_counts', { p_campaign_id: campaign.id })) as { disposition: string; contacts: number }[], [campaign.id]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(['No Answer']));
+  const [name, setName] = useState(`${campaign.name} – re-run`);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<number | null>(null);
+  const [made, setMade] = useState<{ campaign_id: string; contacts: number } | null>(null);
 
   const total = counts.data?.filter((c) => selected.has(c.disposition)).reduce((n, c) => n + c.contacts, 0) ?? 0;
 
   const run = async () => {
+    if (!name.trim()) return setError('Give the new campaign a name.');
     setSaving(true);
     setError(null);
     try {
-      setDone(must(await supabase.rpc('dialer_rerun_campaign', { p_campaign_id: campaign.id, p_dispositions: [...selected] })) as number);
+      const [row] = must(await supabase.rpc('dialer_rerun_as_new_campaign', { p_campaign_id: campaign.id, p_dispositions: [...selected], p_name: name.trim() })) as {
+        campaign_id: string;
+        contacts: number;
+      }[];
+      setMade(row);
+      onCreated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not re-run the campaign.');
+      setError(err instanceof Error ? err.message : 'Could not create the campaign.');
     } finally {
       setSaving(false);
     }
@@ -342,23 +350,33 @@ function RerunModal({ campaign, onClose }: { campaign: Campaign; onClose: () => 
       title={`Re-run ${campaign.name}`}
       onClose={saving ? () => undefined : onClose}
       footer={
-        done != null ? (
-          <Button onClick={onClose}>Done</Button>
+        made ? (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+            <Link
+              to={`/campaigns/${made.campaign_id}`}
+              className="inline-flex h-10 items-center rounded-full border border-brand bg-brand px-5 text-[15px] font-medium text-white transition hover:bg-brand-hover"
+            >
+              Open new campaign
+            </Link>
+          </>
         ) : (
           <>
             <Button variant="ghost" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={run} disabled={saving || total === 0}>
-              {saving ? <Spinner /> : <RotateCcw size={15} />} Re-queue {total.toLocaleString()} contact{total === 1 ? '' : 's'}
+            <Button onClick={run} disabled={saving || total === 0 || !name.trim()}>
+              {saving ? <Spinner /> : <Plus size={15} />} Create campaign with {total.toLocaleString()} contact{total === 1 ? '' : 's'}
             </Button>
           </>
         )
       }
     >
-      {done != null ? (
+      {made ? (
         <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-emerald-800">
-          {done.toLocaleString()} contact{done === 1 ? ' is' : 's are'} back in the queue{campaign.status === 'active' ? '' : `. The campaign is ${campaign.status}, so set it to Active to dial them`}.
+          Created <b>{name.trim()}</b> with {made.contacts.toLocaleString()} contact{made.contacts === 1 ? '' : 's'}, assigned to the same team. {campaign.name} hasn't changed.
         </p>
       ) : counts.loading ? (
         <LoadingRows label="Counting contacts…" />
@@ -367,33 +385,42 @@ function RerunModal({ campaign, onClose }: { campaign: Campaign; onClose: () => 
       ) : !counts.data?.length ? (
         <p className="text-ink-muted">No one in this campaign has been called yet.</p>
       ) : (
-        <>
-          <p className="mb-4 text-sm text-ink-muted">Choose which contacts to dial again, by how their last call went. They go back in the queue for everyone assigned to this campaign.</p>
-          <ul className="divide-y divide-line">
-            {counts.data.map((c) => (
-              <li key={c.disposition}>
-                <label className="flex cursor-pointer items-center gap-3 py-3">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 accent-brand"
-                    checked={selected.has(c.disposition)}
-                    onChange={(e) =>
-                      setSelected((s) => {
-                        const next = new Set(s);
-                        if (e.target.checked) next.add(c.disposition);
-                        else next.delete(c.disposition);
-                        return next;
-                      })
-                    }
-                  />
-                  <span className="flex-1 font-medium">{c.disposition}</span>
-                  <span className="tabular-nums text-ink-muted">{c.contacts.toLocaleString()}</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-xs text-ink-faint">Do Not Call contacts are never re-queued.</p>
-        </>
+        <div className="space-y-5">
+          <div>
+            <p className="mb-1 text-sm font-medium text-ink-soft">1. Contacts to include, by how their last call went</p>
+            <ul className="divide-y divide-line">
+              {counts.data.map((c) => (
+                <li key={c.disposition}>
+                  <label className="flex cursor-pointer items-center gap-3 py-3">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-brand"
+                      checked={selected.has(c.disposition)}
+                      onChange={(e) =>
+                        setSelected((s) => {
+                          const next = new Set(s);
+                          if (e.target.checked) next.add(c.disposition);
+                          else next.delete(c.disposition);
+                          return next;
+                        })
+                      }
+                    />
+                    <span className="flex-1 font-medium">{c.disposition}</span>
+                    <span className="tabular-nums text-ink-muted">{c.contacts.toLocaleString()}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs text-ink-faint">Do Not Call numbers are never included.</p>
+          </div>
+          <div>
+            <label htmlFor="rerun-name" className="mb-2 block text-sm font-medium text-ink-soft">
+              2. Name the new campaign
+            </label>
+            <input id="rerun-name" className="field" value={name} onChange={(e) => setName(e.target.value)} />
+            <p className="mt-1.5 text-xs text-ink-faint">Same client ({campaign.client_name}), caller number and team as {campaign.name}. You can change these after.</p>
+          </div>
+        </div>
       )}
       {error && (
         <p role="alert" className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">

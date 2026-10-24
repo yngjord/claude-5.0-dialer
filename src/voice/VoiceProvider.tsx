@@ -162,8 +162,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     return () => timers.forEach(clearTimeout);
   }, [callId, ended, patch]);
 
-  // Ring tone while the call is being placed; stops on answer, voicemail detection or hang-up.
-  const dialing = !!active && ['Connecting…', 'Ringing…'].includes(callStatusLabel(active).label);
+  // Ring tone once Twilio reports the prospect's phone is ringing; stops on answer, voicemail detection or hang-up.
+  const dialing = !!active && callStatusLabel(active).label === 'Ringing…';
   useEffect(() => {
     if (!dialing) return;
     return startRingback();
