@@ -1,5 +1,5 @@
 import { FileUp } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import {
   buildImport,
   columnCustomKey,
@@ -56,6 +56,21 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<number | null>(null);
   const [dedupe, setDedupe] = useState(true);
+  const [dragging, setDragging] = useState(false);
+
+  // While this is open, a file dropped anywhere outside the drop box is ignored instead of the browser opening or
+  // downloading it.
+  useEffect(() => {
+    const stop = (e: globalThis.DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    };
+    window.addEventListener('dragover', stop);
+    window.addEventListener('drop', stop);
+    return () => {
+      window.removeEventListener('dragover', stop);
+      window.removeEventListener('drop', stop);
+    };
+  }, []);
 
   const hasPhone = mapping.some((t) => t.kind === 'field' && t.field === 'phone');
   const preview = useMemo(() => (rows && existing && hasPhone ? buildImport(rows, mapping, existing) : null), [rows, mapping, existing, hasPhone]);
@@ -148,9 +163,25 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
       {done != null ? (
         <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-emerald-800">Added {done.toLocaleString()} contacts to the campaign.</p>
       ) : !rows ? (
-        <label className="flex cursor-pointer flex-col items-center gap-3 rounded-card border-2 border-dashed border-line-strong px-6 py-10 text-center transition hover:border-brand">
+        <label
+          className={`flex cursor-pointer flex-col items-center gap-3 rounded-card border-2 border-dashed px-6 py-10 text-center transition hover:border-brand ${dragging ? 'border-brand bg-brand-tint' : 'border-line-strong'}`}
+          onDragOver={(e: DragEvent) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e: DragEvent) => {
+            e.preventDefault();
+            setDragging(false);
+            const file = e.dataTransfer.files?.[0];
+            if (!file || busy) return;
+            if (!/\.csv$/i.test(file.name) && file.type !== 'text/csv') return setError('That isn\'t a CSV file. Export the list as .csv and try again.');
+            onFile(file);
+          }}
+        >
           {busy ? <Spinner className="text-brand" size={22} /> : <FileUp className="text-brand" size={28} />}
-          <span className="font-medium">Choose a CSV file</span>
+          <span className="font-medium">{dragging ? 'Drop the CSV here' : 'Choose a CSV file, or drag it here'}</span>
           <span className="text-sm text-ink-muted">One row per contact with a header row. Only AU and NZ mobiles can be imported.</span>
           <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         </label>
