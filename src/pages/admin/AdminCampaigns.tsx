@@ -14,6 +14,7 @@ import { api, must, useLoad } from '../../lib/api';
 import { removeAvatar, uploadAvatar, useAvatarUrls } from '../../lib/avatars';
 import { useClientLogos } from '../../lib/clientLogos';
 import { supabase } from '../../lib/supabase';
+import { CAMPAIGN_STATUS } from '../../lib/tones';
 
 type Row = Campaign & { campaign_members: { user_id: string }[] };
 
@@ -85,7 +86,7 @@ export default function AdminCampaigns() {
                         </Link>
                       </td>
                       <td className="td">
-                        <Badge tone={c.status === 'active' ? 'green' : c.status === 'paused' ? 'amber' : 'grey'}>{c.status}</Badge>
+                        <Badge tone={CAMPAIGN_STATUS[c.status].tone}>{CAMPAIGN_STATUS[c.status].label}</Badge>
                       </td>
                       <td className="td tabular-nums text-ink-muted">
                         {callerLabel(c)}
@@ -191,8 +192,9 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const save = async (e: FormEvent) => {
-    e.preventDefault();
+  // New campaigns: "Save as draft" or "Save & launch" (active). Editing: the status picked below.
+  const save = async (e: FormEvent | null, newStatus?: Campaign['status']) => {
+    e?.preventDefault();
     const client = clients.data?.find((c) => c.id === clientId);
     if (!name.trim()) return setError('Give the campaign a name.');
     if (!client) return setError('Choose the client.');
@@ -204,7 +206,7 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
       client_name: client.name,
       airtable_client_id: client.id,
       caller_number_id: numberId || null,
-      status,
+      status: newStatus ?? status,
     };
     const { error } = campaign
       ? await supabase.from('dialer_campaigns').update(fields).eq('id', campaign.id)
@@ -230,13 +232,24 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form="campaign-form" disabled={saving}>
-            {saving && <Spinner />} Save
-          </Button>
+          {campaign ? (
+            <Button type="submit" form="campaign-form" disabled={saving}>
+              {saving && <Spinner />} Save
+            </Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => save(null, 'draft')} disabled={saving}>
+                Save as draft
+              </Button>
+              <Button onClick={() => save(null, 'active')} disabled={saving}>
+                {saving && <Spinner />} Save &amp; launch
+              </Button>
+            </>
+          )}
         </>
       }
     >
-      <form id="campaign-form" onSubmit={save} className="space-y-4" noValidate>
+      <form id="campaign-form" onSubmit={(e) => save(e)} className="space-y-4" noValidate>
         <div>
           <label htmlFor="c-name" className="mb-2 block text-sm font-medium text-ink-soft">
             Name
@@ -272,16 +285,22 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
           </select>
           <p className="mt-1.5 text-xs text-ink-faint">Leave as the client's number unless this campaign needs a different one. Set client numbers in Phone numbers.</p>
         </div>
-        <div>
-          <label htmlFor="c-status" className="mb-2 block text-sm font-medium text-ink-soft">
-            Status
-          </label>
-          <select id="c-status" className="field" value={status} onChange={(e) => setStatus(e.target.value as Campaign['status'])}>
-            <option value="active">Active</option>
-            <option value="paused">Paused (no dialing)</option>
-            <option value="archived">Archived (hidden)</option>
-          </select>
-        </div>
+        {campaign ? (
+          <div>
+            <label htmlFor="c-status" className="mb-2 block text-sm font-medium text-ink-soft">
+              Status
+            </label>
+            <select id="c-status" className="field" value={status} onChange={(e) => setStatus(e.target.value as Campaign['status'])}>
+              <option value="draft">Draft (only admins can see it)</option>
+              <option value="active">Active</option>
+              <option value="paused">Paused (the team can see it but not open or dial it)</option>
+              <option value="completed">Completed</option>
+            </select>
+            <p className="mt-1.5 text-xs text-ink-faint">Campaigns are marked Completed automatically once every contact has been called and wrapped up.</p>
+          </div>
+        ) : (
+          <p className="text-sm text-ink-muted">Save as a draft to set it up first (only admins can see drafts), or launch it so the team can start dialing.</p>
+        )}
         {error && (
           <p role="alert" className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
@@ -363,20 +382,20 @@ function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onCl
   const [name, setName] = useState(`${campaign.name} – re-run`);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [made, setMade] = useState<{ campaign_id: string; contacts: number } | null>(null);
+  const [made, setMade] = useState<{ campaign_id: string; contacts: number; status: 'draft' | 'active' } | null>(null);
 
   const total = counts.data?.filter((c) => selected.has(c.disposition)).reduce((n, c) => n + c.contacts, 0) ?? 0;
 
-  const run = async () => {
+  const run = async (status: 'draft' | 'active') => {
     if (!name.trim()) return setError('Give the new campaign a name.');
     setSaving(true);
     setError(null);
     try {
-      const [row] = must(await supabase.rpc('dialer_rerun_as_new_campaign', { p_campaign_id: campaign.id, p_dispositions: [...selected], p_name: name.trim() })) as {
+      const [row] = must(await supabase.rpc('dialer_rerun_campaign', { p_campaign_id: campaign.id, p_dispositions: [...selected], p_name: name.trim(), p_status: status })) as {
         campaign_id: string;
         contacts: number;
       }[];
-      setMade(row);
+      setMade({ ...row, status });
       onCreated();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the campaign.');
@@ -407,8 +426,11 @@ function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onCl
             <Button variant="ghost" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={run} disabled={saving || total === 0 || !name.trim()}>
-              {saving ? <Spinner /> : <Plus size={15} />} Create campaign with {total.toLocaleString()} contact{total === 1 ? '' : 's'}
+            <Button variant="outline" onClick={() => run('draft')} disabled={saving || total === 0 || !name.trim()}>
+              Save as draft
+            </Button>
+            <Button onClick={() => run('active')} disabled={saving || total === 0 || !name.trim()}>
+              {saving ? <Spinner /> : <Plus size={15} />} Save &amp; launch ({total.toLocaleString()} contact{total === 1 ? '' : 's'})
             </Button>
           </>
         )
@@ -416,7 +438,8 @@ function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onCl
     >
       {made ? (
         <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-emerald-800">
-          Created <b>{name.trim()}</b> with {made.contacts.toLocaleString()} contact{made.contacts === 1 ? '' : 's'}, assigned to the same team. {campaign.name} hasn't changed.
+          Created <b>{name.trim()}</b> {made.status === 'draft' ? 'as a draft ' : ''}with {made.contacts.toLocaleString()} contact{made.contacts === 1 ? '' : 's'}, assigned to the
+          same team. {campaign.name} hasn't changed.
         </p>
       ) : counts.loading ? (
         <LoadingRows label="Counting contacts…" />

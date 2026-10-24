@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { formatPhone } from '../../shared/phone';
 import type { Campaign, CampaignStats, Contact } from '../../shared/types';
+import { useAuth } from '../auth/AuthProvider';
 import { ImportModal } from '../components/ImportModal';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -14,13 +15,14 @@ import { Tabs } from '../components/ui/Tabs';
 import { must, useLoad } from '../lib/api';
 import { formatDateTime, percent } from '../lib/format';
 import { supabase } from '../lib/supabase';
-import { CONTACT_STATUS_LABELS, DISPOSITION_TONES } from '../lib/tones';
+import { CAMPAIGN_STATUS, CONTACT_STATUS_LABELS, DISPOSITION_TONES } from '../lib/tones';
 
 const PER_PAGE = 50;
 type Filter = 'all' | 'queue' | 'done' | 'removed';
 const FILTERS: Record<Filter, string[] | null> = { all: null, queue: ['new', 'callback'], done: ['done'], removed: ['do_not_call', 'bad_number'] };
 
 export default function CampaignPage() {
+  const { isAdmin } = useAuth();
   const { id = '' } = useParams();
   const [importing, setImporting] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
@@ -61,6 +63,7 @@ export default function CampaignPage() {
   const stats = head.data?.stats;
   if (head.error) return <ErrorState message={head.error} onRetry={head.reload} />;
   if (!head.loading && !campaign) return <ErrorState message="Campaign not found, or you're not assigned to it." />;
+  if (campaign?.status === 'paused' && !isAdmin) return <ErrorState message="This campaign is paused. It'll open again once an admin resumes it." />;
 
   const total = list.data?.total ?? 0;
 
@@ -71,7 +74,7 @@ export default function CampaignPage() {
       </Link>
       <PageHeader
         title={campaign?.name ?? 'Campaign'}
-        subtitle={campaign ? `${campaign.client_name}${campaign.status !== 'active' ? ` · ${campaign.status}` : ''}` : undefined}
+        subtitle={campaign ? `${campaign.client_name}${campaign.status !== 'active' ? ` · ${CAMPAIGN_STATUS[campaign.status].label}` : ''}` : undefined}
         actions={
           <>
             <Button variant="outline" onClick={() => setImporting(true)}>
@@ -88,7 +91,12 @@ export default function CampaignPage() {
       />
 
       <div className="mb-6 grid animate-appear grid-cols-2 gap-4 sm:mb-8 lg:grid-cols-4">
-        <Metric label="Left to call" value={(stats?.contacts_remaining ?? 0).toLocaleString()} note={`of ${(stats?.contacts_total ?? 0).toLocaleString()} contacts`} loading={head.loading} />
+        <Metric
+          label="Completed"
+          value={((stats?.contacts_total ?? 0) - (stats?.contacts_remaining ?? 0)).toLocaleString()}
+          note={`of ${(stats?.contacts_total ?? 0).toLocaleString()} contacts`}
+          loading={head.loading}
+        />
         <Metric label="Dials today" value={(stats?.dials_today ?? 0).toLocaleString()} note={`${stats?.connects_today ?? 0} connected`} loading={head.loading} />
         <Metric label="Total dials" value={(stats?.dials_total ?? 0).toLocaleString()} loading={head.loading} />
         <Metric label="Connect rate" value={percent(stats?.connects_total ?? 0, stats?.dials_total ?? 0)} note="Human pickups ÷ dials" loading={head.loading} />

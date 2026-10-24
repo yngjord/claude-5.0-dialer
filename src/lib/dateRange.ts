@@ -1,6 +1,6 @@
 import { addDays, sydneyMidnight, sydneyToday } from './format';
 
-export type RangePreset = 'today' | '7' | '30' | '90' | 'all' | 'custom';
+export type RangePreset = 'today' | 'month' | '7' | '30' | '90' | 'all' | 'custom';
 
 export interface DateRange {
   preset: RangePreset;
@@ -9,7 +9,7 @@ export interface DateRange {
   to: string;
 }
 
-export const RANGE_LABELS: Record<RangePreset, string> = { today: 'Today', '7': 'Last 7 days', '30': 'Last 30 days', '90': 'Last 90 days', all: 'All time', custom: 'Custom dates' };
+export const RANGE_LABELS: Record<RangePreset, string> = { today: 'Today', month: 'This month', '7': 'Last 7 days', '30': 'Last 30 days', '90': 'Last 90 days', all: 'All time', custom: 'Custom dates' };
 
 export const defaultRange = (preset: RangePreset = '7'): DateRange => ({ preset, from: addDays(sydneyToday(), -6), to: sydneyToday() });
 
@@ -21,6 +21,8 @@ export function rangeBounds(r: DateRange): { from: string | null; to: string | n
       return { from: null, to: null };
     case 'today':
       return { from: sydneyMidnight(today), to: null };
+    case 'month':
+      return { from: sydneyMidnight(`${today.slice(0, 8)}01`), to: null };
     case 'custom': {
       const [from, to] = r.from <= r.to ? [r.from, r.to] : [r.to, r.from];
       return { from: sydneyMidnight(from), to: sydneyMidnight(addDays(to, 1)) };

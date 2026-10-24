@@ -57,7 +57,9 @@ create table if not exists public.dialer_campaigns (
   -- Airtable Clients record id (rec…), used to link created Leads.
   airtable_client_id text not null,
   caller_number_id uuid references public.dialer_phone_numbers(id) on delete set null,
-  status text not null default 'active' check (status in ('active', 'paused', 'archived')),
+  -- draft: admins only. active: dialing. paused: visible to the team but can't be opened. completed: every contact
+  -- wrapped up (set automatically, see dialer_campaign_completion).
+  status text not null default 'active' check (status in ('draft', 'active', 'paused', 'completed')),
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -70,10 +72,18 @@ create table if not exists public.dialer_campaign_members (
 );
 create index if not exists dialer_campaign_members_user on public.dialer_campaign_members (user_id);
 
+-- Statuses were active / paused / archived; archived campaigns become completed.
+alter table public.dialer_campaigns drop constraint if exists dialer_campaigns_status_check;
+update public.dialer_campaigns set status = 'completed' where status = 'archived';
+alter table public.dialer_campaigns add constraint dialer_campaigns_status_check check (status in ('draft', 'active', 'paused', 'completed'));
+
 create or replace function public.dialer_can_access_campaign(cid uuid) returns boolean
 language sql stable security definer set search_path = public as $$
+  -- Team members see the campaigns they're assigned to, except drafts.
   select is_dialer_admin()
-      or (is_dialer_user() and exists (select 1 from dialer_campaign_members where campaign_id = cid and user_id = auth.uid()))
+      or (is_dialer_user()
+          and exists (select 1 from dialer_campaign_members where campaign_id = cid and user_id = auth.uid())
+          and exists (select 1 from dialer_campaigns where id = cid and status <> 'draft'))
 $$;
 
 -- ── Contacts (call lists) ───────────────────────────────────────────────────────────────────────────────────
@@ -274,6 +284,29 @@ create trigger dialer_contacts_updated_at before update on public.dialer_contact
 drop trigger if exists dialer_calls_updated_at on public.dialer_calls;
 create trigger dialer_calls_updated_at before update on public.dialer_calls for each row execute function public.dialer_set_updated_at();
 
+-- A campaign is completed once every contact is wrapped up, and goes back to active if contacts are added later.
+-- Drafts and paused campaigns are left alone.
+create or replace function public.dialer_campaign_completion() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  cid uuid := coalesce(new.campaign_id, old.campaign_id);
+begin
+  if exists (select 1 from dialer_contacts where campaign_id = cid and status in ('new', 'callback')) then
+    update dialer_campaigns set status = 'active' where id = cid and status = 'completed';
+  elsif exists (select 1 from dialer_contacts where campaign_id = cid) then
+    update dialer_campaigns set status = 'completed' where id = cid and status = 'active';
+  end if;
+  return null;
+end $$;
+revoke execute on function public.dialer_campaign_completion() from public, anon, authenticated;
+drop trigger if exists dialer_contacts_completion on public.dialer_contacts;
+create trigger dialer_contacts_completion after insert or delete or update of status on public.dialer_contacts
+  for each row execute function public.dialer_campaign_completion();
+update public.dialer_campaigns c set status = 'completed'
+where c.status = 'active'
+  and exists (select 1 from dialer_contacts k where k.campaign_id = c.id)
+  and not exists (select 1 from dialer_contacts k where k.campaign_id = c.id and k.status in ('new', 'callback'));
+
 -- Calls keep the rep's name for the portal and stats; renaming someone renames them on all their calls.
 create or replace function public.dialer_sync_agent_name() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -408,12 +441,13 @@ language sql stable security definer set search_path = public as $$
   order by count(*) desc
 $$;
 
--- The first version re-queued contacts in place; re-runs now make a new campaign.
+-- Earlier versions: re-queue contacts in place, then copy them into an always-active campaign.
 drop function if exists public.dialer_rerun_campaign(uuid, text[]);
+drop function if exists public.dialer_rerun_as_new_campaign(uuid, text[], text);
 
--- Copies the chosen contacts (fresh, never called) into a new active campaign for the same client, caller number
--- and team. The original campaign is left as it is.
-create or replace function public.dialer_rerun_as_new_campaign(p_campaign_id uuid, p_dispositions text[], p_name text)
+-- Copies the chosen contacts (fresh, never called) into a new campaign (a draft, or launched as active) for the same
+-- client, caller number and team. The original campaign is left as it is.
+create or replace function public.dialer_rerun_campaign(p_campaign_id uuid, p_dispositions text[], p_name text, p_status text default 'draft')
 returns table (campaign_id uuid, contacts int)
 language plpgsql security definer set search_path = public as $$
 declare
@@ -427,13 +461,16 @@ begin
   if coalesce(trim(p_name), '') = '' then
     raise exception 'Give the new campaign a name' using errcode = 'P0001';
   end if;
+  if p_status not in ('draft', 'active') then
+    raise exception 'A new campaign starts as a draft or active' using errcode = 'P0001';
+  end if;
   select * into src from dialer_campaigns where id = p_campaign_id;
   if src.id is null then
     raise exception 'Campaign not found' using errcode = 'P0002';
   end if;
 
   insert into dialer_campaigns (name, client_name, airtable_client_id, caller_number_id, status, created_by)
-  values (trim(p_name), src.client_name, src.airtable_client_id, src.caller_number_id, 'active', auth.uid())
+  values (trim(p_name), src.client_name, src.airtable_client_id, src.caller_number_id, p_status, auth.uid())
   returning id into new_id;
 
   insert into dialer_campaign_members (campaign_id, user_id)
@@ -474,11 +511,11 @@ grant execute on function public.dialer_set_avatar(uuid, text) to authenticated,
 -- Only signed-in users may call the dialer's functions (they also check the caller's role themselves).
 revoke execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
   public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
-  public.dialer_rerun_counts(uuid), public.dialer_rerun_as_new_campaign(uuid, text[], text),
+  public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[], text, text),
   public.dialer_save_custom_fields(jsonb) from public, anon;
 grant execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
   public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
-  public.dialer_rerun_counts(uuid), public.dialer_rerun_as_new_campaign(uuid, text[], text),
+  public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[], text, text),
   public.dialer_save_custom_fields(jsonb) to authenticated, service_role;
 
 -- ── Stats ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -499,10 +536,10 @@ alter table public.dialer_campaigns drop column if exists max_attempts, drop col
 -- Contacts the old retry rules had scheduled for another try count as called; re-run brings them back.
 update public.dialer_contacts set status = 'done', next_attempt_at = null where status = 'callback';
 
--- Daily totals per rep (optionally for one campaign), for the Stats page. Runs with the caller's access (RLS on
+-- Daily totals per rep (optionally for one campaign or one client), for the Campaigns page metrics. Runs with the caller's access (RLS on
 -- calls applies). One row per day per rep keeps it well under PostgREST's 1000-row limit.
 drop function if exists public.dialer_call_stats(timestamptz, timestamptz, uuid);
-create or replace function public.dialer_call_stats(p_from timestamptz, p_to timestamptz, p_campaign_id uuid default null)
+create or replace function public.dialer_call_stats(p_from timestamptz, p_to timestamptz, p_campaign_id uuid default null, p_client_name text default null)
 returns table (day date, user_id uuid, agent_name text, dials int, connects int, machine int, unanswered int,
                appointments int, follow_ups int, talk_seconds int)
 language sql stable security invoker set search_path = public as $$
@@ -520,6 +557,7 @@ language sql stable security invoker set search_path = public as $$
   where x.direction = 'outbound' and x.source = 'dialer'
     and x.started_at >= p_from and x.started_at < p_to
     and (p_campaign_id is null or x.campaign_id = p_campaign_id)
+    and (p_client_name is null or x.client_name = p_client_name)
   group by 1, 2
   order by 1 desc
 $$;

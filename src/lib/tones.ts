@@ -1,3 +1,4 @@
+import type { CampaignStatus } from '../../shared/types';
 import type { Tone } from '../components/ui/Badge';
 
 // Mirrors the option colours in Airtable (same as the portal's Cold Call Logs).
@@ -28,4 +29,11 @@ export const CONTACT_STATUS_LABELS: Record<string, { label: string; tone: Tone }
   done: { label: 'Done', tone: 'grey' },
   do_not_call: { label: 'Do not call', tone: 'redSolid' },
   bad_number: { label: 'Bad number', tone: 'dark' },
+};
+
+export const CAMPAIGN_STATUS: Record<CampaignStatus, { label: string; tone: Tone }> = {
+  draft: { label: 'Draft', tone: 'grey' },
+  active: { label: 'Active', tone: 'green' },
+  paused: { label: 'Paused', tone: 'amber' },
+  completed: { label: 'Completed', tone: 'blue' },
 };

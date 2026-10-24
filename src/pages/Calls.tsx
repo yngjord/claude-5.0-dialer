@@ -71,7 +71,7 @@ export default function Calls() {
       <section className="card animate-appear p-4 sm:p-6">
         <div className="mb-5 flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <DateRangeFilter value={range} onChange={setRange} presets={['today', '7', '30', '90', 'all', 'custom']} />
+            <DateRangeFilter value={range} onChange={setRange} presets={['today', 'month', '7', '30', '90', 'all', 'custom']} />
             <select aria-label="Campaign" className={select} value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
               <option value="">All campaigns</option>
               {campaigns.data?.map((c) => (

@@ -32,13 +32,16 @@ export interface PhoneNumber {
   created_at: string;
 }
 
+/** draft: admins only. paused: visible to the team, can't be opened. completed: set when every contact is wrapped up. */
+export type CampaignStatus = 'draft' | 'active' | 'paused' | 'completed';
+
 export interface Campaign {
   id: string;
   name: string;
   client_name: string;
   airtable_client_id: string;
   caller_number_id: string | null;
-  status: 'active' | 'paused' | 'archived';
+  status: CampaignStatus;
   created_at: string;
 }
 

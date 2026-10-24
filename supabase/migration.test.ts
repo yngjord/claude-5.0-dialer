@@ -186,9 +186,9 @@ describe('re-run by disposition', () => {
     const counts = await as(ADMIN, () => rows<{ disposition: string; contacts: number }>('select * from dialer_rerun_counts($1)', [CAMPAIGN]));
     expect(counts).toContainEqual({ disposition: 'No Answer', contacts: 2 });
     expect(await as(TEAM1, () => rows('select * from dialer_rerun_counts($1)', [CAMPAIGN]))).toEqual([]);
-    await expect(as(TEAM1, () => pg.query('select * from dialer_rerun_as_new_campaign($1, $2, $3)', [CAMPAIGN, ['No Answer'], 'Again']))).rejects.toThrow(/Only admins/);
+    await expect(as(TEAM1, () => pg.query('select * from dialer_rerun_campaign($1, $2, $3, $4)', [CAMPAIGN, ['No Answer'], 'Again', 'active']))).rejects.toThrow(/Only admins/);
 
-    const [made] = await as(ADMIN, () => rows<{ campaign_id: string; contacts: number }>('select * from dialer_rerun_as_new_campaign($1, $2, $3)', [CAMPAIGN, ['No Answer'], ' Kintell re-run ']));
+    const [made] = await as(ADMIN, () => rows<{ campaign_id: string; contacts: number }>('select * from dialer_rerun_campaign($1, $2, $3, $4)', [CAMPAIGN, ['No Answer'], ' Kintell re-run ', 'active']));
     expect(made.contacts).toBe(2);
     const [camp] = await rows<{ name: string; client_name: string; status: string }>('select name, client_name, status from dialer_campaigns where id = $1', [made.campaign_id]);
     expect(camp).toEqual({ name: 'Kintell re-run', client_name: 'Kintell', status: 'active' });
@@ -204,6 +204,14 @@ describe('re-run by disposition', () => {
     expect(orig.status).toBe('done');
 
     await pg.exec(`delete from dialer_campaigns where id = '${made.campaign_id}'`);
+
+    // Saved as a draft: only admins see it.
+    const [draft] = await as(ADMIN, () => rows<{ campaign_id: string }>('select * from dialer_rerun_campaign($1, $2, $3)', [CAMPAIGN, ['No Answer'], 'Draft re-run']));
+    expect((await rows<{ status: string }>('select status from dialer_campaigns where id = $1', [draft.campaign_id]))[0].status).toBe('draft');
+    expect(await as(TEAM1, () => rows('select id from dialer_campaigns where id = $1', [draft.campaign_id]))).toEqual([]);
+    expect(await as(TEAM1, () => rows('select id from dialer_contacts where campaign_id = $1', [draft.campaign_id]))).toEqual([]);
+    expect(await as(ADMIN, () => rows('select id from dialer_campaigns where id = $1', [draft.campaign_id]))).toHaveLength(1);
+    await pg.exec(`delete from dialer_campaigns where id = '${draft.campaign_id}'`);
     await pg.exec(`delete from dialer_contacts where full_name in ('NA1', 'NA2', 'NI', 'NA but DNC', 'DNC')`);
   });
 });
@@ -260,7 +268,7 @@ describe('row level security', () => {
     try {
       await expect(pg.query('select * from dialer_claim_next_contact($1)', [CAMPAIGN])).rejects.toThrow(/permission denied/);
       await expect(pg.query('select * from dialer_users()')).rejects.toThrow(/permission denied/);
-      await expect(pg.query('select * from dialer_rerun_as_new_campaign($1, $2, $3)', [CAMPAIGN, ['No Answer'], 'x'])).rejects.toThrow(/permission denied/);
+      await expect(pg.query('select * from dialer_rerun_campaign($1, $2, $3, $4)', [CAMPAIGN, ['No Answer'], 'x', 'draft'])).rejects.toThrow(/permission denied/);
     } finally {
       await pg.exec('reset role');
     }
@@ -317,6 +325,27 @@ describe('custom fields', () => {
   });
 });
 
+describe('campaign completion', () => {
+  it('completes when every contact is wrapped up, and reopens when contacts are added', async () => {
+    const id = '10000000-0000-0000-0000-0000000000c1';
+    const status = async () => (await rows<{ status: string }>('select status from dialer_campaigns where id = $1', [id]))[0].status;
+    await pg.exec(`
+      insert into dialer_campaigns (id, name, client_name, airtable_client_id, status) values ('${id}', 'Small', 'Kintell', 'recKintell', 'active');
+      insert into dialer_contacts (campaign_id, full_name, phone_e164) values ('${id}', 'X', '+61480000001'), ('${id}', 'Y', '+61480000002');
+    `);
+    await pg.exec(`update dialer_contacts set status = 'done' where campaign_id = '${id}' and full_name = 'X'`);
+    expect(await status()).toBe('active');
+    await pg.exec(`update dialer_contacts set status = 'bad_number' where campaign_id = '${id}' and full_name = 'Y'`);
+    expect(await status()).toBe('completed');
+    await pg.exec(`insert into dialer_contacts (campaign_id, full_name, phone_e164) values ('${id}', 'Z', '+61480000003')`);
+    expect(await status()).toBe('active');
+    // Paused campaigns stay paused.
+    await pg.exec(`update dialer_campaigns set status = 'paused' where id = '${id}'; update dialer_contacts set status = 'done' where campaign_id = '${id}'`);
+    expect(await status()).toBe('paused');
+    await pg.exec(`delete from dialer_campaigns where id = '${id}'`);
+  });
+});
+
 describe('agent names', () => {
   it('follow the rep when their profile name changes', async () => {
     await pg.exec(`insert into dialer_calls (user_id, agent_name, twilio_status) values ('${TEAM1}', 't1@x', 'completed')`);
@@ -354,5 +383,9 @@ describe('stats', () => {
     expect(s).toMatchObject({ dials_today: 1, connects_today: 1 });
     const daily = await as(TEAM1, () => rows<{ dials: number; connects: number }>(`select * from dialer_call_stats(now() - interval '1 day', now() + interval '1 day')`));
     expect(daily[0]).toMatchObject({ dials: 1, connects: 1 });
+    await pg.exec(`update dialer_calls set client_name = 'Kintell' where campaign_id = '${CAMPAIGN}'`);
+    const kintell = await as(TEAM1, () => rows<{ dials: number }>(`select * from dialer_call_stats(now() - interval '1 day', now() + interval '1 day', null, 'Kintell')`));
+    expect(kintell[0]).toMatchObject({ dials: 1 });
+    expect(await as(TEAM1, () => rows(`select * from dialer_call_stats(now() - interval '1 day', now() + interval '1 day', null, 'Morfless')`))).toEqual([]);
   });
 });

@@ -13,6 +13,7 @@ import { ErrorState } from '../components/ui/States';
 import { WrapUpForm, type WrapUpResult } from '../components/WrapUpForm';
 import { must, useLoad } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { CAMPAIGN_STATUS } from '../lib/tones';
 import { useVoice } from '../voice/VoiceProvider';
 
 type Stage = 'idle' | 'claiming' | 'ready' | 'calling' | 'empty' | 'paused';
@@ -246,7 +247,7 @@ export default function Dialer() {
                 <Button size="md" onClick={begin} disabled={deviceState === 'starting' || campaign?.status !== 'active'}>
                   {deviceState === 'starting' ? <Spinner /> : <Phone size={18} />} {stage === 'paused' ? 'Resume dialing' : 'Start dialing'}
                 </Button>
-                {campaign && campaign.status !== 'active' && <p className="text-sm text-amber-700">This campaign is {campaign.status}.</p>}
+                {campaign && campaign.status !== 'active' && <p className="text-sm text-amber-700">This campaign is {CAMPAIGN_STATUS[campaign.status].label.toLowerCase()}, so it can't be dialed.</p>}
               </>
             )}
           </div>
