@@ -53,7 +53,7 @@ const COLUMNS: { key: SortKey; label: string; numeric?: boolean }[] = [
   { key: 'connects', label: 'Connects', numeric: true },
   { key: 'rate', label: 'Connect rate', numeric: true },
   { key: 'appointments', label: 'Appointments', numeric: true },
-  { key: 'follow_ups', label: 'Follow-ups', numeric: true },
+  { key: 'follow_ups', label: 'Leads', numeric: true },
   { key: 'talk_seconds', label: 'Talk time', numeric: true },
   { key: 'last_call_at', label: 'Last call' },
 ];
@@ -160,7 +160,7 @@ export default function Performance() {
             <Metric label="Connects" value={total.connects.toLocaleString()} loading={loading} />
             <Metric label="Connect rate" value={percent(total.connects, total.dials)} loading={loading} />
             <Metric label="Appointments" value={total.appointments.toLocaleString()} loading={loading} />
-            <Metric label="Follow-ups" value={total.follow_ups.toLocaleString()} loading={loading} />
+            <Metric label="Leads" value={total.follow_ups.toLocaleString()} loading={loading} />
             <Metric label="Talk time" value={formatTalkTime(total.talk_seconds)} loading={loading} />
           </div>
 
