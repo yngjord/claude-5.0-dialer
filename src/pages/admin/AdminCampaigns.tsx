@@ -1,4 +1,4 @@
-import { Plus, RotateCcw, Trash2, Users } from 'lucide-react';
+import { Camera, Plus, RotateCcw, Trash2, Users } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPhone } from '../../../shared/phone';
@@ -10,6 +10,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Spinner } from '../../components/ui/Spinner';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/ui/States';
 import { api, must, useLoad } from '../../lib/api';
+import { removeAvatar, uploadAvatar, useAvatarUrls } from '../../lib/avatars';
 import { supabase } from '../../lib/supabase';
 
 type Row = Campaign & { campaign_members: { user_id: string }[] };
@@ -20,6 +21,7 @@ export default function AdminCampaigns() {
   const [rerun, setRerun] = useState<Campaign | null>(null);
   const list = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false })) as Row[], []);
   const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
+  const avatars = useAvatarUrls(users.data);
   const numbers = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
   // Same order as pickCallerNumber on the server: campaign's own pick, else the client's number, else the default.
   const callerLabel = (c: Campaign) => {
@@ -92,7 +94,7 @@ export default function AdminCampaigns() {
                           {c.campaign_members.length ? (
                             <span className="flex -space-x-2">
                               {c.campaign_members.map((m) => (
-                                <Avatar key={m.user_id} user={users.data?.find((u) => u.id === m.user_id)} name={nameOf(m.user_id)} />
+                                <Avatar key={m.user_id} url={avatars.get(m.user_id)} name={nameOf(m.user_id)} />
                               ))}
                             </span>
                           ) : (
@@ -135,6 +137,8 @@ export default function AdminCampaigns() {
         <MembersModal
           campaign={members}
           users={users.data ?? []}
+          avatars={avatars}
+          onPhotosChanged={() => users.reload({ quiet: true })}
           onClose={() => setMembers(null)}
           onSaved={() => {
             setMembers(null);
@@ -147,7 +151,7 @@ export default function AdminCampaigns() {
 }
 
 /** A team member's profile picture, or their initials when they don't have one (or it doesn't load). */
-function Avatar({ user, name }: { user: DialerUser | undefined; name: string }) {
+function Avatar({ url, name, size = 'h-8 w-8' }: { url: string | undefined; name: string; size?: string }) {
   const [broken, setBroken] = useState(false);
   const initials = name
     .split(/[\s@.]+/)
@@ -155,10 +159,10 @@ function Avatar({ user, name }: { user: DialerUser | undefined; name: string }) 
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase())
     .join('');
-  return user?.avatar_url && !broken ? (
-    <img src={user.avatar_url} alt={name} title={name} onError={() => setBroken(true)} className="h-8 w-8 rounded-full object-cover ring-2 ring-white" />
+  return url && !broken ? (
+    <img src={url} alt={name} title={name} onError={() => setBroken(true)} className={`${size} shrink-0 rounded-full object-cover ring-2 ring-white`} />
   ) : (
-    <span title={name} className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-tint text-xs font-semibold text-brand ring-2 ring-white">
+    <span title={name} className={`flex ${size} shrink-0 items-center justify-center rounded-full bg-brand-tint text-xs font-semibold text-brand ring-2 ring-white`}>
       {initials}
     </span>
   );
@@ -462,7 +466,34 @@ function RerunModal({ campaign, onClose, onCreated }: { campaign: Campaign; onCl
   );
 }
 
-function MembersModal({ campaign, users, onClose, onSaved }: { campaign: Row; users: DialerUser[]; onClose: () => void; onSaved: () => void }) {
+function MembersModal({
+  campaign,
+  users,
+  avatars,
+  onPhotosChanged,
+  onClose,
+  onSaved,
+}: {
+  campaign: Row;
+  users: DialerUser[];
+  avatars: Map<string, string>;
+  onPhotosChanged: () => void;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [photoBusy, setPhotoBusy] = useState<string | null>(null);
+  const changePhoto = async (u: DialerUser, file: File | null) => {
+    setPhotoBusy(u.id);
+    setError(null);
+    try {
+      await (file ? uploadAvatar(u, file) : removeAvatar(u));
+      onPhotosChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change the photo.');
+    } finally {
+      setPhotoBusy(null);
+    }
+  };
   const [selected, setSelected] = useState(() => new Set(campaign.campaign_members.map((m) => m.user_id)));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -498,11 +529,11 @@ function MembersModal({ campaign, users, onClose, onSaved }: { campaign: Row; us
         </>
       }
     >
-      <p className="mb-4 text-sm text-ink-muted">Admins can dial every campaign. Team members only see the ones they're ticked for here.</p>
+      <p className="mb-4 text-sm text-ink-muted">Admins can dial every campaign. Team members only see the ones they're ticked for here. Use the camera button to add someone's profile picture.</p>
       <ul className="divide-y divide-line">
         {users.map((u) => (
-          <li key={u.id}>
-            <label className="flex cursor-pointer items-center gap-3 py-3">
+          <li key={u.id} className="flex items-center gap-2">
+            <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-3">
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-brand"
@@ -517,12 +548,36 @@ function MembersModal({ campaign, users, onClose, onSaved }: { campaign: Row; us
                   })
                 }
               />
+              <Avatar url={avatars.get(u.id)} name={u.display_name || u.email} size="h-9 w-9" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{u.display_name || u.email}</span>
                 {u.display_name && <span className="block truncate text-xs text-ink-muted">{u.email}</span>}
               </span>
               {u.role === 'admin' && <Badge tone="blue">Admin</Badge>}
             </label>
+            <div className="flex shrink-0 items-center gap-1">
+              {u.avatar_url && (
+                <button onClick={() => changePhoto(u, null)} disabled={photoBusy === u.id} className="rounded-full px-2 py-1 text-xs text-ink-muted hover:bg-black/[0.04] hover:text-ink">
+                  Remove
+                </button>
+              )}
+              <label
+                className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-line-strong text-ink-muted transition hover:border-brand hover:text-brand ${photoBusy === u.id ? 'pointer-events-none opacity-50' : ''}`}
+                title={u.avatar_url ? 'Change photo' : 'Add photo'}
+              >
+                {photoBusy === u.id ? <Spinner /> : <Camera size={16} />}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (f) changePhoto(u, f);
+                  }}
+                />
+              </label>
+            </div>
           </li>
         ))}
       </ul>

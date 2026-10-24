@@ -11,7 +11,7 @@ const SUPABASE_STUBS = `
   create table auth.users (id uuid primary key, email text);
   create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
   create schema storage;
-  create table storage.buckets (id text primary key, name text, public boolean);
+  create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
   create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text);
   alter table storage.objects enable row level security;
   create publication supabase_realtime;
@@ -327,6 +327,17 @@ describe('agent names', () => {
     const [after] = await rows<{ agent_name: string }>(`select distinct agent_name from dialer_calls where user_id = '${TEAM1}'`);
     expect(after.agent_name).toBe('t1@x');
     await pg.exec(`delete from dialer_calls where user_id = '${TEAM1}'`);
+  });
+
+  it('only admins set profile pictures', async () => {
+    await expect(as(TEAM1, () => pg.query('select dialer_set_avatar($1, $2)', [TEAM1, 'me.jpg']))).rejects.toThrow(/Only admins/);
+    await as(ADMIN, () => pg.query('select dialer_set_avatar($1, $2)', [TEAM1, `${TEAM1}/1.jpg`]));
+    await as(ADMIN, () => pg.query('select dialer_set_avatar($1, $2)', [CLIENT, 'nope.jpg']));
+    const set = await rows<{ id: string; avatar_url: string | null }>('select id, avatar_url from profiles where id in ($1, $2) order by id', [TEAM1, CLIENT]);
+    expect(set).toEqual([
+      { id: TEAM1, avatar_url: `${TEAM1}/1.jpg` },
+      { id: CLIENT, avatar_url: null },
+    ]);
   });
 
   it('dialer_users includes profile pictures', async () => {

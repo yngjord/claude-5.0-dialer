@@ -10,7 +10,8 @@
 -- ── Profiles ────────────────────────────────────────────────────────────────────────────────────────────────
 -- Shown as the agent name on calls ("Agent Name" in the portal). Falls back to the email when empty.
 alter table public.profiles add column if not exists display_name text;
--- Profile picture (a hosted image link, e.g. imgur), shown on campaigns' team lists.
+-- Profile picture shown on campaigns' team lists: a path in the private 'dialer-avatars' bucket (uploaded on Manage
+-- campaigns), or a full https link to an image hosted elsewhere.
 alter table public.profiles add column if not exists avatar_url text;
 
 -- ── Helpers ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -458,6 +459,18 @@ language sql stable security definer set search_path = public as $$
   order by coalesce(p.display_name, p.email)
 $$;
 
+-- Admins set a team member's profile picture (profiles is otherwise read-only to the app).
+create or replace function public.dialer_set_avatar(p_user_id uuid, p_avatar text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_dialer_admin() then
+    raise exception 'Only admins can change profile pictures' using errcode = '42501';
+  end if;
+  update profiles set avatar_url = nullif(trim(p_avatar), '') where id = p_user_id and role in ('team', 'admin');
+end $$;
+revoke execute on function public.dialer_set_avatar(uuid, text) from public, anon;
+grant execute on function public.dialer_set_avatar(uuid, text) to authenticated, service_role;
+
 -- Only signed-in users may call the dialer's functions (they also check the caller's role themselves).
 revoke execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
   public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
@@ -525,6 +538,18 @@ end $$;
 
 -- ── Storage ─────────────────────────────────────────────────────────────────────────────────────────────────
 -- dialer-recordings: private; the functions hand out short-lived signed URLs.
+-- dialer-avatars: private; admins upload team profile pictures, anyone on the dialer team can view them.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('dialer-avatars', 'dialer-avatars', false, 2097152, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do nothing;
+drop policy if exists "Dialer users view avatars" on storage.objects;
+create policy "Dialer users view avatars" on storage.objects for select to authenticated
+  using (bucket_id = 'dialer-avatars' and public.is_dialer_user());
+drop policy if exists "Dialer admins manage avatars" on storage.objects;
+create policy "Dialer admins manage avatars" on storage.objects for all to authenticated
+  using (bucket_id = 'dialer-avatars' and public.is_dialer_admin())
+  with check (bucket_id = 'dialer-avatars' and public.is_dialer_admin());
+
 -- dialer-greetings: private; admins upload custom voicemail greetings.
 insert into storage.buckets (id, name, public) values ('dialer-recordings', 'dialer-recordings', false) on conflict (id) do nothing;
 insert into storage.buckets (id, name, public) values ('dialer-greetings', 'dialer-greetings', false) on conflict (id) do nothing;
