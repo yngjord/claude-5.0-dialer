@@ -5,6 +5,7 @@ import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
 import { shouldTranscribe } from './pickup';
+import { buildBlocklistFields } from './blocklist';
 import { decodeEntities } from './text';
 import { zonedTimeToUtc } from './time';
 
@@ -200,5 +201,21 @@ describe('decodeEntities', () => {
     expect(decodeEntities('Shane O&#039;Dea')).toBe("Shane O'Dea");
     expect(decodeEntities('A &amp; B &lt;3 &quot;hi&quot; &#x27;x&#x27;')).toBe('A & B <3 "hi" \'x\'');
     expect(decodeEntities('no entities & stuff')).toBe('no entities & stuff');
+  });
+});
+
+describe('buildBlocklistFields', () => {
+  it('fills the Blocklists 2.0 record for a human pickup, leaving out empty values', () => {
+    expect(
+      buildBlocklistFields({ airtableClientId: 'recKintell', fullName: ' Jane Doe ', email: null, phone: '+61412345678', website: 'acme.com', linkedin: '', campaignName: 'Kintell Oct' }),
+    ).toEqual({
+      fldITStrOdTH309Ue: ['recKintell'],
+      fldrYy4qGvbCl05uS: 'Person',
+      fldtVGwN5uYiDZGN2: 'Cold Call pickup',
+      fld2SoW3XttqFThAu: 'Jane Doe',
+      fldQSBSPNfZ34GqFO: '+61412345678',
+      fldtWCAxtp7sD5crB: 'acme.com',
+      fldHRM9yswPCVPomf: 'Kintell Oct',
+    });
   });
 });

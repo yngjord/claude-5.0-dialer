@@ -1,3 +1,5 @@
+import type { Context } from '@netlify/functions';
+
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -11,11 +13,14 @@ export function json(data: unknown, status = 200): Response {
   });
 }
 
-/** Wraps a handler so thrown HttpErrors become JSON responses and anything else is a logged 500. */
-export function handler(fn: (req: Request) => Promise<Response>) {
-  return async (req: Request): Promise<Response> => {
+/**
+ * Wraps a handler so thrown HttpErrors become JSON responses and anything else is a logged 500. `context` is
+ * Netlify's (e.g. waitUntil, for work that finishes after the response is sent).
+ */
+export function handler(fn: (req: Request, context: Context) => Promise<Response>) {
+  return async (req: Request, context: Context): Promise<Response> => {
     try {
-      return await fn(req);
+      return await fn(req, context);
     } catch (err) {
       if (err instanceof HttpError) return json({ error: err.message }, err.status);
       console.error(err);

@@ -1,10 +1,12 @@
 import type { Config } from '@netlify/functions';
 import { db, must } from './_lib/db';
+import { addToBlocklist } from './_lib/blocklist';
 import { loadMediaCall, processRecording, storeTranscript } from './_lib/media';
 
 /**
- * Every 10 minutes: finishes recordings and transcripts the webhooks didn't (timeouts, Twilio retries), and closes
- * inbound calls where the caller hung up without leaving a message.
+ * Every 10 minutes: finishes recordings and transcripts the webhooks didn't (timeouts, Twilio retries), adds human
+ * pickups to the Airtable blocklist where the wrap-up's attempt failed, and closes inbound calls where the caller
+ * hung up without leaving a message.
  */
 export default async () => {
   const twoMinutesAgo = new Date(Date.now() - 2 * 60_000).toISOString();
@@ -29,6 +31,23 @@ export default async () => {
   for (const { id } of transcripts) {
     const call = await loadMediaCall(id);
     if (call) await storeTranscript(call).catch((err) => console.error('Sweep: transcript failed', id, err));
+  }
+
+  // Human pickups wrapped up 5+ minutes ago (the wrap-up's own attempt has finished) and still not on the blocklist.
+  const blocklist = must(
+    await db()
+      .from('dialer_calls')
+      .select('id')
+      .eq('source', 'dialer')
+      .eq('pickup_status', 'Human Pickup')
+      .is('blocklist_record_id', null)
+      .not('wrapped_up_at', 'is', null)
+      .lt('wrapped_up_at', new Date(Date.now() - 5 * 60_000).toISOString())
+      .gt('wrapped_up_at', new Date(Date.now() - 7 * 86_400_000).toISOString())
+      .limit(20),
+  ) as { id: string }[];
+  for (const { id } of blocklist) {
+    await addToBlocklist(id).catch((err) => console.error('Sweep: blocklist failed', id, err));
   }
 
   must(

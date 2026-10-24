@@ -365,6 +365,11 @@ update public.dialer_contacts k set airtable_client_id = c.airtable_client_id, c
 from public.dialer_campaigns c
 where c.id = k.campaign_id and (k.airtable_client_id is distinct from c.airtable_client_id or k.client_name is distinct from c.client_name);
 
+-- Airtable Blocklists 2.0 record for a human pickup ('skipped' for calls from before this was added).
+alter table public.dialer_calls add column if not exists blocklist_record_id text;
+update public.dialer_calls set blocklist_record_id = 'skipped'
+where blocklist_record_id is null and pickup_status = 'Human Pickup' and wrapped_up_at < '2026-10-25T00:00:00Z';
+
 -- Calls keep the rep's name for the portal and stats; renaming someone renames them on all their calls.
 create or replace function public.dialer_sync_agent_name() returns trigger
 language plpgsql security definer set search_path = public as $$

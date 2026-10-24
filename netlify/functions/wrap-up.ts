@@ -1,10 +1,11 @@
 import type { Config } from '@netlify/functions';
-import { CALLBACK, isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
+import { CALLBACK, CONNECTED_PICKUP_STATUS, isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
 import { buildLeadFields, todayInSydney, validateLead } from '../../shared/leads';
 import { contactOutcome } from '../../shared/outcomes';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { createRecord } from './_lib/airtable';
 import { requireSignedIn } from './_lib/auth';
+import { addToBlocklist } from './_lib/blocklist';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json, readJson } from './_lib/http';
 
@@ -23,7 +24,7 @@ const REFUSALS: Record<string, [number, string]> = {
  * Safe to submit again: the contact's attempt count only goes up once, and a lead is only created once. If
  * Airtable fails, the call is still saved and `leadError` is returned so the rep can retry.
  */
-export default handler(async (req) => {
+export default handler(async (req, context) => {
   const [user, body] = await Promise.all([requireSignedIn(req), readJson<WrapUpRequest>(req)]);
   if (!isPickupStatus(body.pickupStatus)) throw new HttpError(400, 'Choose a pickup status.');
   if (!isDisposition(body.disposition)) throw new HttpError(400, 'Choose a disposition.');
@@ -68,6 +69,12 @@ export default handler(async (req) => {
   if (saved.error) {
     const [status, message] = REFUSALS[saved.error] ?? [400, 'Could not save this call.'];
     throw new HttpError(status, message);
+  }
+
+  // Human pickups go on the client's Airtable blocklist, in the background so the rep isn't kept waiting (the sweep
+  // retries if Airtable fails).
+  if (body.pickupStatus === CONNECTED_PICKUP_STATUS) {
+    context.waitUntil(addToBlocklist(body.callId).catch((err) => console.error('Blocklist failed for call', body.callId, err)));
   }
 
   let leadId = saved.airtable_lead_id;
