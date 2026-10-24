@@ -68,7 +68,7 @@ export default function Leads() {
 
   return (
     <>
-      <PageHeader title="Leads" subtitle="The meetings you've booked from your calls, straight from the CRM." />
+      <PageHeader title="Leads" subtitle="Leads attributed to you: meetings booked on your calls, and leads that booked after we followed up." />
 
       <section className="card animate-appear p-4 sm:p-6">
         <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
