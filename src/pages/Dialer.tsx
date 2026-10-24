@@ -5,12 +5,12 @@ import { APPOINTMENT_SET, CONNECTED_PICKUP_STATUS, NEEDS_FOLLOW_UP } from '../..
 import { formatPhone } from '../../shared/phone';
 import type { Campaign, Contact } from '../../shared/types';
 import { CallControls } from '../components/CallControls';
-import { ContactCard } from '../components/ContactCard';
+import { ContactCard, PreviousCalls } from '../components/ContactCard';
 import LoadingBar from '../components/LoadingBar';
 import { Button } from '../components/ui/Button';
 import { Spinner } from '../components/ui/Spinner';
 import { ErrorState } from '../components/ui/States';
-import { WrapUpForm } from '../components/WrapUpForm';
+import { WrapUpForm, type WrapUpResult } from '../components/WrapUpForm';
 import { must, useLoad } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { useVoice } from '../voice/VoiceProvider';
@@ -35,8 +35,9 @@ function readDelay(): number {
 }
 
 /**
- * Power dialer: claims the next contact from the campaign queue (never the same one as a teammate), dials it after
- * a short countdown, then shows the wrap-up form; saving it moves straight on to the next contact.
+ * Power dialer: claims the next contact from the campaign queue (never the same one as a teammate) and dials it per
+ * the auto-dial setting. After the call, "Save & dial next" calls the next contact straight away; "Save" moves on to
+ * them and follows the auto-dial setting again.
  */
 export default function Dialer() {
   const { id = '' } = useParams();
@@ -50,7 +51,6 @@ export default function Dialer() {
   const [error, setError] = useState<string | null>(null);
   const [delay, setDelay] = useState(readDelay);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [pauseAfter, setPauseAfter] = useState(false);
   const [session, setSession] = useState({ dials: 0, connects: 0, leads: 0 });
 
   // The contact we hold a queue lock on but haven't called yet, so leaving the page can give it back.
@@ -65,7 +65,8 @@ export default function Dialer() {
 
   const myCall = active && active.mode === 'power' && active.campaign.id === id ? active : null;
 
-  const claimNext = useCallback(async () => {
+  // `dialAfter` overrides the auto-dial setting for this contact (0 = dial straight away).
+  const claimNext = useCallback(async (dialAfter?: number) => {
     setStage('claiming');
     setError(null);
     try {
@@ -77,7 +78,8 @@ export default function Dialer() {
       }
       setContact(rows[0]);
       setStage('ready');
-      setCountdown(delay >= 0 ? delay : null);
+      const wait = dialAfter ?? delay;
+      setCountdown(wait >= 0 ? wait : null);
     } catch (err) {
       setStage('idle');
       setError(err instanceof Error ? err.message : 'Could not get the next contact.');
@@ -112,7 +114,6 @@ export default function Dialer() {
     setError(null);
     try {
       await start();
-      setPauseAfter(false);
       await claimNext();
     } catch {
       // deviceError explains it
@@ -131,7 +132,7 @@ export default function Dialer() {
     setStage('paused');
   };
 
-  const afterWrapUp = (result: { disposition: string; pickup: string }) => {
+  const afterWrapUp = (result: WrapUpResult) => {
     setSession((s) => ({
       ...s,
       connects: s.connects + (result.pickup === CONNECTED_PICKUP_STATUS ? 1 : 0),
@@ -139,10 +140,7 @@ export default function Dialer() {
     }));
     clear();
     setContact(null);
-    if (pauseAfter) {
-      setPauseAfter(false);
-      setStage('paused');
-    } else claimNext();
+    claimNext(result.dialNext ? 0 : undefined);
   };
 
   // The call never reached Twilio (connection error): nothing to wrap up, let the rep retry or move on.
@@ -170,8 +168,8 @@ export default function Dialer() {
 
   return (
     <FocusLayout title={campaign?.name ?? 'Power dialer'} subtitle={campaign?.client_name} onEnd={endSession} endBlocked={endBlocked}>
-      <div className="mb-6 flex animate-appear flex-wrap items-center justify-end gap-3">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-6 flex animate-appear flex-wrap items-center justify-center gap-3">
           <dl className="flex gap-2 text-center text-sm">
             {(
               [
@@ -210,107 +208,105 @@ export default function Dialer() {
             ))}
           </select>
         </div>
-      </div>
 
-      {(error || deviceError) && (
-        <p role="alert" className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error ?? deviceError}
-        </p>
-      )}
+        {(error || deviceError) && (
+          <p role="alert" className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error ?? deviceError}
+          </p>
+        )}
 
-      {!shown ? (
-        <div className="card flex flex-col items-center gap-4 px-6 py-16 text-center">
-          {stage === 'claiming' ? (
-            <>
-              <Spinner className="text-brand" size={24} />
-              <p className="text-ink-muted">Getting the next contact…</p>
-            </>
-          ) : stage === 'empty' ? (
-            <>
-              <p className="font-display text-xl">No one left to call right now</p>
-              <p className="max-w-md text-ink-muted">Everyone is done, maxed out on attempts, or waiting for their callback time. Import more contacts or check back later.</p>
-              <Button variant="outline" onClick={claimNext}>
-                Check again
-              </Button>
-            </>
-          ) : (
-            <>
-              <PhoneOutgoing className="text-brand" size={32} />
-              <p className="font-display text-xl">{stage === 'paused' ? 'Paused' : 'Ready when you are'}</p>
-              <p className="max-w-md text-ink-muted">
-                Calls go out from your browser. Use a headset, and allow microphone access when your browser asks. After each call, fill in the wrap-up and the next contact is dialed for you.
-              </p>
-              <Button size="md" onClick={begin} disabled={deviceState === 'starting' || campaign?.status !== 'active'}>
-                {deviceState === 'starting' ? <Spinner /> : <Phone size={18} />} {stage === 'paused' ? 'Resume dialing' : 'Start dialing'}
-              </Button>
-              {campaign && campaign.status !== 'active' && <p className="text-sm text-amber-700">This campaign is {campaign.status}.</p>}
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="grid animate-appear gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,460px)]">
-          <section className="card p-5 sm:p-7">
-            <ContactCard key={shown.id} contact={shown} />
-          </section>
-
-          <section className="card p-5 sm:p-6">
-            {myCall ? (
-              <div className="space-y-6">
-                <CallControls call={myCall} />
-                {failedToStart ? (
-                  <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">
-                    <p>The call didn't go through: {myCall.error}</p>
-                    <div className="mt-3 flex gap-2">
-                      <Button size="sm" onClick={retryFailed}>
-                        Try again
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={async () => {
-                          clear();
-                          await skip();
-                        }}
-                      >
-                        Skip contact
-                      </Button>
-                    </div>
+        {!shown ? (
+          <div className="card flex flex-col items-center gap-4 px-6 py-16 text-center">
+            {stage === 'claiming' ? (
+              <>
+                <Spinner className="text-brand" size={24} />
+                <p className="text-ink-muted">Getting the next contact…</p>
+              </>
+            ) : stage === 'empty' ? (
+              <>
+                <p className="font-display text-xl">No one left to call</p>
+                <p className="max-w-md text-ink-muted">Everyone in this campaign has been called. An admin can re-run it for contacts by disposition (e.g. No Answer), or import more contacts.</p>
+                <Button variant="outline" onClick={() => claimNext()}>
+                  Check again
+                </Button>
+              </>
+            ) : (
+              <>
+                <PhoneOutgoing className="text-brand" size={32} />
+                <p className="font-display text-xl">{stage === 'paused' ? 'Paused' : 'Ready when you are'}</p>
+                <p className="max-w-md text-ink-muted">
+                  Calls go out from your browser. Use a headset, and allow microphone access when your browser asks. After each call, fill in the wrap-up and move on to the next contact.
+                </p>
+                <Button size="md" onClick={begin} disabled={deviceState === 'starting' || campaign?.status !== 'active'}>
+                  {deviceState === 'starting' ? <Spinner /> : <Phone size={18} />} {stage === 'paused' ? 'Resume dialing' : 'Start dialing'}
+                </Button>
+                {campaign && campaign.status !== 'active' && <p className="text-sm text-amber-700">This campaign is {campaign.status}.</p>}
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="animate-appear space-y-6">
+            <section className="card p-5 sm:p-8">
+              <ContactCard key={shown.id} contact={shown} centered history={false}>
+                {myCall ? (
+                  <div className="border-t border-line pt-6">
+                    <CallControls call={myCall} />
+                    {failedToStart && (
+                      <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">
+                        <p>The call didn't go through: {myCall.error}</p>
+                        <div className="mt-3 flex justify-center gap-2">
+                          <Button size="sm" onClick={retryFailed}>
+                            Try again
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              clear();
+                              await skip();
+                            }}
+                          >
+                            Skip contact
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <>
-                    <WrapUpForm key={myCall.callId} call={myCall} onDone={afterWrapUp} />
-                    <label className="flex items-center gap-2 text-sm text-ink-muted">
-                      <input type="checkbox" checked={pauseAfter} onChange={(e) => setPauseAfter(e.target.checked)} className="h-4 w-4 accent-brand" />
-                      Pause after this call
-                    </label>
-                  </>
+                  <div className="flex flex-col items-center gap-4 border-t border-line pt-6">
+                    {countdown != null && countdown > 0 && (
+                      <p className="font-display text-[15px] text-brand" role="status">
+                        Dialing in {countdown}…
+                      </p>
+                    )}
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <Button size="md" onClick={callNow} disabled={!!active}>
+                        <Phone size={18} /> Call {formatPhone(shown.phone_e164)}
+                      </Button>
+                      <Button size="md" variant="outline" onClick={skip}>
+                        <SkipForward size={18} /> Skip
+                      </Button>
+                    </div>
+                    <button onClick={stop} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-ink">
+                      {countdown != null ? <Pause size={14} /> : <Square size={14} />} Stop dialing
+                    </button>
+                  </div>
                 )}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-5 py-6 text-center">
-                <p className="text-sm text-ink-muted">Next up</p>
-                <p className="font-display text-2xl tabular-nums">{formatPhone(shown.phone_e164)}</p>
-                {countdown != null && countdown > 0 && (
-                  <p className="font-display text-[15px] text-brand" role="status">
-                    Dialing in {countdown}…
-                  </p>
-                )}
-                <div className="flex flex-wrap justify-center gap-2">
-                  <Button size="md" onClick={callNow} disabled={!!active}>
-                    <Phone size={18} /> Call now
-                  </Button>
-                  <Button size="md" variant="outline" onClick={skip}>
-                    <SkipForward size={18} /> Skip
-                  </Button>
-                </div>
-                <button onClick={stop} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-ink">
-                  {countdown != null ? <Pause size={14} /> : <Square size={14} />} Stop dialing
-                </button>
-              </div>
+              </ContactCard>
+            </section>
+
+            {myCall && !failedToStart && (
+              <section className="card p-5 sm:p-8">
+                <WrapUpForm key={myCall.callId} call={myCall} onDone={afterWrapUp} dialNextOption />
+              </section>
             )}
-          </section>
-        </div>
-      )}
+
+            <section className="card p-5 sm:p-8">
+              <PreviousCalls key={shown.id} contact={shown} />
+            </section>
+          </div>
+        )}
+      </div>
     </FocusLayout>
   );
 }

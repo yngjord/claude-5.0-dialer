@@ -1,4 +1,4 @@
-import { Plus, Trash2, Users } from 'lucide-react';
+import { Plus, RotateCcw, Trash2, Users } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPhone } from '../../../shared/phone';
@@ -17,6 +17,7 @@ type Row = Campaign & { campaign_members: { user_id: string }[] };
 export default function AdminCampaigns() {
   const [editing, setEditing] = useState<Campaign | 'new' | null>(null);
   const [members, setMembers] = useState<Row | null>(null);
+  const [rerun, setRerun] = useState<Campaign | null>(null);
   const list = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false })) as Row[], []);
   const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
   const numbers = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
@@ -61,13 +62,12 @@ export default function AdminCampaigns() {
                   <th className="th">Status</th>
                   <th className="th">Caller number</th>
                   <th className="th">Team</th>
-                  <th className="th">Retries</th>
                   <th className="th" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {!list.data?.length ? (
-                  <EmptyRow colSpan={7}>No campaigns yet.</EmptyRow>
+                  <EmptyRow colSpan={6}>No campaigns yet.</EmptyRow>
                 ) : (
                   list.data.map((c) => (
                     <tr key={c.id}>
@@ -89,10 +89,10 @@ export default function AdminCampaigns() {
                           <span className="truncate">{c.campaign_members.length ? c.campaign_members.map((m) => nameOf(m.user_id)).join(', ') : 'Assign people'}</span>
                         </button>
                       </td>
-                      <td className="td text-ink-muted">
-                        {c.max_attempts} dials, every {Math.round(c.retry_after_minutes / 60)}h
-                      </td>
-                      <td className="td text-right">
+                      <td className="td whitespace-nowrap text-right">
+                        <Button variant="ghost" onClick={() => setRerun(c)} title="Put called contacts back in the queue">
+                          <RotateCcw size={15} /> Re-run
+                        </Button>
                         <Button variant="ghost" onClick={() => setEditing(c)}>
                           Edit
                         </Button>
@@ -117,6 +117,7 @@ export default function AdminCampaigns() {
           }}
         />
       )}
+      {rerun && <RerunModal campaign={rerun} onClose={() => setRerun(null)} />}
       {members && (
         <MembersModal
           campaign={members}
@@ -146,8 +147,6 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
   const [clientId, setClientId] = useState(campaign?.airtable_client_id ?? '');
   const [numberId, setNumberId] = useState(campaign?.caller_number_id ?? '');
   const [status, setStatus] = useState<Campaign['status']>(campaign?.status ?? 'active');
-  const [maxAttempts, setMaxAttempts] = useState(String(campaign?.max_attempts ?? 3));
-  const [retryHours, setRetryHours] = useState(String((campaign?.retry_after_minutes ?? 1440) / 60));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -157,10 +156,6 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
     const client = clients.data?.find((c) => c.id === clientId);
     if (!name.trim()) return setError('Give the campaign a name.');
     if (!client) return setError('Choose the client.');
-    const attempts = Number(maxAttempts);
-    const minutes = Math.round(Number(retryHours) * 60);
-    if (!Number.isInteger(attempts) || attempts < 1 || attempts > 20) return setError('Max dials must be between 1 and 20.');
-    if (!Number.isFinite(minutes) || minutes < 5) return setError('Retry delay must be at least 5 minutes.');
 
     setSaving(true);
     setError(null);
@@ -170,8 +165,6 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
       airtable_client_id: client.id,
       caller_number_id: numberId || null,
       status,
-      max_attempts: attempts,
-      retry_after_minutes: minutes,
     };
     const { error } = campaign
       ? await supabase.from('dialer_campaigns').update(fields).eq('id', campaign.id)
@@ -238,20 +231,6 @@ function CampaignForm({ campaign, numbers, onClose, onSaved }: { campaign: Campa
             ))}
           </select>
           <p className="mt-1.5 text-xs text-ink-faint">Leave as the client's number unless this campaign needs a different one. Set client numbers in Phone numbers.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="c-attempts" className="mb-2 block text-sm font-medium text-ink-soft">
-              Max dials per contact
-            </label>
-            <input id="c-attempts" type="number" min={1} max={20} className="field" value={maxAttempts} onChange={(e) => setMaxAttempts(e.target.value)} />
-          </div>
-          <div>
-            <label htmlFor="c-retry" className="mb-2 block text-sm font-medium text-ink-soft">
-              Retry no-answers after (hours)
-            </label>
-            <input id="c-retry" type="number" min={0.1} step={0.5} className="field" value={retryHours} onChange={(e) => setRetryHours(e.target.value)} />
-          </div>
         </div>
         <div>
           <label htmlFor="c-status" className="mb-2 block text-sm font-medium text-ink-soft">
@@ -329,6 +308,98 @@ function DeleteCampaignModal({ campaign, onCancel, onDeleted }: { campaign: Camp
           </p>
         )}
       </div>
+    </Modal>
+  );
+}
+
+/**
+ * Puts contacts that have been called back in the queue, picked by their last disposition, so the campaign can be
+ * dialed again (e.g. every No Answer). Do Not Call numbers are never put back.
+ */
+function RerunModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
+  const counts = useLoad(async () => must(await supabase.rpc('dialer_rerun_counts', { p_campaign_id: campaign.id })) as { disposition: string; contacts: number }[], [campaign.id]);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(['No Answer']));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<number | null>(null);
+
+  const total = counts.data?.filter((c) => selected.has(c.disposition)).reduce((n, c) => n + c.contacts, 0) ?? 0;
+
+  const run = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      setDone(must(await supabase.rpc('dialer_rerun_campaign', { p_campaign_id: campaign.id, p_dispositions: [...selected] })) as number);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not re-run the campaign.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={`Re-run ${campaign.name}`}
+      onClose={saving ? () => undefined : onClose}
+      footer={
+        done != null ? (
+          <Button onClick={onClose}>Done</Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button onClick={run} disabled={saving || total === 0}>
+              {saving ? <Spinner /> : <RotateCcw size={15} />} Re-queue {total.toLocaleString()} contact{total === 1 ? '' : 's'}
+            </Button>
+          </>
+        )
+      }
+    >
+      {done != null ? (
+        <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-emerald-800">
+          {done.toLocaleString()} contact{done === 1 ? ' is' : 's are'} back in the queue{campaign.status === 'active' ? '' : `. The campaign is ${campaign.status}, so set it to Active to dial them`}.
+        </p>
+      ) : counts.loading ? (
+        <LoadingRows label="Counting contacts…" />
+      ) : counts.error ? (
+        <ErrorState message={counts.error} onRetry={counts.reload} />
+      ) : !counts.data?.length ? (
+        <p className="text-ink-muted">No one in this campaign has been called yet.</p>
+      ) : (
+        <>
+          <p className="mb-4 text-sm text-ink-muted">Choose which contacts to dial again, by how their last call went. They go back in the queue for everyone assigned to this campaign.</p>
+          <ul className="divide-y divide-line">
+            {counts.data.map((c) => (
+              <li key={c.disposition}>
+                <label className="flex cursor-pointer items-center gap-3 py-3">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-brand"
+                    checked={selected.has(c.disposition)}
+                    onChange={(e) =>
+                      setSelected((s) => {
+                        const next = new Set(s);
+                        if (e.target.checked) next.add(c.disposition);
+                        else next.delete(c.disposition);
+                        return next;
+                      })
+                    }
+                  />
+                  <span className="flex-1 font-medium">{c.disposition}</span>
+                  <span className="tabular-nums text-ink-muted">{c.contacts.toLocaleString()}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-ink-faint">Do Not Call contacts are never re-queued.</p>
+        </>
+      )}
+      {error && (
+        <p role="alert" className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
     </Modal>
   );
 }

@@ -3,6 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { CallRow, Campaign, Contact } from '../../shared/types';
 import { api } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { startRingback } from './ringback';
+import { callStatusLabel } from './status';
 
 export type CallPhase = 'connecting' | 'ringing' | 'live' | 'ended';
 export type DeviceState = 'off' | 'starting' | 'ready' | 'error';
@@ -159,6 +161,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     );
     return () => timers.forEach(clearTimeout);
   }, [callId, ended, patch]);
+
+  // Ring tone while the call is being placed; stops on answer, voicemail detection or hang-up.
+  const dialing = !!active && ['Connecting…', 'Ringing…'].includes(callStatusLabel(active).label);
+  useEffect(() => {
+    if (!dialing) return;
+    return startRingback();
+  }, [dialing]);
 
   const hangUp = useCallback(() => callRef.current?.disconnect(), []);
   const toggleMute = useCallback(() => {

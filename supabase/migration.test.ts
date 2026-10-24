@@ -55,16 +55,15 @@ beforeAll(async () => {
   await pg.exec(`
     insert into auth.users (id, email) values ('${ADMIN}', 'admin@x'), ('${TEAM1}', 't1@x'), ('${TEAM2}', 't2@x'), ('${CLIENT}', 'c@x');
     insert into profiles (id, role, email) values ('${ADMIN}', 'admin', 'admin@x'), ('${TEAM1}', 'team', 't1@x'), ('${TEAM2}', 'team', 't2@x'), ('${CLIENT}', 'client', 'c@x');
-    insert into dialer_campaigns (id, name, client_name, airtable_client_id, max_attempts) values
-      ('${CAMPAIGN}', 'Kintell Oct', 'Kintell', 'recKintell', 2),
-      ('${OTHER_CAMPAIGN}', 'Other', 'Morfless', 'recMorfless', 3);
+    insert into dialer_campaigns (id, name, client_name, airtable_client_id) values
+      ('${CAMPAIGN}', 'Kintell Oct', 'Kintell', 'recKintell'),
+      ('${OTHER_CAMPAIGN}', 'Other', 'Morfless', 'recMorfless');
     insert into dialer_campaign_members (campaign_id, user_id) values ('${CAMPAIGN}', '${TEAM1}'), ('${CAMPAIGN}', '${TEAM2}');
     insert into dialer_contacts (campaign_id, full_name, phone_e164, created_at) values
       ('${CAMPAIGN}', 'A', '+61411111111', now() - interval '3 hours'),
       ('${CAMPAIGN}', 'B', '+61422222222', now() - interval '2 hours'),
       ('${CAMPAIGN}', 'C', '+61433333333', now() - interval '1 hour');
     insert into dialer_contacts (campaign_id, full_name, phone_e164, status) values ('${CAMPAIGN}', 'Done', '+61444444444', 'done');
-    insert into dialer_contacts (campaign_id, full_name, phone_e164, attempts) values ('${CAMPAIGN}', 'Maxed', '+61455555555', 2);
     insert into dialer_contacts (campaign_id, full_name, phone_e164, status, next_attempt_at) values ('${CAMPAIGN}', 'Later', '+61466666666', 'callback', now() + interval '1 day');
     insert into dialer_contacts (campaign_id, full_name, phone_e164) values ('${OTHER_CAMPAIGN}', 'Elsewhere', '+64211234567');
   `);
@@ -121,7 +120,7 @@ describe('claim_next_contact', () => {
   const claim = (user: string, campaign = CAMPAIGN) =>
     as(user, () => rows<{ full_name: string; locked_by: string }>('select full_name, locked_by from dialer_claim_next_contact($1)', [campaign]));
 
-  it('gives two reps different contacts, oldest first, skipping finished/maxed/not-yet-due ones', async () => {
+  it('gives two reps different contacts, oldest first, skipping finished and not-yet-due ones', async () => {
     const [first] = await claim(TEAM1);
     const [second] = await claim(TEAM2);
     expect(first).toMatchObject({ full_name: 'A', locked_by: TEAM1 });
@@ -132,7 +131,6 @@ describe('claim_next_contact', () => {
     expect(third.full_name).toBe('A');
     const remaining = await claim(TEAM2);
     expect(remaining.map((r) => r.full_name)).not.toContain('Done');
-    expect(remaining.map((r) => r.full_name)).not.toContain('Maxed');
     expect(remaining.map((r) => r.full_name)).not.toContain('Later');
   });
 
@@ -164,14 +162,42 @@ describe('claim_next_contact', () => {
     await as(null, () => pg.exec(`update dialer_campaigns set status = 'active' where id = '${CAMPAIGN}'`));
   });
 
-  it('release with skip pushes the contact back', async () => {
+  it('release with skip moves the contact to the back of the queue', async () => {
     const [c] = await as(TEAM1, () => rows<{ id: string }>('select id from dialer_claim_next_contact($1)', [CAMPAIGN]));
     await as(TEAM1, () => pg.query('select dialer_release_contact($1, true)', [c.id]));
-    const [after] = await rows<{ locked_by: string | null; later: boolean }>(
-      `select locked_by, next_attempt_at > now() + interval '23 hours' as later from dialer_contacts where id = $1`,
-      [c.id],
-    );
-    expect(after).toEqual({ locked_by: null, later: true });
+    const [after] = await rows<{ locked_by: string | null }>('select locked_by from dialer_contacts where id = $1', [c.id]);
+    expect(after.locked_by).toBeNull();
+    const [next] = await as(TEAM1, () => rows<{ id: string }>('select id from dialer_claim_next_contact($1)', [CAMPAIGN]));
+    expect(next.id).not.toBe(c.id);
+    await as(null, () => pg.exec(`update dialer_contacts set locked_by = null, locked_at = null, next_attempt_at = null`));
+  });
+});
+
+describe('re-run by disposition', () => {
+  it('admins put chosen contacts back in the queue, never Do Not Call numbers; team members cannot', async () => {
+    await pg.exec(`
+      insert into dialer_contacts (campaign_id, full_name, phone_e164, status, last_disposition) values
+        ('${CAMPAIGN}', 'NA1', '+61470000001', 'done', 'No Answer'),
+        ('${CAMPAIGN}', 'NA2', '+61470000002', 'done', 'No Answer'),
+        ('${CAMPAIGN}', 'NI', '+61470000003', 'done', 'Not Interested'),
+        ('${CAMPAIGN}', 'NA but DNC', '+61470000004', 'done', 'No Answer'),
+        ('${OTHER_CAMPAIGN}', 'DNC', '+61470000004', 'do_not_call', 'Do Not Call');
+    `);
+    const counts = await as(ADMIN, () => rows<{ disposition: string; contacts: number }>('select * from dialer_rerun_counts($1)', [CAMPAIGN]));
+    expect(counts).toContainEqual({ disposition: 'No Answer', contacts: 2 });
+    expect(await as(TEAM1, () => rows('select * from dialer_rerun_counts($1)', [CAMPAIGN]))).toEqual([]);
+    await expect(as(TEAM1, () => pg.query('select dialer_rerun_campaign($1, $2)', [CAMPAIGN, ['No Answer']]))).rejects.toThrow(/Only admins/);
+
+    const [{ n }] = await as(ADMIN, () => rows<{ n: number }>('select dialer_rerun_campaign($1, $2) as n', [CAMPAIGN, ['No Answer']]));
+    expect(n).toBe(2);
+    const statuses = await rows<{ full_name: string; status: string }>(`select full_name, status from dialer_contacts where full_name in ('NA1', 'NA2', 'NI', 'NA but DNC') order by full_name`);
+    expect(statuses).toEqual([
+      { full_name: 'NA but DNC', status: 'done' },
+      { full_name: 'NA1', status: 'new' },
+      { full_name: 'NA2', status: 'new' },
+      { full_name: 'NI', status: 'done' },
+    ]);
+    await pg.exec(`delete from dialer_contacts where full_name in ('NA1', 'NA2', 'NI', 'NA but DNC', 'DNC')`);
   });
 });
 
@@ -227,6 +253,7 @@ describe('row level security', () => {
     try {
       await expect(pg.query('select * from dialer_claim_next_contact($1)', [CAMPAIGN])).rejects.toThrow(/permission denied/);
       await expect(pg.query('select * from dialer_users()')).rejects.toThrow(/permission denied/);
+      await expect(pg.query('select dialer_rerun_campaign($1, $2)', [CAMPAIGN, ['No Answer']])).rejects.toThrow(/permission denied/);
     } finally {
       await pg.exec('reset role');
     }

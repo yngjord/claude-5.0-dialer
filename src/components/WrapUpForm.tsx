@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Phone } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { APPOINTMENT_SET, DISPOSITIONS, LEAD_DISPOSITIONS, NEEDS_FOLLOW_UP, PICKUP_STATUSES, type Disposition, type PickupStatus } from '../../shared/constants';
 import { validateLead } from '../../shared/leads';
@@ -33,7 +33,18 @@ function suggestedDisposition(pickup: PickupStatus | null): Disposition | null {
   return null;
 }
 
-export function WrapUpForm({ call, onDone }: { call: ActiveCall; onDone: (result: { disposition: Disposition; pickup: PickupStatus }) => void }) {
+export interface WrapUpResult {
+  disposition: Disposition;
+  pickup: PickupStatus;
+  /** "Save & dial next" was pressed: call the next contact straight away. */
+  dialNext: boolean;
+}
+
+/**
+ * Post-call form. With `dialNextOption` (power dialer) it has two buttons: "Save & dial next", and "Save" which moves
+ * on to the next contact and dials it per the auto-dial setting.
+ */
+export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: ActiveCall; onDone: (result: WrapUpResult) => void; dialNextOption?: boolean }) {
   const livePickup = call.row?.pickup_status ?? null;
   const [pickup, setPickup] = useState<PickupStatus | ''>(livePickup ?? '');
   const [pickupTouched, setPickupTouched] = useState(false);
@@ -50,6 +61,7 @@ export function WrapUpForm({ call, onDone }: { call: ActiveCall; onDone: (result
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [leadError, setLeadError] = useState<string | null>(null);
+  const [dialNext, setDialNext] = useState(false);
 
   // Twilio's result can land a second or two after hang-up: keep following it until the rep changes it.
   useEffect(() => {
@@ -71,8 +83,9 @@ export function WrapUpForm({ call, onDone }: { call: ActiveCall; onDone: (result
     [fullName, email, phone, notes, disposition, nextFollowUp, bookedFor, time, tz],
   );
 
-  const submit = async (e?: FormEvent) => {
+  const submit = async (e?: FormEvent, next = dialNext) => {
     e?.preventDefault();
+    setDialNext(next);
     if (submitting || call.phase !== 'ended') return;
     if (!pickup) return setError('Choose a pickup status.');
     if (!disposition) return setError('Choose a disposition.');
@@ -90,7 +103,7 @@ export function WrapUpForm({ call, onDone }: { call: ActiveCall; onDone: (result
         setSubmitting(false);
         return;
       }
-      onDone({ disposition, pickup });
+      onDone({ disposition, pickup, dialNext: next });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save.');
       setSubmitting(false);
@@ -111,7 +124,7 @@ export function WrapUpForm({ call, onDone }: { call: ActiveCall; onDone: (result
       }
       if (e.key === 'Enter' && (!typing || e.metaKey || e.ctrlKey) && target.tagName !== 'BUTTON') {
         e.preventDefault();
-        submit();
+        submit(undefined, false);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -223,26 +236,38 @@ export function WrapUpForm({ call, onDone }: { call: ActiveCall; onDone: (result
             <Button size="sm" onClick={() => submit()} disabled={submitting}>
               Retry Lead
             </Button>
-            <Button size="sm" variant="outline" onClick={() => onDone({ disposition: disposition as Disposition, pickup: pickup as PickupStatus })}>
+            <Button size="sm" variant="outline" onClick={() => onDone({ disposition: disposition as Disposition, pickup: pickup as PickupStatus, dialNext })}>
               Continue without it
             </Button>
           </div>
         </div>
       )}
 
-      {!leadError && (
-        <Button type="submit" size="md" className="w-full" disabled={submitting || call.phase !== 'ended'}>
-          {submitting ? (
-            <>
-              <Spinner /> Saving…
-            </>
-          ) : call.phase !== 'ended' ? (
-            'Hang up to save'
-          ) : (
-            'Save & continue'
-          )}
-        </Button>
-      )}
+      {!leadError &&
+        (call.phase !== 'ended' ? (
+          <Button type="button" size="md" className="w-full" disabled>
+            Hang up to save
+          </Button>
+        ) : dialNextOption ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button type="button" size="md" variant="outline" disabled={submitting} onClick={() => submit(undefined, false)}>
+              {submitting && !dialNext ? <Spinner /> : null} Save
+            </Button>
+            <Button type="button" size="md" disabled={submitting} onClick={() => submit(undefined, true)}>
+              {submitting && dialNext ? <Spinner /> : <Phone size={17} />} Save &amp; dial next
+            </Button>
+          </div>
+        ) : (
+          <Button type="submit" size="md" className="w-full" disabled={submitting}>
+            {submitting ? (
+              <>
+                <Spinner /> Saving…
+              </>
+            ) : (
+              'Save'
+            )}
+          </Button>
+        ))}
     </form>
   );
 }

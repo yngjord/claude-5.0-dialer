@@ -55,8 +55,6 @@ create table if not exists public.dialer_campaigns (
   airtable_client_id text not null,
   caller_number_id uuid references public.dialer_phone_numbers(id) on delete set null,
   status text not null default 'active' check (status in ('active', 'paused', 'archived')),
-  max_attempts int not null default 3 check (max_attempts between 1 and 20),
-  retry_after_minutes int not null default 1440 check (retry_after_minutes >= 5),
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -357,7 +355,6 @@ begin
   select id into picked from dialer_contacts
   where campaign_id = p_campaign_id
     and status in ('new', 'callback')
-    and attempts < camp.max_attempts
     and (next_attempt_at is null or next_attempt_at <= now())
     and (locked_by is null or locked_at < now() - interval '30 minutes')
     -- Do Not Call follows the number into lists imported later.
@@ -373,16 +370,41 @@ begin
   return query update dialer_contacts set locked_by = auth.uid(), locked_at = now() where id = picked returning *;
 end $$;
 
--- Gives a contact back to the queue without a call (Skip / Stop). Skip pushes it back by the campaign's retry delay.
+-- Gives a contact back to the queue without a call (Skip / Stop). Skip moves it to the back of the queue.
 create or replace function public.dialer_release_contact(p_contact_id uuid, p_skip boolean default false) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   update dialer_contacts c
   set locked_by = null,
       locked_at = null,
-      next_attempt_at = case when p_skip then now() + make_interval(mins => camp.retry_after_minutes) else c.next_attempt_at end
-  from dialer_campaigns camp
-  where c.id = p_contact_id and camp.id = c.campaign_id and c.locked_by = auth.uid();
+      next_attempt_at = case when p_skip then now() else c.next_attempt_at end
+  where c.id = p_contact_id and c.locked_by = auth.uid();
+end $$;
+
+-- Re-run: how many called contacts there are per last disposition, then put the chosen ones back in the queue.
+-- Admins only. Do Not Call numbers (here or in any campaign) are never put back.
+create or replace function public.dialer_rerun_counts(p_campaign_id uuid) returns table (disposition text, contacts int)
+language sql stable security definer set search_path = public as $$
+  select c.last_disposition, count(*)::int from dialer_contacts c
+  where is_dialer_admin() and c.campaign_id = p_campaign_id and c.status in ('done', 'bad_number') and c.last_disposition is not null
+    and not exists (select 1 from dialer_contacts d where d.phone_e164 = c.phone_e164 and d.status = 'do_not_call')
+  group by c.last_disposition
+  order by count(*) desc
+$$;
+
+create or replace function public.dialer_rerun_campaign(p_campaign_id uuid, p_dispositions text[]) returns int
+language plpgsql security definer set search_path = public as $$
+declare
+  n int;
+begin
+  if not is_dialer_admin() then
+    raise exception 'Only admins can re-run campaigns' using errcode = '42501';
+  end if;
+  update dialer_contacts c set status = 'new', next_attempt_at = null, locked_by = null, locked_at = null
+  where c.campaign_id = p_campaign_id and c.status in ('done', 'bad_number') and c.last_disposition = any(p_dispositions)
+    and not exists (select 1 from dialer_contacts d where d.phone_e164 = c.phone_e164 and d.status = 'do_not_call');
+  get diagnostics n = row_count;
+  return n;
 end $$;
 
 -- Team list for admin screens and agent names.
@@ -396,9 +418,11 @@ $$;
 -- Only signed-in users may call the dialer's functions (they also check the caller's role themselves).
 revoke execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
   public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
+  public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[]),
   public.dialer_save_custom_fields(jsonb) from public, anon;
 grant execute on function public.is_dialer_user(), public.is_dialer_admin(), public.dialer_can_access_campaign(uuid),
   public.dialer_claim_next_contact(uuid), public.dialer_release_contact(uuid, boolean), public.dialer_users(),
+  public.dialer_rerun_counts(uuid), public.dialer_rerun_campaign(uuid, text[]),
   public.dialer_save_custom_fields(jsonb) to authenticated, service_role;
 
 -- ── Stats ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -407,12 +431,17 @@ with today as (select (date_trunc('day', now() at time zone 'Australia/Sydney') 
 select
   c.id as campaign_id,
   (select count(*) from dialer_contacts k where k.campaign_id = c.id)::int as contacts_total,
-  (select count(*) from dialer_contacts k where k.campaign_id = c.id and k.status in ('new', 'callback') and k.attempts < c.max_attempts)::int as contacts_remaining,
+  (select count(*) from dialer_contacts k where k.campaign_id = c.id and k.status in ('new', 'callback'))::int as contacts_remaining,
   (select count(*) from dialer_calls x, today where x.campaign_id = c.id and x.direction = 'outbound' and x.started_at >= today.start)::int as dials_today,
   (select count(*) from dialer_calls x, today where x.campaign_id = c.id and x.direction = 'outbound' and x.started_at >= today.start and x.pickup_status = 'Human Pickup')::int as connects_today,
   (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound')::int as dials_total,
   (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound' and x.pickup_status = 'Human Pickup')::int as connects_total
 from dialer_campaigns c;
+
+-- Retry rules were removed: every call takes a contact out of the queue, and admins re-run by disposition.
+alter table public.dialer_campaigns drop column if exists max_attempts, drop column if exists retry_after_minutes;
+-- Contacts the old retry rules had scheduled for another try count as called; re-run brings them back.
+update public.dialer_contacts set status = 'done', next_attempt_at = null where status = 'callback';
 
 -- Daily totals per rep (optionally for one campaign), for the Stats page. Runs with the caller's access (RLS on
 -- calls applies). One row per day per rep keeps it well under PostgREST's 1000-row limit.

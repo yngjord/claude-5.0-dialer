@@ -37,8 +37,6 @@ export interface Campaign {
   airtable_client_id: string;
   caller_number_id: string | null;
   status: 'active' | 'paused' | 'archived';
-  max_attempts: number;
-  retry_after_minutes: number;
   created_at: string;
 }
 

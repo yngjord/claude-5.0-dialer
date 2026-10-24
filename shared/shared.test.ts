@@ -46,20 +46,13 @@ describe('normalizePhone', () => {
 });
 
 describe('contactOutcome', () => {
-  const now = new Date('2026-10-22T00:00:00Z');
-  const opts = { maxAttempts: 3, retryAfterMinutes: 60, now };
-
-  it('retries no answers until the attempt limit', () => {
-    expect(contactOutcome('No Answer', { ...opts, attemptsAfterThisCall: 1 })).toEqual({ status: 'callback', nextAttemptAt: new Date('2026-10-22T01:00:00Z') });
-    expect(contactOutcome('Left Voicemail', { ...opts, attemptsAfterThisCall: 3 })).toEqual({ status: 'done', nextAttemptAt: null });
-  });
-
-  it('takes everything else out of the queue', () => {
-    expect(contactOutcome('Do Not Call', { ...opts, attemptsAfterThisCall: 1 }).status).toBe('do_not_call');
-    expect(contactOutcome('Wrong Number', { ...opts, attemptsAfterThisCall: 1 }).status).toBe('bad_number');
-    expect(contactOutcome('Disconnected Number', { ...opts, attemptsAfterThisCall: 1 }).status).toBe('bad_number');
-    expect(contactOutcome('Interested - Appointment Set', { ...opts, attemptsAfterThisCall: 1 }).status).toBe('done');
-    expect(contactOutcome('Not Interested', { ...opts, attemptsAfterThisCall: 1 }).status).toBe('done');
+  it('takes every contact out of the queue', () => {
+    expect(contactOutcome('No Answer')).toBe('done');
+    expect(contactOutcome('Left Voicemail')).toBe('done');
+    expect(contactOutcome('Do Not Call')).toBe('do_not_call');
+    expect(contactOutcome('Wrong Number')).toBe('bad_number');
+    expect(contactOutcome('Disconnected Number')).toBe('bad_number');
+    expect(contactOutcome('Interested - Appointment Set')).toBe('done');
   });
 });
 

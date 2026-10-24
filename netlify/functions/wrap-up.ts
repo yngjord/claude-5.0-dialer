@@ -51,11 +51,6 @@ export default handler(async (req) => {
 
   if (contact && campaign) {
     const attempts = firstWrapUp ? contact.attempts + 1 : contact.attempts;
-    const outcome = contactOutcome(body.disposition, {
-      attemptsAfterThisCall: attempts,
-      maxAttempts: campaign.max_attempts,
-      retryAfterMinutes: campaign.retry_after_minutes,
-    });
     must(
       await db()
         .from('dialer_contacts')
@@ -63,8 +58,8 @@ export default handler(async (req) => {
           attempts,
           last_called_at: call.started_at,
           last_disposition: body.disposition,
-          status: outcome.status,
-          next_attempt_at: outcome.nextAttemptAt?.toISOString() ?? null,
+          status: contactOutcome(body.disposition),
+          next_attempt_at: null,
           locked_by: null,
           locked_at: null,
           // Keep corrections the rep made in the lead form.
