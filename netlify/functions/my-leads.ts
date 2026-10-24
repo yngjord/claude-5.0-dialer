@@ -8,12 +8,14 @@ import { handler, json } from './_lib/http';
 
 type Attachment = { url: string; thumbnails?: { large?: { url: string } } };
 
-// Bookings only: a rep's Leads page shows the meetings they've booked (and those since closed).
+// Bookings only: a rep's Leads page shows the meetings they've booked (and those since closed), from cold calls, for
+// clients that are still active.
 const STAGES = ['Booking', 'Closed'];
 
 /**
- * GET /api/my-leads: the Airtable Leads the logged-in rep created through the dialer (Leads → "Attributed to - new
- * dialer" = their login email), Booking and Closed only, newest first, with each client's name and logo.
+ * GET /api/my-leads: the Airtable Leads the logged-in rep created (Leads → "Attributed to - new dialer" = their login
+ * email), where Channel is Cold Call, Stage is Booking or Closed, and the linked client's Status is Active. Newest
+ * first, with each client's name and logo.
  */
 export default handler(async (req) => {
   const me = await requireDialerUser(req);
@@ -32,7 +34,15 @@ export default handler(async (req) => {
     Opened: string;
     'Notes (Maronly)': string;
   }>('Leads', {
-    filterByFormula: `AND(LOWER(TRIM({${ATTRIBUTED_TO_FIELD_NAME}})) = '${email}', OR(${STAGES.map((s) => `{Stage} = '${s}'`).join(', ')}))`,
+    filterByFormula: [
+      'AND(',
+      `LOWER(TRIM({${ATTRIBUTED_TO_FIELD_NAME}})) = '${email}',`,
+      `{Channel} = 'Cold Call',`,
+      // A lookup of the client's Status: exactly 'Active' (a plain FIND would also match 'Inactive').
+      `ARRAYJOIN({Linked Client Status}) = 'Active',`,
+      `OR(${STAGES.map((s) => `{Stage} = '${s}'`).join(', ')})`,
+      ')',
+    ].join(' '),
     fields: ['Prospect Full Name', 'Prospect Email', 'Phone Number', 'Linkedin Profile', 'Client', 'Stage', 'Booked For', 'Time Booked for (plain text)', 'Opened', 'Notes (Maronly)'],
   });
 
