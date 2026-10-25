@@ -1,8 +1,10 @@
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { MyLead } from '../../shared/types';
 import { ClientLogo } from '../components/ClientLogo';
+import { NewLeadModal } from '../components/NewLeadModal';
 import { Badge, type Tone } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
 import { SearchInput } from '../components/ui/SearchInput';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/States';
 import { Tabs } from '../components/ui/Tabs';
@@ -34,6 +36,7 @@ export default function Leads() {
   const [period, setPeriod] = useState<Period>('this');
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
 
   const thisMonth = sydneyToday().slice(0, 7);
   const lastMonth = (() => {
@@ -68,7 +71,15 @@ export default function Leads() {
 
   return (
     <>
-      <PageHeader title="Leads" subtitle="Leads attributed to you: meetings booked on your calls, and leads that booked after we followed up." />
+      <PageHeader
+        title="Leads"
+        subtitle="Leads attributed to you: meetings booked on your calls, and leads that booked after we followed up."
+        actions={
+          <Button onClick={() => setAdding(true)}>
+            <Plus size={16} /> Add new lead
+          </Button>
+        }
+      />
 
       <section className="card animate-appear p-4 sm:p-6">
         <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -191,6 +202,16 @@ export default function Leads() {
           </div>
         )}
       </section>
+
+      {adding && (
+        <NewLeadModal
+          onClose={() => setAdding(false)}
+          onCreated={() => {
+            setAdding(false);
+            leads.reload();
+          }}
+        />
+      )}
     </>
   );
 }

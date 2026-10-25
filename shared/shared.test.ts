@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
-import { buildLeadFields, recordingLink, todayInSydney, validateLead, type LeadInput } from './leads';
+import { buildLeadFields, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
@@ -86,6 +86,26 @@ describe('leads', () => {
     expect(fields).toMatchObject({ Stage: 'Booking', 'Booked For': '2026-10-30', 'Time Booked for (plain text)': '2:30pm AEDT', 'Date Booked': '2026-10-22' });
     expect(fields).not.toHaveProperty('Next follow up');
     expect(fields).not.toHaveProperty('Website');
+  });
+
+  it('validates hand-added bookings like the Airtable form', () => {
+    const booking = {
+      airtableClientId: 'recABCDEFGHIJKLMN',
+      campaignName: 'Kintell Oct',
+      linkedin: 'https://linkedin.com/in/jane',
+      lead: { ...lead, bookedFor: '2026-10-30', timeBookedFor: '2:30pm AEDT' },
+    };
+    expect(validateManualBooking(booking)).toEqual([]);
+    expect(validateManualBooking({ ...booking, airtableClientId: '', linkedin: ' ', lead: { ...lead, phone: '' } })).toEqual([
+      'Choose a client.',
+      'Phone number is required.',
+      'LinkedIn profile is required.',
+      'Booked for date is required.',
+      'Time booked for is required.',
+    ]);
+    const fields = buildLeadFields('Interested - Appointment Set', booking.lead, { ...ctx, recordingLink: undefined });
+    expect(fields).not.toHaveProperty('Call Recording Link');
+    expect(fields).toMatchObject({ Stage: 'Booking', Channel: 'Cold Call' });
   });
 
   it('builds permanent recording links', () => {

@@ -56,6 +56,25 @@ export function validateLead(disposition: Disposition, lead: LeadInput): string[
   return errors;
 }
 
+/** A booking added by hand from the Leads tab (replaces the Airtable "New Booking" form). */
+export interface ManualBookingInput {
+  airtableClientId: string;
+  campaignName: string;
+  linkedin: string;
+  lead: LeadInput;
+}
+
+/** Same rules as the Airtable form: everything but the notes is required. */
+export function validateManualBooking(input: ManualBookingInput): string[] {
+  const errors: string[] = [];
+  if (!/^rec[A-Za-z0-9]{14}$/.test(input.airtableClientId ?? '')) errors.push('Choose a client.');
+  if (!input.campaignName?.trim()) errors.push('Campaign name is required.');
+  if (!input.lead?.email?.trim()) errors.push('Prospect email is required.');
+  if (!input.lead?.phone?.trim()) errors.push('Phone number is required.');
+  if (!input.linkedin?.trim()) errors.push('LinkedIn profile is required.');
+  return [...errors, ...(input.lead ? validateLead(APPOINTMENT_SET, input.lead) : ['Fill in the lead details.'])];
+}
+
 /**
  * Builds the Airtable Leads record for an "Interested" wrap-up. Leads are only ever created, never updated.
  * Empty values are left out so Airtable doesn't get blank strings for URL/date fields.
@@ -63,7 +82,7 @@ export function validateLead(disposition: Disposition, lead: LeadInput): string[
 export function buildLeadFields(
   disposition: Disposition,
   lead: LeadInput,
-  ctx: { airtableClientId: string; campaignName: string; linkedin: string | null; website: string | null; todaySydney: string; attributedTo: string; recordingLink: string },
+  ctx: { airtableClientId: string; campaignName: string; linkedin: string | null; website: string | null; todaySydney: string; attributedTo: string; recordingLink?: string },
 ): Partial<LeadFields> {
   const fields: Partial<LeadFields> = {
     'Prospect Full Name': lead.fullName.trim(),
@@ -76,7 +95,7 @@ export function buildLeadFields(
     'Linkedin Profile': ctx.linkedin?.trim() ?? '',
     Website: ctx.website?.trim() ?? '',
     'Record Status': 'Open',
-    'Call Recording Link': ctx.recordingLink,
+    'Call Recording Link': ctx.recordingLink ?? '',
     [ATTRIBUTED_TO_FIELD]: ctx.attributedTo.trim(),
   };
 

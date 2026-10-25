@@ -260,3 +260,9 @@ export interface MyLead {
   opened: string;
   notes: string | null;
 }
+
+/** POST /api/leads: a booking added by hand from the Leads tab. */
+export type { ManualBookingInput as NewBookingRequest } from './leads';
+export interface NewBookingResponse {
+  leadId: string;
+}
