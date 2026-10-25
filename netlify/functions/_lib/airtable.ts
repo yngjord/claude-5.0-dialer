@@ -56,6 +56,11 @@ export async function listAll<F>(
   return records;
 }
 
+/** Reads one record by id. */
+export async function getRecord<F>(table: string, id: string): Promise<AirtableRecord<F>> {
+  return request<AirtableRecord<F>>(`${encodeURIComponent(table)}/${encodeURIComponent(id)}`);
+}
+
 /** Creates one record and returns its id. */
 export async function createRecord<F>(table: string, fields: Partial<F>): Promise<string> {
   const res = await request<{ records: { id: string }[] }>(encodeURIComponent(table), {
