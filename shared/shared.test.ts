@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
-import { buildLeadFields, todayInSydney, validateLead, type LeadInput } from './leads';
+import { buildLeadFields, recordingLink, todayInSydney, validateLead, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
@@ -61,7 +61,7 @@ describe('contactOutcome', () => {
 
 describe('leads', () => {
   const lead: LeadInput = { fullName: ' Jane Doe ', email: 'jane@acme.com', phone: '+61412345678', notes: 'Call back Tues' };
-  const ctx = { airtableClientId: 'recABC', campaignName: 'Kintell Oct', linkedin: 'https://linkedin.com/in/jane', website: null, todaySydney: '2026-10-22', attributedTo: 'tom@maronly.com' };
+  const ctx = { airtableClientId: 'recABC', campaignName: 'Kintell Oct', linkedin: 'https://linkedin.com/in/jane', website: null, todaySydney: '2026-10-22', attributedTo: 'tom@maronly.com', recordingLink: 'https://dialer.maronly.com.au/r/abc.mp3' };
 
   it('builds a Nurture lead for Needs Follow-Up', () => {
     expect(buildLeadFields('Interested - Needs Follow-Up', lead, ctx)).toEqual({
@@ -74,6 +74,7 @@ describe('leads', () => {
       'Notes (Maronly)': 'Call back Tues',
       'Linkedin Profile': 'https://linkedin.com/in/jane',
       'Record Status': 'Open',
+      'Call Recording Link': 'https://dialer.maronly.com.au/r/abc.mp3',
       Stage: 'Nurture',
       'Next follow up': '2026-10-22',
       fldKG3QEhKosSdvxc: 'tom@maronly.com',
@@ -85,6 +86,10 @@ describe('leads', () => {
     expect(fields).toMatchObject({ Stage: 'Booking', 'Booked For': '2026-10-30', 'Time Booked for (plain text)': '2:30pm AEDT', 'Date Booked': '2026-10-22' });
     expect(fields).not.toHaveProperty('Next follow up');
     expect(fields).not.toHaveProperty('Website');
+  });
+
+  it('builds permanent recording links', () => {
+    expect(recordingLink('https://dialer.maronly.com.au/', '3f9c')).toBe('https://dialer.maronly.com.au/r/3f9c.mp3');
   });
 
   it('validates', () => {

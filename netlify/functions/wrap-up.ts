@@ -1,6 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { CALLBACK, CONNECTED_PICKUP_STATUS, isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
-import { buildLeadFields, todayInSydney, validateLead } from '../../shared/leads';
+import { buildLeadFields, recordingLink, todayInSydney, validateLead } from '../../shared/leads';
 import { contactOutcome } from '../../shared/outcomes';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { createRecord } from './_lib/airtable';
@@ -19,7 +19,8 @@ const REFUSALS: Record<string, [number, string]> = {
  * POST /api/wrap-up: the post-call form. One database round trip (dialer_save_wrap_up) saves pickup status (as
  * corrected by the rep), disposition and notes, and moves the contact on (or, for Callback, holds it for this rep
  * until the callback time). For the two "Interested" dispositions it
- * then creates the lead in the CRM (Airtable), so only those saves wait on Airtable.
+ * then creates the lead in the CRM (Airtable), with a permanent link to the call recording (/r/{callId}.mp3), so
+ * only those saves wait on Airtable.
  *
  * Safe to submit again: the contact's attempt count only goes up once, and a lead is only created once. If
  * Airtable fails, the call is still saved and `leadError` is returned so the rep can retry.
@@ -91,6 +92,8 @@ export default handler(async (req, context) => {
           website: saved.website,
           todaySydney: todayInSydney(),
           attributedTo: user.email,
+          // The site the rep is on (dialer.maronly.com.au in production), so preview leads link to the preview.
+          recordingLink: recordingLink(new URL(req.url).origin, body.callId),
         }),
       );
       await Promise.all([

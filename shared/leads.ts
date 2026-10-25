@@ -29,6 +29,7 @@ export interface LeadFields {
   'Booked For': string;
   'Time Booked for (plain text)': string;
   'Date Booked': string;
+  'Call Recording Link': string;
   [ATTRIBUTED_TO_FIELD]: string;
 }
 
@@ -62,7 +63,7 @@ export function validateLead(disposition: Disposition, lead: LeadInput): string[
 export function buildLeadFields(
   disposition: Disposition,
   lead: LeadInput,
-  ctx: { airtableClientId: string; campaignName: string; linkedin: string | null; website: string | null; todaySydney: string; attributedTo: string },
+  ctx: { airtableClientId: string; campaignName: string; linkedin: string | null; website: string | null; todaySydney: string; attributedTo: string; recordingLink: string },
 ): Partial<LeadFields> {
   const fields: Partial<LeadFields> = {
     'Prospect Full Name': lead.fullName.trim(),
@@ -75,6 +76,7 @@ export function buildLeadFields(
     'Linkedin Profile': ctx.linkedin?.trim() ?? '',
     Website: ctx.website?.trim() ?? '',
     'Record Status': 'Open',
+    'Call Recording Link': ctx.recordingLink,
     [ATTRIBUTED_TO_FIELD]: ctx.attributedTo.trim(),
   };
 
@@ -92,6 +94,11 @@ export function buildLeadFields(
   return Object.fromEntries(
     Object.entries(fields).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : v !== '' && v != null)),
   ) as Partial<LeadFields>;
+}
+
+/** The permanent recording link for a call (served by netlify/functions/recording-link.ts). */
+export function recordingLink(baseUrl: string, callId: string): string {
+  return `${baseUrl.replace(/\/$/, '')}/r/${callId}.mp3`;
 }
 
 /** Today's date in Sydney as YYYY-MM-DD. */
