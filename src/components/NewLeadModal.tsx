@@ -86,7 +86,7 @@ export function NewLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
             Client
           </Label>
           <select id="nl-client" className="field" value={clientId} onChange={(e) => setClientId(e.target.value)} disabled={!clients.data}>
-            <option value="">{clients.loading ? 'Loading clients…' : clients.error ? "Couldn't load clients" : 'Choose a client'}</option>
+            <option value="">{clients.loading ? 'Loading clients…' : clients.error ? "Couldn't load clients" : clients.data?.length ? 'Choose a client' : "You're not assigned to any clients yet"}</option>
             {clients.data?.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -131,27 +131,30 @@ export function NewLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
           </Label>
           <input id="nl-linkedin" type="url" maxLength={500} className="field" placeholder="https://linkedin.com/in/…" value={linkedin} onChange={(e) => setLinkedin(e.target.value)} />
         </div>
-        <div className="grid gap-4 sm:grid-cols-[11rem_1fr]">
-          <div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="min-w-0">
             <Label htmlFor="nl-date" required>
               Date booked for
             </Label>
             <input id="nl-date" type="date" className="field" value={bookedFor} onChange={(e) => setBookedFor(e.target.value)} />
           </div>
-          <div>
+          <div className="min-w-0">
             <Label htmlFor="nl-time" required>
               Time booked for
             </Label>
-            <div className="flex gap-2">
-              <input id="nl-time" type="time" className="field" value={time} onChange={(e) => setTime(e.target.value)} />
-              <select aria-label="Time zone" className="field !w-auto" value={tz} onChange={(e) => setTz(e.target.value)}>
-                {ZONES.map((z) => (
-                  <option key={z.tz} value={z.tz}>
-                    {z.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <input id="nl-time" type="time" className="field" value={time} onChange={(e) => setTime(e.target.value)} />
+          </div>
+          <div className="sm:col-span-2">
+            <Label htmlFor="nl-tz" required>
+              Time zone
+            </Label>
+            <select id="nl-tz" className="field" value={tz} onChange={(e) => setTz(e.target.value)}>
+              {ZONES.map((z) => (
+                <option key={z.tz} value={z.tz}>
+                  {z.label}
+                </option>
+              ))}
+            </select>
             {timeText && <p className="mt-1.5 text-xs text-ink-muted">Saved as “{timeText}”</p>}
           </div>
         </div>
