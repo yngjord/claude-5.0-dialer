@@ -12,33 +12,35 @@ export interface LeadInput {
   timeBookedFor?: string | null;
 }
 
-/** Fields written to Airtable 'Leads'. Names must match the base exactly (typecast is off). */
-export interface LeadFields {
-  'Prospect Full Name': string;
-  'Prospect Email': string;
-  'Phone Number': string;
-  Client: string[];
-  Channel: 'Cold Call';
-  'Campaign Name': string;
-  'Notes (Maronly)': string;
-  'Linkedin Profile': string;
-  Website: string;
-  'Record Status': 'Open';
-  Stage: 'Nurture' | 'Booking';
-  'Next follow up': string;
-  'Booked For': string;
-  'Time Booked for (plain text)': string;
-  'Date Booked': string;
-  'Call Recording Link': string;
-  [ATTRIBUTED_TO_FIELD]: string;
-}
-
 /**
- * Leads → "Attributed to - new dialer" (text): the email of the rep who created the lead. Written by field id, so
- * renaming the field in Airtable doesn't break creating leads.
+ * Airtable Leads fields, by field id so renaming a field in Airtable doesn't break reading or creating leads. The
+ * comment is each field's name today. Only filter formulas (my-leads) use names, as Airtable formulas can't use ids.
  */
-export const ATTRIBUTED_TO_FIELD = 'fldKG3QEhKosSdvxc';
-/** Its current name, for Airtable formulas (which can't use field ids). Update this if the field is renamed. */
+export const LEAD_FIELDS = {
+  fullName: 'fldjhflLiM5HD7Gav', // Prospect Full Name
+  email: 'fldamXigL4ZUHvVVT', // Prospect Email
+  phone: 'fldhTSI4gv8SYKKTh', // Phone Number
+  client: 'fldo5DcqcpAuteG8K', // Client (link to Clients)
+  channel: 'fldrWTZXSaJSsALFp', // Channel
+  campaignName: 'fldS1E9RFDmKwdcSQ', // Campaign Name
+  notes: 'fldNX796UmD3S0YPw', // Notes (Maronly)
+  linkedin: 'fldWN5F8nR4WLUlzO', // Linkedin Profile
+  website: 'fld1lFc2Nf3c994V0', // Website
+  recordStatus: 'fld87WbJl40UGTLiX', // Record Status
+  stage: 'fldCNcQQLsHuo6pAy', // Stage
+  nextFollowUp: 'fldOhKAOIgQDdaRy0', // Next Follow-up
+  dateBookedFor: 'fld94vlZrBFMg8z2W', // Date Booked For
+  timeBookedFor: 'fldkqUeG60gLfosxD', // Time Booked for (plain text)
+  dateBookingMade: 'fldcea5C6NrjJPdHM', // Date Booking Made
+  callRecordingLink: 'fldd8s4r5ZYx31Tdz', // Call Recording Link
+  attributedTo: 'fldKG3QEhKosSdvxc', // Attributed to - new dialer: the email of the rep who created the lead
+  recordCreated: 'fldBWnRJxBXSXIYSy', // Record Created
+} as const;
+
+/** A Leads record's fields, keyed by field id. */
+export type LeadFields = Record<string, string | string[]>;
+
+/** The "Attributed to" field's current name, for Airtable formulas (which can't use field ids). Update if renamed. */
 export const ATTRIBUTED_TO_FIELD_NAME = 'Attributed to - new dialer';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -83,36 +85,35 @@ export function buildLeadFields(
   disposition: Disposition,
   lead: LeadInput,
   ctx: { airtableClientId: string; campaignName: string; linkedin: string | null; website: string | null; todaySydney: string; attributedTo: string; recordingLink?: string },
-): Partial<LeadFields> {
-  const fields: Partial<LeadFields> = {
-    'Prospect Full Name': lead.fullName.trim(),
-    'Prospect Email': lead.email.trim(),
-    'Phone Number': lead.phone.trim(),
-    Client: [ctx.airtableClientId],
-    Channel: 'Cold Call',
-    'Campaign Name': ctx.campaignName,
-    'Notes (Maronly)': lead.notes.trim(),
-    'Linkedin Profile': ctx.linkedin?.trim() ?? '',
-    Website: ctx.website?.trim() ?? '',
-    'Record Status': 'Open',
-    'Call Recording Link': ctx.recordingLink ?? '',
-    [ATTRIBUTED_TO_FIELD]: ctx.attributedTo.trim(),
+): LeadFields {
+  const F = LEAD_FIELDS;
+  const fields: LeadFields = {
+    [F.fullName]: lead.fullName.trim(),
+    [F.email]: lead.email.trim(),
+    [F.phone]: lead.phone.trim(),
+    [F.client]: [ctx.airtableClientId],
+    [F.channel]: 'Cold Call',
+    [F.campaignName]: ctx.campaignName,
+    [F.notes]: lead.notes.trim(),
+    [F.linkedin]: ctx.linkedin?.trim() ?? '',
+    [F.website]: ctx.website?.trim() ?? '',
+    [F.recordStatus]: 'Open',
+    [F.callRecordingLink]: ctx.recordingLink ?? '',
+    [F.attributedTo]: ctx.attributedTo.trim(),
   };
 
   if (disposition === APPOINTMENT_SET) {
-    fields.Stage = 'Booking';
-    fields['Booked For'] = lead.bookedFor ?? '';
-    fields['Time Booked for (plain text)'] = lead.timeBookedFor?.trim() ?? '';
-    fields['Date Booked'] = ctx.todaySydney;
+    fields[F.stage] = 'Booking';
+    fields[F.dateBookedFor] = lead.bookedFor ?? '';
+    fields[F.timeBookedFor] = lead.timeBookedFor?.trim() ?? '';
+    fields[F.dateBookingMade] = ctx.todaySydney;
   } else {
     // Needs Follow-Up leads are always due for follow-up from today.
-    fields.Stage = 'Nurture';
-    fields['Next follow up'] = ctx.todaySydney;
+    fields[F.stage] = 'Nurture';
+    fields[F.nextFollowUp] = ctx.todaySydney;
   }
 
-  return Object.fromEntries(
-    Object.entries(fields).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : v !== '' && v != null)),
-  ) as Partial<LeadFields>;
+  return Object.fromEntries(Object.entries(fields).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : v !== '' && v != null)));
 }
 
 /** The permanent recording link for a call (served by netlify/functions/recording-link.ts). */

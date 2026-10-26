@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
-import { buildLeadFields, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
+import { buildLeadFields, LEAD_FIELDS as F, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
@@ -65,27 +65,27 @@ describe('leads', () => {
 
   it('builds a Nurture lead for Needs Follow-Up', () => {
     expect(buildLeadFields('Interested - Needs Follow-Up', lead, ctx)).toEqual({
-      'Prospect Full Name': 'Jane Doe',
-      'Prospect Email': 'jane@acme.com',
-      'Phone Number': '+61412345678',
-      Client: ['recABC'],
-      Channel: 'Cold Call',
-      'Campaign Name': 'Kintell Oct',
-      'Notes (Maronly)': 'Call back Tues',
-      'Linkedin Profile': 'https://linkedin.com/in/jane',
-      'Record Status': 'Open',
-      'Call Recording Link': 'https://dialer.maronly.com.au/r/abc.mp3',
-      Stage: 'Nurture',
-      'Next follow up': '2026-10-22',
+      [F.fullName]: 'Jane Doe',
+      [F.email]: 'jane@acme.com',
+      [F.phone]: '+61412345678',
+      [F.client]: ['recABC'],
+      [F.channel]: 'Cold Call',
+      [F.campaignName]: 'Kintell Oct',
+      [F.notes]: 'Call back Tues',
+      [F.linkedin]: 'https://linkedin.com/in/jane',
+      [F.recordStatus]: 'Open',
+      [F.callRecordingLink]: 'https://dialer.maronly.com.au/r/abc.mp3',
+      [F.stage]: 'Nurture',
+      [F.nextFollowUp]: '2026-10-22',
       fldKG3QEhKosSdvxc: 'tom@maronly.com',
     });
   });
 
   it('builds a Booking lead for Appointment Set', () => {
     const fields = buildLeadFields('Interested - Appointment Set', { ...lead, bookedFor: '2026-10-30', timeBookedFor: '2:30pm AEDT' }, ctx);
-    expect(fields).toMatchObject({ Stage: 'Booking', 'Booked For': '2026-10-30', 'Time Booked for (plain text)': '2:30pm AEDT', 'Date Booked': '2026-10-22' });
-    expect(fields).not.toHaveProperty('Next follow up');
-    expect(fields).not.toHaveProperty('Website');
+    expect(fields).toMatchObject({ [F.stage]: 'Booking', [F.dateBookedFor]: '2026-10-30', [F.timeBookedFor]: '2:30pm AEDT', [F.dateBookingMade]: '2026-10-22' });
+    expect(fields).not.toHaveProperty(F.nextFollowUp);
+    expect(fields).not.toHaveProperty(F.website);
   });
 
   it('validates hand-added bookings like the Airtable form', () => {
@@ -104,8 +104,8 @@ describe('leads', () => {
       'Time booked for is required.',
     ]);
     const fields = buildLeadFields('Interested - Appointment Set', booking.lead, { ...ctx, recordingLink: undefined });
-    expect(fields).not.toHaveProperty('Call Recording Link');
-    expect(fields).toMatchObject({ Stage: 'Booking', Channel: 'Cold Call' });
+    expect(fields).not.toHaveProperty(F.callRecordingLink);
+    expect(fields).toMatchObject({ [F.stage]: 'Booking', [F.channel]: 'Cold Call' });
   });
 
   it('builds permanent recording links', () => {

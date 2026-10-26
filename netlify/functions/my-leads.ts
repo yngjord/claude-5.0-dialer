@@ -1,5 +1,5 @@
 import type { Config } from '@netlify/functions';
-import { ATTRIBUTED_TO_FIELD_NAME } from '../../shared/leads';
+import { ATTRIBUTED_TO_FIELD_NAME, LEAD_FIELDS as F } from '../../shared/leads';
 import { decodeEntities } from '../../shared/text';
 import type { MyLead } from '../../shared/types';
 import { listAll } from './_lib/airtable';
@@ -22,18 +22,8 @@ export default handler(async (req) => {
   const email = me.email.trim().toLowerCase().replace(/'/g, "\\'");
   if (!email) return json([]);
 
-  const leads = await listAll<{
-    'Prospect Full Name': string;
-    'Prospect Email': string;
-    'Phone Number': string;
-    'Linkedin Profile': string;
-    Client: string[];
-    Stage: string;
-    'Booked For': string;
-    'Time Booked for (plain text)': string;
-    Opened: string;
-    'Notes (Maronly)': string;
-  }>('Leads', {
+  // Read by field id, so renaming a Leads field in Airtable doesn't break this page. The formula has to use names.
+  const leads = await listAll<Record<string, string & string[]>>('Leads', {
     filterByFormula: [
       'AND(',
       `LOWER(TRIM({${ATTRIBUTED_TO_FIELD_NAME}})) = '${email}',`,
@@ -43,10 +33,11 @@ export default handler(async (req) => {
       `OR(${STAGES.map((s) => `{Stage} = '${s}'`).join(', ')})`,
       ')',
     ].join(' '),
-    fields: ['Prospect Full Name', 'Prospect Email', 'Phone Number', 'Linkedin Profile', 'Client', 'Stage', 'Booked For', 'Time Booked for (plain text)', 'Opened', 'Notes (Maronly)'],
+    fields: [F.fullName, F.email, F.phone, F.linkedin, F.client, F.stage, F.dateBookedFor, F.timeBookedFor, F.recordCreated, F.notes],
+    byFieldId: true,
   });
 
-  const clientIds = [...new Set(leads.flatMap((l) => l.fields.Client ?? []))];
+  const clientIds = [...new Set(leads.flatMap((l) => l.fields[F.client] ?? []))];
   const clients = clientIds.length
     ? await listAll<{ 'Client Company': string; 'Client Logo Image': Attachment[] }>('Clients', {
         filterByFormula: `OR(${clientIds.map((id) => `RECORD_ID() = '${id}'`).join(', ')})`,
@@ -57,24 +48,24 @@ export default handler(async (req) => {
 
   const rows: MyLead[] = leads
     .map((l) => {
-      const clientId = l.fields.Client?.[0] ?? null;
+      const clientId = l.fields[F.client]?.[0] ?? null;
       const client = clientId ? byId.get(clientId) : undefined;
       const logo = client?.['Client Logo Image']?.[0];
       const text = (v: string | undefined) => (v?.trim() ? decodeEntities(v.trim()) : null);
       return {
         id: l.id,
-        fullName: text(l.fields['Prospect Full Name']),
-        email: l.fields['Prospect Email']?.trim() || null,
-        phone: l.fields['Phone Number']?.trim() || null,
-        linkedin: l.fields['Linkedin Profile']?.trim() || null,
+        fullName: text(l.fields[F.fullName]),
+        email: l.fields[F.email]?.trim() || null,
+        phone: l.fields[F.phone]?.trim() || null,
+        linkedin: l.fields[F.linkedin]?.trim() || null,
         clientId,
         clientName: client?.['Client Company']?.trim() || null,
         clientLogo: logo?.thumbnails?.large?.url ?? logo?.url ?? null,
-        stage: l.fields.Stage ?? null,
-        bookedFor: l.fields['Booked For'] ?? null,
-        timeBookedFor: l.fields['Time Booked for (plain text)']?.trim() || null,
-        opened: l.fields.Opened ?? l.createdTime,
-        notes: text(l.fields['Notes (Maronly)']),
+        stage: l.fields[F.stage] ?? null,
+        bookedFor: l.fields[F.dateBookedFor] ?? null,
+        timeBookedFor: l.fields[F.timeBookedFor]?.trim() || null,
+        opened: l.fields[F.recordCreated] ?? l.createdTime,
+        notes: text(l.fields[F.notes]),
       };
     })
     .sort((a, b) => b.opened.localeCompare(a.opened));

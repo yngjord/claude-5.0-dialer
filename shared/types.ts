@@ -256,7 +256,7 @@ export interface MyLead {
   /** YYYY-MM-DD */
   bookedFor: string | null;
   timeBookedFor: string | null;
-  /** When the lead was created (Leads → Opened), ISO timestamp. */
+  /** When the lead was created (Leads → Record Created), ISO timestamp. */
   opened: string;
   notes: string | null;
 }

@@ -41,9 +41,9 @@ Browser (React + Vite)
   never overwritten (`pickup_source = 'agent'`). The raw values stay in `twilio_status` and `answered_by`.
 - **No abandoned calls.** The rep hears the line from the first ring (`answerOnBridge`); AMD only labels the call.
 - **Interested dispositions.**
-  - *Interested - Needs Follow-Up* creates a Lead with Stage `Nurture` and `Next follow up`.
-  - *Interested - Appointment Set* creates a Lead with Stage `Booking`, `Booked For`, `Time Booked for (plain text)`
-    (e.g. `2:30pm AEDT`) and `Date Booked`.
+  - *Interested - Needs Follow-Up* creates a Lead with Stage `Nurture` and `Next Follow-up`.
+  - *Interested - Appointment Set* creates a Lead with Stage `Booking`, `Date Booked For`, `Time Booked for (plain text)`
+    (e.g. `2:30pm AEDT`) and `Date Booking Made`.
   - Both set Channel `Cold Call`, Record Status `Open`, Client, Campaign Name, name, email, phone, LinkedIn and
     website. The rep's notes go in `Notes (Maronly)`.
   - If Airtable fails, the call is still saved and the rep can retry. All Lead field names are in `shared/leads.ts`.

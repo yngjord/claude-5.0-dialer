@@ -41,13 +41,15 @@ async function request<T>(path: string, init: RequestInit = {}, attempt = 0): Pr
 /** Lists every record matching the formula, following Airtable's 100-record pages. */
 export async function listAll<F>(
   table: string,
-  opts: { filterByFormula: string; fields?: readonly (keyof F & string)[] },
+  opts: { filterByFormula: string; fields?: readonly (keyof F & string)[]; byFieldId?: boolean },
 ): Promise<AirtableRecord<F>[]> {
   const records: AirtableRecord<F>[] = [];
   let offset: string | undefined;
   do {
     const params = new URLSearchParams({ filterByFormula: opts.filterByFormula, pageSize: '100' });
     opts.fields?.forEach((f) => params.append('fields[]', f));
+    // Key the returned fields by id instead of name (pass ids in `fields` too).
+    if (opts.byFieldId) params.set('returnFieldsByFieldId', 'true');
     if (offset) params.set('offset', offset);
     const page = await request<{ records: AirtableRecord<F>[]; offset?: string }>(`${encodeURIComponent(table)}?${params}`);
     records.push(...page.records);
