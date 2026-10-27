@@ -116,7 +116,7 @@ Netlify scheduled functions (`sweep`) run on production deploys only.
 
 ### 4. Moving off JustCall
 
-The dialer starts fresh: JustCall's call history isn't imported (it's archived outside the app). Once the team has
+A backfill of the calls worth keeping (with their recordings) is planned: see `docs/justcall-backfill.md`. Once the team has
 finished dialling in JustCall:
 
 1. Export and archive JustCall's call log, plus the Airtable `JustCall Storage` and `Cold Call Transcripts` tables.
