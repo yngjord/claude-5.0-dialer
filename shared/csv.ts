@@ -91,7 +91,8 @@ const GUESSES: [RegExp, ContactField][] = [
 
 /**
  * First guess at where each column goes: a standard contact field, else a saved custom field whose name or a
- * previously mapped header matches, else a new custom field named after the header. Blank headers are skipped.
+ * previously mapped header matches, else Don't import (the rep can make it a new custom field). Blank headers are
+ * skipped too.
  */
 export function guessMapping(headers: string[], customFields: CustomField[] = []): ColumnMapping {
   const used = new Set<ContactField>();
@@ -111,7 +112,7 @@ export function guessMapping(headers: string[], customFields: CustomField[] = []
       usedCustom.add(saved.key);
       return { kind: 'custom', key: saved.key };
     }
-    return { kind: 'new', label: h.trim() };
+    return { kind: 'skip' };
   });
 }
 

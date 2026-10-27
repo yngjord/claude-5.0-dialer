@@ -205,45 +205,57 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
             {fileName} · {(rows.length - 1).toLocaleString()} rows. Match each column, then check the numbers below.
           </p>
           <div className="max-h-[260px] space-y-2 overflow-y-auto pr-1">
-            {rows[0].map((header, col) => (
-              <div key={col} className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{header || `Column ${col + 1}`}</p>
-                  <p className="truncate text-xs text-ink-faint">{rows[1]?.[col]}</p>
-                </div>
-                <div className="flex w-56 shrink-0 flex-col gap-1.5">
-                  <select aria-label={`Field for ${header}`} className="field !py-2 text-sm" value={targetValue(mapping[col])} onChange={(e) => setTarget(col, parseTarget(e.target.value, header))}>
-                    <optgroup label="Contact fields">
-                      {CONTACT_FIELDS.map((f) => (
-                        <option key={f} value={`field:${f}`}>
-                          {CONTACT_FIELD_LABELS[f]}
-                        </option>
-                      ))}
-                    </optgroup>
-                    {customFields.length > 0 && (
-                      <optgroup label="Custom fields">
-                        {customFields.map((f) => (
-                          <option key={f.key} value={`custom:${f.key}`}>
-                            {f.label}
+            {rows[0].map((header, col) => {
+              const target = mapping[col];
+              return (
+                <div key={col} className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1 pt-2">
+                    <p className={`truncate text-sm font-medium ${target.kind === 'skip' ? 'text-ink-faint' : ''}`}>{header || `Column ${col + 1}`}</p>
+                    <p className="truncate text-xs text-ink-faint">{rows[1]?.[col]}</p>
+                  </div>
+                  <div className="flex w-56 shrink-0 flex-col gap-1.5">
+                    <select
+                      aria-label={`Field for ${header}`}
+                      className={`field !py-2 text-sm ${target.kind === 'skip' ? 'text-ink-muted' : ''}`}
+                      value={targetValue(target)}
+                      onChange={(e) => setTarget(col, parseTarget(e.target.value, header))}
+                    >
+                      <optgroup label="Contact fields">
+                        {CONTACT_FIELDS.map((f) => (
+                          <option key={f} value={`field:${f}`}>
+                            {CONTACT_FIELD_LABELS[f]}
                           </option>
                         ))}
                       </optgroup>
+                      {customFields.length > 0 && (
+                        <optgroup label="Custom fields">
+                          {customFields.map((f) => (
+                            <option key={f.key} value={`custom:${f.key}`}>
+                              {f.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      <option value="new">New custom field…</option>
+                      <option value="skip">Don't import</option>
+                    </select>
+                    {target.kind === 'new' && (
+                      // The new field's name: tinted so it reads as a name being created, not another dropdown.
+                      <label className="block rounded-2xl border border-dashed border-brand/50 bg-brand/5 px-3.5 py-1.5">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wider text-brand">New field name</span>
+                        <input
+                          aria-label={`Name of the new field for ${header}`}
+                          className="w-full bg-transparent text-sm font-medium outline-none placeholder:text-ink-faint"
+                          placeholder="Field name"
+                          value={target.label}
+                          onChange={(e) => setTarget(col, { kind: 'new', label: e.target.value })}
+                        />
+                      </label>
                     )}
-                    <option value="new">New custom field…</option>
-                    <option value="skip">Don't import</option>
-                  </select>
-                  {mapping[col].kind === 'new' && (
-                    <input
-                      aria-label={`Name of the new field for ${header}`}
-                      className="field !py-1.5 text-sm"
-                      placeholder="Field name"
-                      value={(mapping[col] as { label: string }).label}
-                      onChange={(e) => setTarget(col, { kind: 'new', label: e.target.value })}
-                    />
-                  )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {blankNewField && <p className="text-sm text-red-600">Give each new custom field a name, or set it to Don't import.</p>}

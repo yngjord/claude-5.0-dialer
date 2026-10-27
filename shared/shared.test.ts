@@ -137,7 +137,7 @@ describe('csv import', () => {
     const f = (field: string) => ({ kind: 'field', field });
     expect(guessMapping(['First Name', 'Last Name', 'Mobile Phone', 'Email Address', 'Company Website', 'Company', 'Job Title', 'LinkedIn URL', 'Industry', ''])).toEqual([
       f('first_name'), f('last_name'), f('phone'), f('email'), f('website'), f('company'), f('title'), f('linkedin'),
-      { kind: 'new', label: 'Industry' }, { kind: 'skip' },
+      { kind: 'skip' }, { kind: 'skip' },
     ]);
   });
 
@@ -151,13 +151,15 @@ describe('csv import', () => {
       { kind: 'custom', key: 'industry' },
     ]);
     expect(guessMapping(['Head-count'], saved)).toEqual([{ kind: 'custom', key: 'employee_count' }]);
-    expect(guessMapping(['Revenue'], saved)).toEqual([{ kind: 'new', label: 'Revenue' }]);
+    expect(guessMapping(['Revenue'], saved)).toEqual([{ kind: 'skip' }]);
     expect(customFieldKey(' Annual Revenue ($) ')).toBe('annual_revenue');
   });
 
   it('builds contacts, rejecting bad numbers and flagging duplicates', () => {
     const rows = parseCsv('Name,Phone,Company,Industry\nJane Doe,0412 345 678,Acme,SaaS\nBob,02 9876 5432,Beta,\nJane again,+61412345678,Acme,\nKim,0423 456 789,,Fin\nOld,0499 999 999,,');
-    const preview = buildImport(rows, guessMapping(rows[0]), new Set(['+61499999999']));
+    // Industry isn't a saved field, so it's Don't import until the rep makes it a new custom field.
+    const mapping = guessMapping(rows[0]).map((t, i) => (i === 3 ? { kind: 'new' as const, label: 'Industry' } : t));
+    const preview = buildImport(rows, mapping, new Set(['+61499999999']));
     expect(preview.unique.map((c) => [c.full_name, c.phone_e164, c.first_name])).toEqual([
       ['Jane Doe', '+61412345678', 'Jane'],
       ['Kim', '+61423456789', 'Kim'],
