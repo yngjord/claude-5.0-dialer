@@ -128,6 +128,7 @@ export interface CallRow {
   lead_sync_error: string | null;
   read_at: string | null;
   justcall_call_id: number | null;
+  updated_at: string;
 }
 
 export interface TranscriptTurn {
@@ -267,4 +268,10 @@ export interface MyLead {
 export type { ManualBookingInput as NewBookingRequest } from './leads';
 export interface NewBookingResponse {
   leadId: string;
+}
+
+/** GET /api/admin/twilio-balance */
+export interface TwilioBalance {
+  balance: number;
+  currency: string;
 }

@@ -1,8 +1,11 @@
 import { CalendarCheck, CalendarClock, Contact as ContactIcon, LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import type { TwilioBalance } from '../../shared/types';
+import { api } from '../lib/api';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { useVoice } from '../voice/VoiceProvider';
+import { AudioDevicesLine } from './AudioSettings';
 import Brand from './Brand';
 import { ClickToCallBar } from './ClickToCall';
 import LoadingBar from './LoadingBar';
@@ -40,6 +43,44 @@ function PhoneStatus() {
       {deviceState === 'off' && <span className="ml-auto underline">Turn on</span>}
       {deviceState === 'error' && <span className="ml-auto underline">Retry</span>}
     </button>
+  );
+}
+
+// Below this the balance shows in amber: calls stop when the Twilio balance runs out.
+const LOW_BALANCE = 20;
+
+/** Admins: the Twilio account balance, refreshed every 10 minutes. */
+function TwilioBalanceLine() {
+  const [balance, setBalance] = useState<TwilioBalance | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      api<TwilioBalance>('admin/twilio-balance')
+        .then((b) => alive && (setBalance(b), setFailed(false)))
+        .catch(() => alive && setFailed(true));
+    void load();
+    const timer = setInterval(load, 10 * 60_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+  if (!balance && !failed) return null;
+  const low = !!balance && balance.balance < LOW_BALANCE;
+  return (
+    <a
+      href="https://console.twilio.com/us1/billing/manage-billing/billing-overview"
+      target="_blank"
+      rel="noopener noreferrer"
+      title={low ? 'Low balance: top up in Twilio so calls keep working' : 'Open Twilio billing'}
+      className="mt-1.5 flex items-center justify-between rounded-xl px-1 py-1 text-xs text-white/80 hover:text-white"
+    >
+      <span>Twilio balance</span>
+      <span className={`tabular-nums font-semibold ${low ? 'rounded-full bg-amber-300 px-2 py-0.5 text-amber-950' : 'text-white'}`}>
+        {balance ? balance.balance.toLocaleString('en-AU', { style: 'currency', currency: balance.currency, currencyDisplay: 'code' }) : 'Unavailable'}
+      </span>
+    </a>
   );
 }
 
@@ -107,6 +148,8 @@ export default function AppShell() {
 
         <div className="m-3 rounded-2xl bg-white/10 p-4">
           <PhoneStatus />
+          <AudioDevicesLine />
+          {isAdmin && <TwilioBalanceLine />}
           <p className="mt-3 flex items-center gap-2 text-xs text-white/70">
             Logged in as
             {me && <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">{me.role === 'admin' ? 'Admin' : 'Team'}</span>}

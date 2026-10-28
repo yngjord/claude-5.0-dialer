@@ -12,7 +12,8 @@ import { Spinner } from './ui/Spinner';
 
 /** Disposition that fits the pickup when the rep hasn't picked one: saves a click on the many unanswered dials. */
 function suggestedDisposition(pickup: PickupStatus | null): Disposition | null {
-  if (pickup === 'Unanswered' || pickup === 'Busy' || pickup === 'Failed') return 'No Answer';
+  // Voicemail picked up (Machine Pickup) counts as No Answer too; the rep can switch it to Left Voicemail.
+  if (pickup === 'Unanswered' || pickup === 'Busy' || pickup === 'Failed' || pickup === 'Machine Pickup') return 'No Answer';
   return null;
 }
 

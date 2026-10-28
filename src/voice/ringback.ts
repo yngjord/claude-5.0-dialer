@@ -1,6 +1,9 @@
+import { routeContextToSpeaker, routeToSpeaker } from './audioDevices';
+
 /**
  * The Australian ring tone (400 + 450 Hz, ring-ring then a 2s pause), played in the browser while a call is being
- * placed, so the rep can hear that it's dialing. Twilio passes no audio until the prospect answers.
+ * placed, so the rep can hear that it's dialing. Most mobile networks send no audio until the prospect answers; the
+ * ones that send their own ringing ("early media") are detected in VoiceProvider, which stops this tone.
  */
 export function startRingback(): () => void {
   let ctx: AudioContext;
@@ -9,6 +12,7 @@ export function startRingback(): () => void {
   } catch {
     return () => undefined;
   }
+  void routeContextToSpeaker(ctx);
   const gain = ctx.createGain();
   gain.gain.value = 0;
   gain.connect(ctx.destination);
@@ -49,8 +53,14 @@ export function playDialChime(): void {
   try {
     chime ??= new Audio(DIAL_CHIME);
     chime.currentTime = 0;
-    void chime.play().catch(() => undefined);
+    const el = chime;
+    void routeToSpeaker(el).then(() => el.play().catch(() => undefined));
   } catch {
     // no audio available: dialing works without it
   }
+}
+
+/** Plays the dial chime through the chosen speaker, for the audio settings' "Test speaker". */
+export function playTestSound(): void {
+  playDialChime();
 }

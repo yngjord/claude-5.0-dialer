@@ -4,6 +4,7 @@ import type { Campaign, DialerUser } from '../../../shared/types';
 import { Avatar } from '../../components/Avatar';
 import { ClientLogo } from '../../components/ClientLogo';
 import { DateRangeFilter } from '../../components/DateRangeFilter';
+import { PickupTimes } from '../../components/PickupTimes';
 import { Metric } from '../../components/ui/Metric';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/ui/States';
 import { Tabs } from '../../components/ui/Tabs';
@@ -28,10 +29,18 @@ interface PerfRow {
   last_call_at: string | null;
 }
 
+interface ActivityRow {
+  user_id: string;
+  dials: number;
+  sessions: number;
+  active_seconds: number;
+}
+
 type View = 'team' | 'client';
 type Totals = Omit<PerfRow, 'user_id' | 'agent_name' | 'client_name'>;
-type Line = Totals & { key: string; name: string; userId: string | null; clientName: string | null };
-type SortKey = 'name' | 'dials' | 'connects' | 'rate' | 'appointments' | 'follow_ups' | 'talk_seconds' | 'last_call_at';
+// active_seconds: the rep's dialing time (team view only), for calls per hour.
+type Line = Totals & { key: string; name: string; userId: string | null; clientName: string | null; active_seconds: number | null };
+type SortKey = 'name' | 'dials' | 'connects' | 'rate' | 'appointments' | 'follow_ups' | 'talk_seconds' | 'active_seconds' | 'calls_per_hour' | 'last_call_at';
 
 const EMPTY: Totals = { dials: 0, connects: 0, machine: 0, unanswered: 0, appointments: 0, follow_ups: 0, talk_seconds: 0, last_call_at: null };
 
@@ -48,21 +57,37 @@ function add(a: Totals, b: Totals): Totals {
   };
 }
 
-const COLUMNS: { key: SortKey; label: string; numeric?: boolean }[] = [
+// teamOnly: per-rep measures, hidden in the By client view.
+const COLUMNS: { key: SortKey; label: string; numeric?: boolean; teamOnly?: boolean }[] = [
   { key: 'dials', label: 'Dials', numeric: true },
   { key: 'connects', label: 'Connects', numeric: true },
   { key: 'rate', label: 'Connect rate', numeric: true },
   { key: 'appointments', label: 'Appointments', numeric: true },
   { key: 'follow_ups', label: 'Leads', numeric: true },
   { key: 'talk_seconds', label: 'Talk time', numeric: true },
+  { key: 'active_seconds', label: 'Dialing time', numeric: true, teamOnly: true },
+  { key: 'calls_per_hour', label: 'Calls/hr', numeric: true, teamOnly: true },
   { key: 'last_call_at', label: 'Last call' },
 ];
 
-const sortValue = (l: Line, key: SortKey): string | number => (key === 'name' ? l.name.toLowerCase() : key === 'rate' ? (l.dials ? l.connects / l.dials : -1) : (l[key] ?? ''));
+/** Dials per hour of dialing time, or null when there's no dialing time to divide by. */
+const callsPerHour = (dials: number, seconds: number | null) => (seconds ? dials / (seconds / 3600) : null);
+
+const sortValue = (l: Line, key: SortKey): string | number =>
+  key === 'name'
+    ? l.name.toLowerCase()
+    : key === 'rate'
+      ? l.dials
+        ? l.connects / l.dials
+        : -1
+      : key === 'calls_per_hour'
+        ? (callsPerHour(l.dials, l.active_seconds) ?? -1)
+        : (l[key] ?? '');
 
 /**
  * Admin-only: how each team member and each client is performing over a date range, optionally narrowed to one
- * client or campaign. Counts calls made in the dialer, like the Campaigns metrics.
+ * client or campaign: dials, outcomes, calls per hour, and the best times of day to call. Counts calls made in the
+ * dialer, like the Campaigns metrics.
  */
 export default function Performance() {
   const [range, setRange] = useState<DateRange>(() => defaultRange('month'));
@@ -93,6 +118,22 @@ export default function Performance() {
     [bounds.from, bounds.to, clientName, campaignId],
   );
 
+  // Each rep's dialing time, for calls per hour (sessions of calls; a 15+ minute gap starts a new one).
+  const activity = useLoad(
+    async () =>
+      must(
+        await supabase.rpc('dialer_rep_activity', {
+          p_from: bounds.from ?? '2000-01-01T00:00:00Z',
+          p_to: bounds.to ?? new Date(Date.now() + 60_000).toISOString(),
+          p_client_name: clientName || null,
+          p_campaign_id: campaignId || null,
+        }),
+      ) as ActivityRow[],
+    [bounds.from, bounds.to, clientName, campaignId],
+  );
+  const activeByUser = useMemo(() => new Map((activity.data ?? []).map((a) => [a.user_id, a.active_seconds])), [activity.data]);
+  const totalActive = (activity.data ?? []).reduce((sum, a) => sum + a.active_seconds, 0);
+
   const clients = useMemo(() => [...new Set((campaigns.data ?? []).map((c) => c.client_name))].sort((a, b) => a.localeCompare(b)), [campaigns.data]);
   const clientIds = useMemo(() => new Map((campaigns.data ?? []).map((c) => [c.client_name, c.airtable_client_id])), [campaigns.data]);
   const campaignOptions = (campaigns.data ?? []).filter((c) => !clientName || c.client_name === clientName);
@@ -105,7 +146,8 @@ export default function Performance() {
       const user = users.data?.find((u) => u.id === r.user_id);
       const name = view === 'team' ? user?.display_name || r.agent_name || user?.email || 'Unknown' : r.client_name || 'No client';
       const prev = byKey.get(key);
-      byKey.set(key, { ...(prev ?? { key, name, userId: r.user_id, clientName: r.client_name }), ...add(prev ?? EMPTY, r) });
+      const active = view === 'team' && r.user_id ? (activeByUser.get(r.user_id) ?? null) : null;
+      byKey.set(key, { ...(prev ?? { key, name, userId: r.user_id, clientName: r.client_name }), ...add(prev ?? EMPTY, r), active_seconds: active });
     }
     const dir = sort.desc ? -1 : 1;
     return [...byKey.values()].sort((a, b) => {
@@ -113,7 +155,8 @@ export default function Performance() {
       const y = sortValue(b, sort.key);
       return x < y ? -dir : x > y ? dir : a.name.localeCompare(b.name);
     });
-  }, [stats.data, users.data, view, sort]);
+  }, [stats.data, users.data, view, sort, activeByUser]);
+  const columns = COLUMNS.filter((c) => view === 'team' || !c.teamOnly);
 
   const toggleSort = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'name' }));
   const select = 'field !w-auto !rounded-full !py-2 text-sm';
@@ -155,13 +198,19 @@ export default function Performance() {
         <ErrorState message={stats.error} onRetry={stats.reload} />
       ) : (
         <>
-          <div className="grid animate-appear grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid animate-appear grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-7">
             <Metric label="Dials" value={total.dials.toLocaleString()} loading={loading} />
             <Metric label="Connects" value={total.connects.toLocaleString()} loading={loading} />
             <Metric label="Connect rate" value={percent(total.connects, total.dials)} loading={loading} />
             <Metric label="Appointments" value={total.appointments.toLocaleString()} loading={loading} />
             <Metric label="Leads" value={total.follow_ups.toLocaleString()} loading={loading} />
             <Metric label="Talk time" value={formatTalkTime(total.talk_seconds)} loading={loading} />
+            <Metric
+              label="Calls/hr"
+              value={callsPerHour(total.dials, totalActive)?.toFixed(1) ?? '—'}
+              note={totalActive ? `over ${formatTalkTime(totalActive)} dialing` : undefined}
+              loading={loading || activity.loading}
+            />
           </div>
 
           <div className="mb-3 mt-8 flex animate-appear flex-wrap items-center justify-between gap-3">
@@ -189,14 +238,14 @@ export default function Performance() {
                   <thead className="border-b border-line">
                     <tr>
                       <SortHeader label={view === 'team' ? 'Team member' : 'Client'} col="name" sort={sort} onSort={toggleSort} />
-                      {COLUMNS.map((c) => (
+                      {columns.map((c) => (
                         <SortHeader key={c.key} label={c.label} col={c.key} sort={sort} onSort={toggleSort} right={c.numeric} />
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
                     {!lines.length ? (
-                      <EmptyRow colSpan={8}>No calls in this period.</EmptyRow>
+                      <EmptyRow colSpan={columns.length + 1}>No calls in this period.</EmptyRow>
                     ) : (
                       lines.map((l) => (
                         <tr key={l.key}>
@@ -210,7 +259,7 @@ export default function Performance() {
                               {(view === 'team' || (l.clientName && logos[clientIds.get(l.clientName) ?? ''])) && <span className="font-medium">{l.name}</span>}
                             </span>
                           </td>
-                          <Cells line={l} />
+                          <Cells line={l} team={view === 'team'} />
                         </tr>
                       ))
                     )}
@@ -219,7 +268,7 @@ export default function Performance() {
                     <tfoot className="border-t-2 border-line font-medium">
                       <tr>
                         <td className="td">Total</td>
-                        <Cells line={{ ...total, key: 'total', name: 'Total', userId: null, clientName: null }} />
+                        <Cells line={{ ...total, key: 'total', name: 'Total', userId: null, clientName: null, active_seconds: view === 'team' ? totalActive : null }} team={view === 'team'} />
                       </tr>
                     </tfoot>
                   )}
@@ -227,13 +276,27 @@ export default function Performance() {
               </div>
             )}
           </section>
+
+          <section className="card mt-8 animate-appear p-4 sm:p-6">
+            <PickupTimes
+              from={bounds.from ?? '2000-01-01T00:00:00Z'}
+              to={bounds.to ?? new Date(Date.now() + 60_000).toISOString()}
+              clientName={clientName || null}
+              campaignId={campaignId || null}
+            />
+          </section>
+          <p className="mt-3 text-xs text-ink-muted">
+            Calls/hr is dials ÷ dialing time. Dialing time runs from the first call to the end of the last in each session, plus a minute for the last
+            wrap-up; a gap of more than 15 minutes between calls starts a new session, so breaks don't count.
+          </p>
         </>
       )}
     </>
   );
 }
 
-function Cells({ line: l }: { line: Line }) {
+function Cells({ line: l, team }: { line: Line; team: boolean }) {
+  const cph = callsPerHour(l.dials, l.active_seconds);
   return (
     <>
       <td className="td text-right tabular-nums">{l.dials.toLocaleString()}</td>
@@ -242,6 +305,12 @@ function Cells({ line: l }: { line: Line }) {
       <td className="td text-right tabular-nums">{l.appointments.toLocaleString()}</td>
       <td className="td text-right tabular-nums">{l.follow_ups.toLocaleString()}</td>
       <td className="td text-right tabular-nums">{formatTalkTime(l.talk_seconds)}</td>
+      {team && (
+        <>
+          <td className="td text-right tabular-nums">{l.active_seconds ? formatTalkTime(l.active_seconds) : '—'}</td>
+          <td className="td text-right tabular-nums">{cph != null ? cph.toFixed(1) : '—'}</td>
+        </>
+      )}
       <td className="td whitespace-nowrap tabular-nums text-ink-muted">{formatDateTime(l.last_call_at)}</td>
     </>
   );

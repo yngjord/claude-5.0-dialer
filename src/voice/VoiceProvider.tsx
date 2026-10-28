@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { CallRow, Campaign, Contact } from '../../shared/types';
 import { api } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { chosenMicId, chosenSpeakerId, onAudioDevicesChanged } from './audioDevices';
 import { playDialChime, startRingback } from './ringback';
 import { callStatusLabel } from './status';
 
@@ -21,6 +22,8 @@ export interface ActiveCall {
   answeredAt: number | null;
   /** The call's row in Supabase, kept live (Twilio status, AMD, pickup status). */
   row: CallRow | null;
+  /** The phone network is playing its own audio before answer (its ringing or a message), so our ring tone stops. */
+  earlyMedia: boolean;
   error: string | null;
 }
 
@@ -42,6 +45,18 @@ const VoiceContext = createContext<VoiceContextValue | null>(null);
 
 const fetchToken = () => api<{ token: string }>('voice-token').then((r) => r.token);
 
+/** Sends call audio to the chosen speaker (Chrome/Edge; elsewhere the system default is used). */
+function applySpeaker(device: Device) {
+  if (!device.audio?.isOutputSelectionSupported) return;
+  const id = chosenSpeakerId();
+  const known = id && device.audio.availableOutputDevices.has(id);
+  device.audio.speakerDevices.set(known ? id : 'default').catch(() => undefined);
+}
+
+// The network's own pre-answer audio: this many volume readings (~50ms apart) in a row above the threshold.
+const EARLY_MEDIA_LEVEL = 0.03;
+const EARLY_MEDIA_SAMPLES = 4;
+
 export function VoiceProvider({ children }: { children: ReactNode }) {
   const [deviceState, setDeviceState] = useState<DeviceState>('off');
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -52,6 +67,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const patch = useCallback((callId: string, p: Partial<ActiveCall>) => {
     setActive((a) => (a && a.callId === callId ? { ...a, ...p } : a));
+  }, []);
+  // Realtime and the polls below can deliver rows out of order: never step back to an older version of the row.
+  const patchRow = useCallback((callId: string, row: CallRow) => {
+    setActive((a) => (a && a.callId === callId && (!a.row || row.updated_at >= a.row.updated_at) ? { ...a, row } : a));
   }, []);
 
   const start = useCallback(async () => {
@@ -76,6 +95,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         device.on('tokenWillExpire', async () => device.updateToken(await fetchToken()));
         device.on('error', (err: { message?: string }) => setDeviceError(err.message ?? 'Phone connection error'));
         deviceRef.current = device;
+        applySpeaker(device);
         setDeviceState('ready');
       } catch (err) {
         setDeviceState('error');
@@ -101,16 +121,34 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const device = deviceRef.current!;
       const callId = crypto.randomUUID();
       playDialChime();
-      setActive({ callId, contact, campaign, mode, phase: 'connecting', muted: false, answeredAt: null, row: null, error: null });
+      setActive({ callId, contact, campaign, mode, phase: 'connecting', muted: false, answeredAt: null, row: null, earlyMedia: false, error: null });
+
+      // The rep's chosen microphone, for this call only (an unplugged one falls back to the default).
+      const mic = chosenMicId();
+      if (mic) await device.audio?.setInputDevice(mic).catch(() => undefined);
+      applySpeaker(device);
 
       try {
         const call = await device.connect({ params: { callId, contactId: contact.id } });
         callRef.current = call;
+        let answered = false;
+        let loud = 0;
         call.on('ringing', () => patch(callId, { phase: 'ringing' }));
-        call.on('accept', () => patch(callId, { phase: 'live', answeredAt: Date.now() }));
+        call.on('accept', () => {
+          answered = true;
+          patch(callId, { phase: 'live', answeredAt: Date.now() });
+        });
         call.on('mute', (muted: boolean) => patch(callId, { muted }));
+        // Some networks play their own ringing (or "your call is being forwarded…") before answer. Hearing that and our
+        // ring tone together sounded like two rings, so ours stops once the line has audio of its own.
+        call.on('volume', (_input: number, output: number) => {
+          if (answered || loud >= EARLY_MEDIA_SAMPLES) return;
+          loud = output > EARLY_MEDIA_LEVEL ? loud + 1 : 0;
+          if (loud >= EARLY_MEDIA_SAMPLES) patch(callId, { earlyMedia: true });
+        });
         const end = () => {
           callRef.current = null;
+          if (mic) device.audio?.unsetInputDevice().catch(() => undefined);
           patch(callId, { phase: 'ended' });
         };
         call.on('disconnect', end);
@@ -135,12 +173,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const refresh = async () => {
       const { data } = await supabase.from('dialer_calls').select('*').eq('id', callId).maybeSingle();
-      if (!cancelled && data) patch(callId, { row: data as CallRow });
+      if (!cancelled && data) patchRow(callId, data as CallRow);
     };
     const channel = supabase
       .channel(`call-${callId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dialer_calls', filter: `id=eq.${callId}` }, (payload) => {
-        if (payload.new && 'id' in payload.new) patch(callId, { row: payload.new as CallRow });
+        if (payload.new && 'id' in payload.new) patchRow(callId, payload.new as CallRow);
       })
       .subscribe();
     // Realtime can miss the first events while subscribing, so also poll briefly.
@@ -150,7 +188,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       timers.forEach(clearTimeout);
       supabase.removeChannel(channel);
     };
-  }, [callId, patch]);
+  }, [callId, patchRow]);
 
   // After hang-up, fetch the final row a few times so pickup status is filled in for the wrap-up form.
   const ended = active?.phase === 'ended';
@@ -159,14 +197,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const timers = [500, 2000, 5000].map((ms) =>
       setTimeout(async () => {
         const { data } = await supabase.from('dialer_calls').select('*').eq('id', callId).maybeSingle();
-        if (data) patch(callId, { row: data as CallRow });
+        if (data) patchRow(callId, data as CallRow);
       }, ms),
     );
     return () => timers.forEach(clearTimeout);
-  }, [callId, ended, patch]);
+  }, [callId, ended, patchRow]);
 
-  // Ring tone once Twilio reports the prospect's phone is ringing; stops on answer, voicemail detection or hang-up.
-  const dialing = !!active && callStatusLabel(active).label === 'Ringing…';
+  // Ring tone once Twilio reports the prospect's phone is ringing; stops on answer, voicemail detection, hang-up, or
+  // when the network starts playing its own ringing.
+  const dialing = !!active && !active.earlyMedia && callStatusLabel(active).label === 'Ringing…';
   useEffect(() => {
     if (!dialing) return;
     return startRingback();
@@ -179,6 +218,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }, []);
   const sendDigits = useCallback((digits: string) => callRef.current?.sendDigits(digits), []);
   const clear = useCallback(() => setActive((a) => (a?.phase === 'ended' ? null : a)), []);
+
+  // A different speaker picked in the audio settings applies straight away, even mid-call.
+  useEffect(() => onAudioDevicesChanged(() => deviceRef.current && applySpeaker(deviceRef.current)), []);
 
   useEffect(() => () => deviceRef.current?.destroy(), []);
 

@@ -4,6 +4,13 @@ import { handler, json } from './_lib/http';
 import { verifyTwilioWebhook } from './_lib/webhook';
 
 const FINAL = ['completed', 'busy', 'no-answer', 'failed', 'canceled'];
+// The order a call moves through. Twilio's events can arrive out of order, so a status only replaces an earlier one.
+const BEFORE: Record<string, string[]> = {
+  initiated: [],
+  ringing: ['initiated'],
+  'in-progress': ['initiated', 'ringing'],
+  answered: ['initiated', 'ringing'],
+};
 
 /**
  * POST /api/twilio/call-status?callId=…: status events for the prospect's leg (initiated, ringing, answered,
@@ -27,8 +34,16 @@ export default handler(async (req) => {
     patch.duration_s = Number.parseInt(p.CallDuration ?? '0', 10) || 0;
     must(await db().from('dialer_calls').update(patch).eq('id', callId));
   } else {
-    // Events can arrive out of order: never let "ringing" overwrite a finished call.
-    must(await db().from('dialer_calls').update(patch).eq('id', callId).or(`twilio_status.is.null,twilio_status.not.in.(${FINAL.join(',')})`));
+    // Events can arrive out of order: a late "initiated" mustn't undo "ringing", nor "ringing" undo an answered or
+    // finished call (the browser's ring tone follows this status, so a step backwards restarted it).
+    const earlier = BEFORE[status] ?? [];
+    must(
+      await db()
+        .from('dialer_calls')
+        .update(patch)
+        .eq('id', callId)
+        .or(['twilio_status.is.null', ...(earlier.length ? [`twilio_status.in.(${earlier.map((s) => `"${s}"`).join(',')})`] : [])].join(',')),
+    );
   }
   return json({ ok: true });
 });

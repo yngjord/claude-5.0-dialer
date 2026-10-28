@@ -105,6 +105,10 @@ describe('pickup status trigger', () => {
     expect(await pickup(b)).toBe('Unclassified Pickup');
     await pg.query(`update dialer_calls set answered_by = 'machine_end_beep' where id = $1`, [b]);
     expect(await pickup(b)).toBe('Machine Pickup');
+    // AMD 'unknown' is in practice a carrier voicemail message ("your call has been forwarded…").
+    const c = await newCall();
+    await pg.query(`update dialer_calls set twilio_status = 'completed', answered_at = now(), answered_by = 'unknown' where id = $1`, [c]);
+    expect(await pickup(c)).toBe('Machine Pickup');
   });
 
   it('maps unanswered outcomes', async () => {
@@ -555,5 +559,28 @@ describe('stats', () => {
     const perf = await as(ADMIN, () => rows<{ user_id: string; client_name: string; dials: number; connects: number }>(`select * from dialer_performance_stats(now() - interval '1 day', now() + interval '1 day')`));
     expect(perf).toContainEqual(expect.objectContaining({ user_id: TEAM1, client_name: 'Kintell', dials: 1, connects: 1 }));
     expect(await as(TEAM2, () => rows(`select * from dialer_performance_stats(now() - interval '1 day', now() + interval '1 day')`))).toEqual([]);
+  });
+
+  it('rep activity splits sessions on a 15-minute gap; pickup by time is admin-only', async () => {
+    const at = (min: number) => `timestamptz '2026-10-20 09:00+11' + interval '${min} minutes'`;
+    // Session 1: three calls 09:00, 09:02, 09:05 (each 60s). Session 2: one call at 10:00 (30s).
+    await pg.exec(`insert into dialer_calls (campaign_id, user_id, started_at, ended_at, pickup_status) values
+      ('${CAMPAIGN}', '${TEAM2}', ${at(0)}, ${at(1)}, 'Human Pickup'),
+      ('${CAMPAIGN}', '${TEAM2}', ${at(2)}, ${at(3)}, 'Unanswered'),
+      ('${CAMPAIGN}', '${TEAM2}', ${at(5)}, ${at(6)}, 'Failed'),
+      ('${CAMPAIGN}', '${TEAM2}', ${at(60)}, ${at(60.5)}, 'Human Pickup')`);
+    const range = `timestamptz '2026-10-20 00:00+11', timestamptz '2026-10-21 00:00+11'`;
+    const [a] = await as(ADMIN, () => rows<{ user_id: string; dials: number; sessions: number; active_seconds: number }>(`select * from dialer_rep_activity(${range})`));
+    // (6 min + 1 min wrap-up) + (30s + 1 min) = 510s.
+    expect(a).toEqual({ user_id: TEAM2, dials: 4, sessions: 2, active_seconds: 510 });
+    const byTime = await as(ADMIN, () => rows<{ dow: number; hour: number; dials: number; human: number }>(`select * from dialer_pickup_by_time(${range}) order by hour`));
+    // Tuesday (isodow 2); the failed call is left out.
+    expect(byTime).toEqual([
+      { dow: 2, hour: 9, dials: 2, human: 1 },
+      { dow: 2, hour: 10, dials: 1, human: 1 },
+    ]);
+    expect(await as(TEAM2, () => rows(`select * from dialer_rep_activity(${range})`))).toEqual([]);
+    expect(await as(TEAM2, () => rows(`select * from dialer_pickup_by_time(${range})`))).toEqual([]);
+    await pg.exec(`delete from dialer_calls where user_id = '${TEAM2}' and started_at::date = '2026-10-20'`);
   });
 });

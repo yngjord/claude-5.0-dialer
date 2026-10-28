@@ -282,8 +282,10 @@ create or replace function public.dialer_pickup_status_from(p_status text, p_ans
 language sql immutable set search_path = public as $$
   select case
     when p_answered_by = 'human' then 'Human Pickup'
-    when p_answered_by like 'machine%' or p_answered_by = 'fax' then 'Machine Pickup'
-    when p_answered_by = 'unknown' then 'Unclassified Pickup'
+    -- 'unknown': AMD couldn't decide, which in practice is a carrier message ("your call has been forwarded to
+    -- voicemail") or a pickup that hangs up straight away. Reps corrected every one of these to Machine Pickup or
+    -- Unanswered, never Human Pickup, so it's labelled Machine Pickup (the rep can still change it).
+    when p_answered_by like 'machine%' or p_answered_by in ('fax', 'unknown') then 'Machine Pickup'
     when p_status = 'busy' then 'Busy'
     when p_status = 'failed' then 'Failed'
     -- canceled = the rep hung up while it was still ringing
@@ -811,6 +813,62 @@ language sql stable security invoker set search_path = public as $$
 $$;
 revoke execute on function public.dialer_performance_stats(timestamptz, timestamptz, text, uuid) from public, anon;
 grant execute on function public.dialer_performance_stats(timestamptz, timestamptz, text, uuid) to authenticated, service_role;
+
+-- Admin Performance: each rep's dialing time, for calls per hour. Calls are grouped into sessions: a gap of more than
+-- 15 minutes between one call ending and the next starting begins a new session. A session's time runs from its
+-- first call to the end of its last, plus a minute for that last wrap-up. Admins only (others get no rows).
+create or replace function public.dialer_rep_activity(p_from timestamptz, p_to timestamptz, p_client_name text default null, p_campaign_id uuid default null)
+returns table (user_id uuid, dials int, sessions int, active_seconds int)
+language sql stable security invoker set search_path = public as $$
+  with calls as (
+    select x.user_id, x.started_at,
+           coalesce(x.ended_at, x.started_at + make_interval(secs => coalesce(x.duration_s, 0))) as ended_at
+    from dialer_calls x
+    where is_dialer_admin()
+      and x.direction = 'outbound' and x.source = 'dialer' and x.user_id is not null
+      and x.started_at >= p_from and x.started_at < p_to
+      and (p_client_name is null or x.client_name = p_client_name)
+      and (p_campaign_id is null or x.campaign_id = p_campaign_id)
+  ), marked as (
+    select c.*,
+           case when c.started_at - lag(c.ended_at) over (partition by c.user_id order by c.started_at) <= interval '15 minutes'
+                then 0 else 1 end as new_session
+    from calls c
+  ), numbered as (
+    select m.*, sum(m.new_session) over (partition by m.user_id order by m.started_at) as session
+    from marked m
+  ), per_session as (
+    select n.user_id, n.session, count(*) as dials,
+           extract(epoch from max(n.ended_at) - min(n.started_at)) + 60 as seconds
+    from numbered n
+    group by n.user_id, n.session
+  )
+  select s.user_id, sum(s.dials)::int, count(*)::int, round(sum(s.seconds))::int
+  from per_session s
+  group by s.user_id
+$$;
+revoke execute on function public.dialer_rep_activity(timestamptz, timestamptz, text, uuid) from public, anon;
+grant execute on function public.dialer_rep_activity(timestamptz, timestamptz, text, uuid) to authenticated, service_role;
+
+-- Admin Performance: dials and human pickups by weekday and hour (Sydney time), for the best times to call. Failed
+-- calls never reached the phone network, so they're left out. Admins only.
+create or replace function public.dialer_pickup_by_time(p_from timestamptz, p_to timestamptz, p_client_name text default null, p_campaign_id uuid default null)
+returns table (dow int, hour int, dials int, human int)
+language sql stable security invoker set search_path = public as $$
+  select extract(isodow from x.started_at at time zone 'Australia/Sydney')::int as dow,
+         extract(hour from x.started_at at time zone 'Australia/Sydney')::int as hour,
+         count(*)::int as dials,
+         count(*) filter (where x.pickup_status = 'Human Pickup')::int as human
+  from dialer_calls x
+  where is_dialer_admin()
+    and x.direction = 'outbound' and x.source = 'dialer' and x.pickup_status is distinct from 'Failed'
+    and x.started_at >= p_from and x.started_at < p_to
+    and (p_client_name is null or x.client_name = p_client_name)
+    and (p_campaign_id is null or x.campaign_id = p_campaign_id)
+  group by 1, 2
+$$;
+revoke execute on function public.dialer_pickup_by_time(timestamptz, timestamptz, text, uuid) from public, anon;
+grant execute on function public.dialer_pickup_by_time(timestamptz, timestamptz, text, uuid) to authenticated, service_role;
 
 -- Number health: dials from one of our numbers per day or week (Sydney time), and how many were answered by a
 -- person, for spotting a number that's being flagged as spam (its human pickup rate drops). Failed calls never
