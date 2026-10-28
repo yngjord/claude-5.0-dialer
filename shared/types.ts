@@ -121,6 +121,8 @@ export interface CallRow {
   transcript_status: 'pending' | 'completed' | 'failed' | 'skipped' | null;
   transcript: string | null;
   transcript_json: TranscriptTurn[] | null;
+  /** When the transcript was written to the Airtable lead this call created. */
+  transcript_synced_at: string | null;
   visible: boolean;
   airtable_lead_id: string | null;
   lead_sync_error: string | null;

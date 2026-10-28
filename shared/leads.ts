@@ -35,6 +35,7 @@ export const LEAD_FIELDS = {
   callRecordingLink: 'fldd8s4r5ZYx31Tdz', // Call Recording Link
   attributedTo: 'fldKG3QEhKosSdvxc', // Attributed to - new dialer: the email of the rep who created the lead
   recordCreated: 'fldBWnRJxBXSXIYSy', // Record Created
+  transcript: 'fldJSugGAtJaRppT2', // Cold Call Transcript (long text): written once Twilio's transcript is ready
 } as const;
 
 /** A Leads record's fields, keyed by field id. */
@@ -119,6 +120,12 @@ export function buildLeadFields(
 /** The permanent recording link for a call (served by netlify/functions/recording-link.ts). */
 export function recordingLink(baseUrl: string, callId: string): string {
   return `${baseUrl.replace(/\/$/, '')}/r/${callId}.mp3`;
+}
+
+/** A call transcript as written to Leads → Cold Call Transcript: "Name: text", a blank line between turns (as JustCall's were). */
+export function leadTranscriptText(turns: { speaker: string; text: string }[] | null, fallback: string | null): string {
+  if (turns?.length) return turns.map((t) => `${t.speaker}: ${t.text.trim()}`).join('\n\n');
+  return (fallback ?? '').trim().split('\n').filter(Boolean).join('\n\n');
 }
 
 /** Today's date in Sydney as YYYY-MM-DD. */

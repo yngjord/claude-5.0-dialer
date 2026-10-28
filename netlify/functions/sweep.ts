@@ -1,11 +1,13 @@
 import type { Config } from '@netlify/functions';
 import { db, must } from './_lib/db';
 import { addToBlocklist } from './_lib/blocklist';
+import { syncLeadTranscript } from './_lib/leadTranscript';
 import { loadMediaCall, processRecording, storeTranscript } from './_lib/media';
 
 /**
  * Every 10 minutes: finishes recordings and transcripts the webhooks didn't (timeouts, Twilio retries), adds human
- * pickups to the Airtable blocklist where the wrap-up's attempt failed, and closes inbound calls where the caller
+ * pickups to the Airtable blocklist where the wrap-up's attempt failed, copies finished transcripts to their Airtable
+ * leads where that didn't happen (including leads made before this existed), and closes inbound calls where the caller
  * hung up without leaving a message.
  */
 export default async () => {
@@ -31,6 +33,20 @@ export default async () => {
   for (const { id } of transcripts) {
     const call = await loadMediaCall(id);
     if (call) await storeTranscript(call).catch((err) => console.error('Sweep: transcript failed', id, err));
+  }
+
+  // Finished transcripts whose call created a lead, not yet written to it.
+  const leadTranscripts = must(
+    await db()
+      .from('dialer_calls')
+      .select('id')
+      .not('airtable_lead_id', 'is', null)
+      .eq('transcript_status', 'completed')
+      .is('transcript_synced_at', null)
+      .limit(20),
+  ) as { id: string }[];
+  for (const { id } of leadTranscripts) {
+    await syncLeadTranscript(id).catch((err) => console.error('Sweep: lead transcript failed', id, err));
   }
 
   // Human pickups wrapped up 5+ minutes ago (the wrap-up's own attempt has finished) and still not on the blocklist.

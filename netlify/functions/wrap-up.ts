@@ -7,6 +7,7 @@ import { createRecord } from './_lib/airtable';
 import { requireSignedIn } from './_lib/auth';
 import { addToBlocklist } from './_lib/blocklist';
 import { db, must } from './_lib/db';
+import { syncLeadTranscript } from './_lib/leadTranscript';
 import { handler, HttpError, json, readJson } from './_lib/http';
 
 const REFUSALS: Record<string, [number, string]> = {
@@ -100,6 +101,8 @@ export default handler(async (req, context) => {
         db().from('dialer_calls').update({ airtable_lead_id: leadId, lead_sync_error: null }).eq('id', body.callId).then(must),
         saved.contact_id ? db().from('dialer_contacts').update({ airtable_lead_id: leadId }).eq('id', saved.contact_id).then(must) : null,
       ]);
+      // A transcript that finished before the rep saved goes on the new lead now (otherwise it's added when it lands).
+      context.waitUntil(syncLeadTranscript(body.callId).catch((err) => console.error('Lead transcript sync failed', body.callId, err)));
     } catch (err) {
       leadError = err instanceof Error ? err.message : 'Could not create the lead in the CRM.';
       console.error('Lead creation failed for call', body.callId, err);

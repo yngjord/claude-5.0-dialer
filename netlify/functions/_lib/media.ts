@@ -2,6 +2,7 @@ import { shouldTranscribe } from '../../../shared/pickup';
 import type { CallRow, TranscriptTurn } from '../../../shared/types';
 import { db, must } from './db';
 import { env } from './http';
+import { syncLeadTranscript } from './leadTranscript';
 import { twilioAuthHeader, twilioClient } from './twilio';
 
 export const RECORDINGS_BUCKET = 'dialer-recordings';
@@ -58,7 +59,8 @@ export async function processRecording(call: MediaCall): Promise<void> {
 
 /**
  * Fetches a finished transcript from Twilio and saves it on the call. Returns false while Twilio is still working.
- * Once saved, the Twilio copies of the recording and transcript are deleted (ours live in Supabase).
+ * Once saved, it's copied to the call's Airtable lead (if any) and the Twilio copies of the recording and transcript
+ * are deleted (ours live in Supabase).
  */
 export async function storeTranscript(call: MediaCall): Promise<boolean> {
   if (!call.transcript_sid || call.transcript_status !== 'pending') return true;
@@ -94,6 +96,9 @@ export async function storeTranscript(call: MediaCall): Promise<boolean> {
       })
       .eq('id', call.id),
   );
+
+  // If the call already created an Airtable lead, the transcript goes on it now (the sweep retries if this fails).
+  await syncLeadTranscript(call.id).catch((err) => console.error('Lead transcript sync failed', call.id, err));
 
   await deleteTwilioRecording(call.recording_sid);
   await client.intelligence.v2

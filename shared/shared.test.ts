@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
-import { buildLeadFields, LEAD_FIELDS as F, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
+import { buildLeadFields, LEAD_FIELDS as F, leadTranscriptText, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
 import { formatPhone, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
@@ -106,6 +106,16 @@ describe('leads', () => {
     const fields = buildLeadFields('Interested - Appointment Set', booking.lead, { ...ctx, recordingLink: undefined });
     expect(fields).not.toHaveProperty(F.callRecordingLink);
     expect(fields).toMatchObject({ [F.stage]: 'Booking', [F.channel]: 'Cold Call' });
+  });
+
+  it('formats transcripts for the lead like JustCall did', () => {
+    const turns = [
+      { speaker: 'Kai', text: 'Hi Peter. ', start: 0 },
+      { speaker: 'Peter Yang', text: 'Speaking.', start: 2 },
+    ];
+    expect(leadTranscriptText(turns, null)).toBe('Kai: Hi Peter.\n\nPeter Yang: Speaking.');
+    expect(leadTranscriptText(null, 'Kai: Hi\nPeter Yang: Yes')).toBe('Kai: Hi\n\nPeter Yang: Yes');
+    expect(leadTranscriptText([], null)).toBe('');
   });
 
   it('builds permanent recording links', () => {

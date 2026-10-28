@@ -71,3 +71,8 @@ export async function createRecord<F>(table: string, fields: Partial<F>): Promis
   });
   return res.records[0].id;
 }
+
+/** Updates some fields of one record (the others are left as they are). */
+export async function updateRecord(table: string, id: string, fields: Record<string, unknown>): Promise<void> {
+  await request(`${encodeURIComponent(table)}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ fields, typecast: false }) });
+}

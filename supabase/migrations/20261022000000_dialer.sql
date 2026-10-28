@@ -369,6 +369,10 @@ where c.id = k.campaign_id and (k.airtable_client_id is distinct from c.airtable
 alter table public.dialer_calls add column if not exists blocklist_record_id text;
 update public.dialer_calls set blocklist_record_id = 'skipped'
 where blocklist_record_id is null and pickup_status = 'Human Pickup' and wrapped_up_at < '2026-10-25T00:00:00Z';
+-- When the call's transcript was written to its Airtable lead (Leads → Cold Call Transcript); null until then.
+alter table public.dialer_calls add column if not exists transcript_synced_at timestamptz;
+create index if not exists dialer_calls_transcript_unsynced on public.dialer_calls (id)
+  where airtable_lead_id is not null and transcript_status = 'completed' and transcript_synced_at is null;
 
 -- Calls keep the rep's name for the portal and stats; renaming someone renames them on all their calls.
 create or replace function public.dialer_sync_agent_name() returns trigger
