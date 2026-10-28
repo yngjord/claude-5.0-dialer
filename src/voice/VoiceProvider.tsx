@@ -22,8 +22,6 @@ export interface ActiveCall {
   answeredAt: number | null;
   /** The call's row in Supabase, kept live (Twilio status, AMD, pickup status). */
   row: CallRow | null;
-  /** The phone network is playing its own audio before answer (its ringing or a message), so our ring tone stops. */
-  earlyMedia: boolean;
   error: string | null;
 }
 
@@ -53,9 +51,9 @@ function applySpeaker(device: Device) {
   device.audio.speakerDevices.set(known ? id : 'default').catch(() => undefined);
 }
 
-// The network's own pre-answer audio: this many volume readings (~50ms apart) in a row above the threshold.
-const EARLY_MEDIA_LEVEL = 0.03;
-const EARLY_MEDIA_SAMPLES = 4;
+// How far along a call is, by Twilio status (unknown statuses rank 0, so they never block an update).
+const STATUS_RANK: Record<string, number> = { initiated: 1, ringing: 2, 'in-progress': 3, answered: 3, completed: 4, busy: 4, 'no-answer': 4, failed: 4, canceled: 4 };
+const statusRank = (status: string | null | undefined) => (status ? (STATUS_RANK[status] ?? 0) : 0);
 
 export function VoiceProvider({ children }: { children: ReactNode }) {
   const [deviceState, setDeviceState] = useState<DeviceState>('off');
@@ -68,9 +66,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const patch = useCallback((callId: string, p: Partial<ActiveCall>) => {
     setActive((a) => (a && a.callId === callId ? { ...a, ...p } : a));
   }, []);
-  // Realtime and the polls below can deliver rows out of order: never step back to an older version of the row.
+  // Realtime and the polls below can deliver rows out of order: ignore one whose Twilio status is a step behind the
+  // row we already have (e.g. a poll answered before "ringing" arriving after it), which restarted the ring tone.
   const patchRow = useCallback((callId: string, row: CallRow) => {
-    setActive((a) => (a && a.callId === callId && (!a.row || row.updated_at >= a.row.updated_at) ? { ...a, row } : a));
+    setActive((a) => (a && a.callId === callId && statusRank(row.twilio_status) >= statusRank(a.row?.twilio_status) ? { ...a, row } : a));
   }, []);
 
   const start = useCallback(async () => {
@@ -121,7 +120,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const device = deviceRef.current!;
       const callId = crypto.randomUUID();
       playDialChime();
-      setActive({ callId, contact, campaign, mode, phase: 'connecting', muted: false, answeredAt: null, row: null, earlyMedia: false, error: null });
+      setActive({ callId, contact, campaign, mode, phase: 'connecting', muted: false, answeredAt: null, row: null, error: null });
 
       // The rep's chosen microphone, for this call only (an unplugged one falls back to the default).
       const mic = chosenMicId();
@@ -131,21 +130,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       try {
         const call = await device.connect({ params: { callId, contactId: contact.id } });
         callRef.current = call;
-        let answered = false;
-        let loud = 0;
         call.on('ringing', () => patch(callId, { phase: 'ringing' }));
-        call.on('accept', () => {
-          answered = true;
-          patch(callId, { phase: 'live', answeredAt: Date.now() });
-        });
+        call.on('accept', () => patch(callId, { phase: 'live', answeredAt: Date.now() }));
         call.on('mute', (muted: boolean) => patch(callId, { muted }));
-        // Some networks play their own ringing (or "your call is being forwarded…") before answer. Hearing that and our
-        // ring tone together sounded like two rings, so ours stops once the line has audio of its own.
-        call.on('volume', (_input: number, output: number) => {
-          if (answered || loud >= EARLY_MEDIA_SAMPLES) return;
-          loud = output > EARLY_MEDIA_LEVEL ? loud + 1 : 0;
-          if (loud >= EARLY_MEDIA_SAMPLES) patch(callId, { earlyMedia: true });
-        });
         const end = () => {
           callRef.current = null;
           if (mic) device.audio?.unsetInputDevice().catch(() => undefined);
@@ -203,9 +190,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     return () => timers.forEach(clearTimeout);
   }, [callId, ended, patchRow]);
 
-  // Ring tone once Twilio reports the prospect's phone is ringing; stops on answer, voicemail detection, hang-up, or
-  // when the network starts playing its own ringing.
-  const dialing = !!active && !active.earlyMedia && callStatusLabel(active).label === 'Ringing…';
+  // Ring tone once Twilio reports the prospect's phone is ringing; stops on answer, voicemail detection or hang-up.
+  const dialing = !!active && callStatusLabel(active).label === 'Ringing…';
   useEffect(() => {
     if (!dialing) return;
     return startRingback();

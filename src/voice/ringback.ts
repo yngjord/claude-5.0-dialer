@@ -2,8 +2,7 @@ import { routeContextToSpeaker, routeToSpeaker } from './audioDevices';
 
 /**
  * The Australian ring tone (400 + 450 Hz, ring-ring then a 2s pause), played in the browser while a call is being
- * placed, so the rep can hear that it's dialing. Most mobile networks send no audio until the prospect answers; the
- * ones that send their own ringing ("early media") are detected in VoiceProvider, which stops this tone.
+ * placed, so the rep can hear that it's dialing. Twilio passes no audio until the prospect answers.
  */
 export function startRingback(): () => void {
   let ctx: AudioContext;
