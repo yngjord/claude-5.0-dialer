@@ -28,13 +28,43 @@ export interface WrapUpResult {
  * Post-call form. With `dialNextOption` (power dialer) it has two buttons: "Save & dial next", and "Save" which moves
  * on to the next contact and dials it per the auto-dial setting.
  */
-export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: ActiveCall; onDone: (result: WrapUpResult) => void; dialNextOption?: boolean }) {
+/** Editing a call that was already saved: its saved values, and whether it already created a CRM lead. */
+export interface SavedWrapUp {
+  disposition: Disposition | null;
+  notes: string | null;
+  /** The booked callback time (Callback only). */
+  callbackAt: string | null;
+  leadCreated: boolean;
+}
+
+/** "2026-10-29T01:30:00Z" in Sydney → ["2026-10-29", "12:30"]. */
+function zonedParts(iso: string, tz: string): [string, string] {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      .formatToParts(new Date(iso))
+      .map((x) => [x.type, x.value]),
+  );
+  return [`${p.year}-${p.month}-${p.day}`, `${p.hour}:${p.minute}`];
+}
+
+export function WrapUpForm({
+  call,
+  onDone,
+  dialNextOption = false,
+  saved,
+}: {
+  call: ActiveCall;
+  onDone: (result: WrapUpResult) => void;
+  dialNextOption?: boolean;
+  /** Set when correcting a call that was already saved: the form starts from what was saved. */
+  saved?: SavedWrapUp;
+}) {
   const livePickup = call.row?.pickup_status ?? null;
   const [pickup, setPickup] = useState<PickupStatus | ''>(livePickup ?? '');
-  const [pickupTouched, setPickupTouched] = useState(false);
-  const [disposition, setDisposition] = useState<Disposition | ''>(suggestedDisposition(livePickup) ?? '');
-  const [dispositionTouched, setDispositionTouched] = useState(false);
-  const [notes, setNotes] = useState('');
+  const [pickupTouched, setPickupTouched] = useState(!!saved);
+  const [disposition, setDisposition] = useState<Disposition | ''>(saved ? (saved.disposition ?? '') : (suggestedDisposition(livePickup) ?? ''));
+  const [dispositionTouched, setDispositionTouched] = useState(!!saved);
+  const [notes, setNotes] = useState(saved?.notes ?? '');
   const [fullName, setFullName] = useState(call.contact.full_name ?? '');
   const [email, setEmail] = useState(call.contact.email ?? '');
   const [phone, setPhone] = useState(call.contact.phone_e164);
@@ -46,8 +76,9 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
   const [leadError, setLeadError] = useState<string | null>(null);
   const [dialNext, setDialNext] = useState(false);
   // Callback: when to call back, in the prospect's time zone.
-  const [cbDate, setCbDate] = useState('');
-  const [cbTime, setCbTime] = useState('');
+  const savedCallback = saved?.callbackAt ? zonedParts(saved.callbackAt, tz) : null;
+  const [cbDate, setCbDate] = useState(savedCallback?.[0] ?? '');
+  const [cbTime, setCbTime] = useState(savedCallback?.[1] ?? '');
   const callbackAt = disposition === CALLBACK && cbDate && cbTime ? zonedTimeToUtc(cbDate, cbTime, tz) : null;
   const preset = (hoursFromNow: number | 'tomorrow9') => {
     const at = hoursFromNow === 'tomorrow9' ? null : new Date(Date.now() + hoursFromNow * 3_600_000);
@@ -69,7 +100,9 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
     if (!dispositionTouched && livePickup) setDisposition((d) => d || suggestedDisposition(livePickup) || '');
   }, [livePickup, pickupTouched, dispositionTouched]);
 
-  const needsLead = !!disposition && LEAD_DISPOSITIONS.includes(disposition);
+  // A lead already made from this call isn't made again (or changed), so its details aren't asked for again.
+  const leadExists = !!saved?.leadCreated;
+  const needsLead = !!disposition && LEAD_DISPOSITIONS.includes(disposition) && !leadExists;
   const lead = useMemo(
     () => ({
       fullName,
@@ -177,6 +210,10 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
         </select>
       </div>
 
+      {leadExists && !!disposition && LEAD_DISPOSITIONS.includes(disposition) && (
+        <p className="rounded-2xl bg-brand-tint px-4 py-3 text-sm text-brand">This call already created its lead in the CRM. Saving here won't change the lead.</p>
+      )}
+
       {needsLead && (
         <div className="space-y-4 rounded-card border-2 border-brand/20 bg-brand-tint/50 p-4 sm:p-5">
           <p className="flex items-center gap-2 font-display text-[15px] font-medium text-brand">
@@ -219,6 +256,7 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
           <div className="flex flex-wrap gap-2">
             {(
               [
+                ['In 5 minutes', 5 / 60],
                 ['In 1 hour', 1],
                 ['In 2 hours', 2],
                 ['Tomorrow 9am', 'tomorrow9'],
@@ -289,6 +327,10 @@ export function WrapUpForm({ call, onDone, dialNextOption = false }: { call: Act
         (call.phase !== 'ended' ? (
           <Button type="button" size="md" className="w-full" disabled>
             Hang up to save
+          </Button>
+        ) : saved ? (
+          <Button type="submit" size="md" className="w-full" disabled={submitting}>
+            {submitting ? <Spinner /> : null} Save changes
           </Button>
         ) : dialNextOption ? (
           <div className="grid gap-2 sm:grid-cols-2">

@@ -1,8 +1,8 @@
-import { Camera, Plus, Trash2 } from 'lucide-react';
+import { Camera, FileText, Plus, Trash2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPhone } from '../../../shared/phone';
-import type { AirtableClient, Campaign, CampaignStats, DialerUser, PhoneNumber } from '../../../shared/types';
+import type { AirtableClient, Campaign, CampaignStats, DialerUser, PhoneNumber, Script } from '../../../shared/types';
 import { useAuth } from '../../auth/AuthProvider';
 import { Avatar } from '../../components/Avatar';
 import { Badge } from '../../components/ui/Badge';
@@ -14,12 +14,13 @@ import { api, must, useLoad } from '../../lib/api';
 import { removeAvatar, uploadAvatar } from '../../lib/avatars';
 import { setTeamMember, type CampaignRow } from '../../lib/campaigns';
 import { supabase } from '../../lib/supabase';
+import { ScriptsModal } from './ScriptsModal';
 
 // Admin popups for campaigns, opened from the Campaigns page: create/edit, delete, re-run, and who dials it.
 
 /**
- * Create or edit a campaign in one go: name, client, caller number, the team member who dials it, and (new
- * campaigns) save as a draft or launch.
+ * Create or edit a campaign in one go: name, client, caller number, call script (the client's scripts are managed
+ * from here too), the team member who dials it, and (new campaigns) save as a draft or launch.
  */
 export function CampaignForm({
   campaign,
@@ -53,6 +54,14 @@ export function CampaignForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [scriptId, setScriptId] = useState(campaign?.script_id ?? '');
+  const [managingScripts, setManagingScripts] = useState(false);
+  const scripts = useLoad(
+    async () => (clientId ? (must(await supabase.from('dialer_scripts').select('*').eq('airtable_client_id', clientId).order('name')) as Script[]) : []),
+    [clientId],
+  );
+  // A script belongs to one client: picking another client clears it (until the list loads, keep what was saved).
+  const pickedScript = !scripts.data ? scriptId : scripts.data.some((x) => x.id === scriptId) ? scriptId : '';
 
   // New campaigns: "Save as draft" or "Save & launch" (active). Editing: the status picked below.
   const save = async (e: FormEvent | null, newStatus?: Campaign['status']) => {
@@ -68,6 +77,7 @@ export function CampaignForm({
       client_name: client.name,
       airtable_client_id: client.id,
       caller_number_id: numberId || null,
+      script_id: pickedScript || null,
       status: newStatus ?? status,
     };
     try {
@@ -83,6 +93,21 @@ export function CampaignForm({
   };
 
   if (campaign && deleting) return <DeleteCampaignModal campaign={campaign} onCancel={() => setDeleting(false)} onDeleted={onSaved} />;
+  const client = clients.data?.find((c) => c.id === clientId);
+  if (managingScripts && client) {
+    return (
+      <ScriptsModal
+        clientId={client.id}
+        clientName={client.name}
+        onClose={(list) => {
+          setManagingScripts(false);
+          // A new client script becomes the campaign's when it didn't have one.
+          if (!pickedScript && list.length === 1) setScriptId(list[0].id);
+          scripts.reload({ quiet: true });
+        }}
+      />
+    );
+  }
 
   return (
     <Modal
@@ -150,6 +175,25 @@ export function CampaignForm({
             ))}
           </select>
           <p className="mt-1.5 text-xs text-ink-faint">Leave as the client's number unless this campaign needs a different one. Set client numbers in Phone numbers.</p>
+        </div>
+        <div>
+          <label htmlFor="c-script" className="mb-2 block text-sm font-medium text-ink-soft">
+            Call script
+          </label>
+          <div className="flex gap-2">
+            <select id="c-script" className="field" value={pickedScript} onChange={(e) => setScriptId(e.target.value)} disabled={!clientId || scripts.loading}>
+              <option value="">{!clientId ? 'Choose the client first' : scripts.data?.length ? 'No script' : 'No scripts for this client yet'}</option>
+              {scripts.data?.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+            <Button variant="outline" onClick={() => setManagingScripts(true)} disabled={!client}>
+              <FileText size={15} /> Manage scripts
+            </Button>
+          </div>
+          <p className="mt-1.5 text-xs text-ink-faint">Scripts belong to the client, so every campaign for them can use them. Reps can show the script beside the contact while they dial.</p>
         </div>
         <div>
           <label htmlFor="c-assignee" className="mb-2 block text-sm font-medium text-ink-soft">

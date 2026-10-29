@@ -1,13 +1,17 @@
-import { CheckCircle2, LogOut, Pause, Phone, PhoneOutgoing, SkipForward, Square } from 'lucide-react';
+import { CheckCircle2, FileText, LogOut, Pause, Pencil, Phone, PhoneOutgoing, SkipForward, Square } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { APPOINTMENT_SET, CONNECTED_PICKUP_STATUS, NEEDS_FOLLOW_UP } from '../../shared/constants';
 import { formatPhone } from '../../shared/phone';
-import type { Campaign, CampaignStats, Contact } from '../../shared/types';
+import type { CallRow, Campaign, CampaignStats, Contact } from '../../shared/types';
+import { useAuth } from '../auth/AuthProvider';
 import { CallbackContext } from '../components/CallbackContext';
 import { CallControls } from '../components/CallControls';
+import { CompanyContext } from '../components/CompanyContext';
 import { ContactCard } from '../components/ContactCard';
+import { EditLastCallModal } from '../components/EditLastCall';
 import LoadingBar from '../components/LoadingBar';
+import { ScriptPanel } from '../components/ScriptView';
 import { Button } from '../components/ui/Button';
 import { Spinner } from '../components/ui/Spinner';
 import { ErrorState } from '../components/ui/States';
@@ -26,6 +30,15 @@ const DELAYS = [
   { value: -1, label: 'Wait for me to press Call' },
 ];
 const DELAY_KEY = 'dialer:autoDelay';
+const SCRIPT_KEY = 'dialer:showScript';
+
+function readShowScript(): boolean {
+  try {
+    return localStorage.getItem(SCRIPT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 function readDelay(): number {
   try {
@@ -60,6 +73,11 @@ export default function Dialer() {
   const [delay, setDelay] = useState(readDelay);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [session, setSession] = useState({ dials: 0, connects: 0, leads: 0 });
+  const { me } = useAuth();
+  const [showScript, setShowScript] = useState(readShowScript);
+  // The call just saved, which "Edit last call" reopens.
+  const [lastSaved, setLastSaved] = useState<{ callId: string; name: string | null } | null>(null);
+  const [editingLast, setEditingLast] = useState(false);
 
   // The contact we hold a queue lock on but haven't called yet, so leaving the page can give it back.
   const heldRef = useRef<string | null>(null);
@@ -177,6 +195,7 @@ export default function Dialer() {
   };
 
   const afterWrapUp = (result: WrapUpResult) => {
+    if (myCall) setLastSaved({ callId: myCall.callId, name: myCall.contact.full_name });
     setSession((s) => ({
       ...s,
       connects: s.connects + (result.pickup === CONNECTED_PICKUP_STATUS ? 1 : 0),
@@ -189,6 +208,23 @@ export default function Dialer() {
     const prefetched = nextRef.current?.callId === myCall?.callId && result.disposition !== 'Do Not Call' ? nextRef.current?.next : undefined;
     nextRef.current = null;
     claimNext(result.dialNext ? 0 : undefined, prefetched);
+  };
+
+  // An edit to the last call: keep the session's connects and leads counts in step with the change.
+  const afterEdit = (before: Pick<CallRow, 'pickup_status' | 'disposition'>, after: WrapUpResult) => {
+    const isLead = (d: string | null) => d === APPOINTMENT_SET || d === NEEDS_FOLLOW_UP;
+    setSession((s) => ({
+      ...s,
+      connects: s.connects + (after.pickup === CONNECTED_PICKUP_STATUS ? 1 : 0) - (before.pickup_status === CONNECTED_PICKUP_STATUS ? 1 : 0),
+      leads: s.leads + (isLead(after.disposition) ? 1 : 0) - (isLead(before.disposition) ? 1 : 0),
+    }));
+    setEditingLast(false);
+    progress.reload({ quiet: true });
+  };
+  const openEditLast = () => {
+    // Hold the auto-dial while the rep fixes the last call; they press Call when they're ready.
+    setCountdown(null);
+    setEditingLast(true);
   };
 
   // The call never reached Twilio (connection error): nothing to wrap up, let the rep retry or move on.
@@ -248,6 +284,23 @@ export default function Dialer() {
               </span>
             ))}
           </div>
+          <Button
+            variant={showScript ? 'primary' : 'outline'}
+            onClick={() =>
+              setShowScript((v) => {
+                try {
+                  localStorage.setItem(SCRIPT_KEY, v ? '0' : '1');
+                } catch {
+                  // per-browser convenience only
+                }
+                return !v;
+              })
+            }
+            aria-pressed={showScript}
+            title={showScript ? 'Hide the call script' : 'Show the call script beside the contact'}
+          >
+            <FileText size={15} /> Script
+          </Button>
           <label className="sr-only" htmlFor="auto-delay">
             Auto-dial
           </label>
@@ -274,126 +327,147 @@ export default function Dialer() {
         </>
       }
     >
-      <div className="mx-auto max-w-3xl">
-        {(error || deviceError) && (
-          <p role="alert" className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error ?? deviceError}
-          </p>
-        )}
+      {/* With the script showing, the contact column keeps its width and the script sits to its right. */}
+      <div className={showScript && shown && campaign ? 'mx-auto grid max-w-[1320px] items-start gap-6 lg:grid-cols-[minmax(0,48rem)_minmax(0,1fr)]' : ''}>
+        <div className="mx-auto w-full max-w-3xl">
+          {lastSaved && !myCall && (
+            <div className="mb-3 flex justify-end">
+              <button onClick={openEditLast} className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-ink-muted hover:bg-black/5 hover:text-ink">
+                <Pencil size={14} /> Edit last call{lastSaved.name ? `: ${lastSaved.name}` : ''}
+              </button>
+            </div>
+          )}
+          {(error || deviceError) && (
+            <p role="alert" className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error ?? deviceError}
+            </p>
+          )}
 
-        {!shown ? (
-          <div className="card flex flex-col items-center gap-4 px-6 py-16 text-center">
-            {stage === 'claiming' ? (
-              <>
-                <Spinner className="text-brand" size={24} />
-                <p className="text-ink-muted">Getting the next contact…</p>
-              </>
-            ) : stage === 'empty' || (campaign && campaign.status !== 'active') ? (
-              <>
-                {campaign?.status === 'completed' ? (
-                  <>
-                    <span className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                      <CheckCircle2 size={30} />
-                    </span>
-                    <p className="font-display text-xl">Campaign complete</p>
-                    <p className="max-w-md text-ink-muted">
-                      Every contact in this campaign has been called and wrapped up.
-                      {session.dials > 0 && ` You made ${session.dials} dial${session.dials === 1 ? '' : 's'} this session.`}
-                    </p>
-                  </>
-                ) : campaign && campaign.status !== 'active' ? (
-                  <>
-                    <p className="font-display text-xl">This campaign is {CAMPAIGN_STATUS[campaign.status].label.toLowerCase()}</p>
-                    <p className="max-w-md text-ink-muted">It can't be dialed right now. Check back once an admin makes it active again.</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="font-display text-xl">No one left to call right now</p>
-                    <p className="max-w-md text-ink-muted">
-                      The rest are booked callbacks that aren't due yet, or are with a teammate. Due callbacks come up here first; you'll see them under Callbacks.
-                    </p>
-                    <Button variant="outline" onClick={() => claimNext()}>
-                      Check again
-                    </Button>
-                  </>
-                )}
-                <Button size="md" onClick={() => navigate('/campaigns')}>
-                  <LogOut size={18} /> End dialling session
-                </Button>
-              </>
-            ) : (
-              <>
-                <PhoneOutgoing className="text-brand" size={32} />
-                <p className="font-display text-xl">{stage === 'paused' ? 'Paused' : 'Ready when you are'}</p>
-                <p className="max-w-md text-ink-muted">
-                  Calls go out from your browser. Use a headset, and allow microphone access when your browser asks. After each call, fill in the wrap-up and move on to the next contact.
-                </p>
-                <Button size="md" onClick={begin} disabled={deviceState === 'starting'}>
-                  {deviceState === 'starting' ? <Spinner /> : <Phone size={18} />} {stage === 'paused' ? 'Resume dialing' : 'Start dialing'}
-                </Button>
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="animate-appear space-y-6">
-            <section className="card p-5 sm:p-8">
-              <ContactCard key={shown.id} contact={shown} centered history={false} sms={false}>
-                {shown.status === 'callback' && <CallbackContext contact={shown} />}
-                {myCall ? (
-                  <div className="border-t border-line pt-6">
-                    <CallControls call={myCall} />
-                    {failedToStart && (
-                      <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">
-                        <p>The call didn't go through: {myCall.error}</p>
-                        <div className="mt-3 flex justify-center gap-2">
-                          <Button size="sm" onClick={retryFailed}>
-                            Try again
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={async () => {
-                              clear();
-                              await skip();
-                            }}
-                          >
-                            Skip contact
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-4 border-t border-line pt-6">
-                    {countdown != null && countdown > 0 && (
-                      <p className="font-display text-[15px] text-brand" role="status">
-                        Dialing in {countdown}…
+          {!shown ? (
+            <div className="card flex flex-col items-center gap-4 px-6 py-16 text-center">
+              {stage === 'claiming' ? (
+                <>
+                  <Spinner className="text-brand" size={24} />
+                  <p className="text-ink-muted">Getting the next contact…</p>
+                </>
+              ) : stage === 'empty' || (campaign && campaign.status !== 'active') ? (
+                <>
+                  {campaign?.status === 'completed' ? (
+                    <>
+                      <span className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                        <CheckCircle2 size={30} />
+                      </span>
+                      <p className="font-display text-xl">Campaign complete</p>
+                      <p className="max-w-md text-ink-muted">
+                        Every contact in this campaign has been called and wrapped up.
+                        {session.dials > 0 && ` You made ${session.dials} dial${session.dials === 1 ? '' : 's'} this session.`}
                       </p>
-                    )}
-                    <div className="flex flex-wrap justify-center gap-2">
-                      <Button size="md" onClick={callNow} disabled={!!active}>
-                        <Phone size={18} /> Call {formatPhone(shown.phone_e164)}
+                    </>
+                  ) : campaign && campaign.status !== 'active' ? (
+                    <>
+                      <p className="font-display text-xl">This campaign is {CAMPAIGN_STATUS[campaign.status].label.toLowerCase()}</p>
+                      <p className="max-w-md text-ink-muted">It can't be dialed right now. Check back once an admin makes it active again.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-display text-xl">No one left to call right now</p>
+                      <p className="max-w-md text-ink-muted">
+                        The rest are booked callbacks that aren't due yet, or are with a teammate. Due callbacks come up here first; you'll see them under Callbacks.
+                      </p>
+                      <Button variant="outline" onClick={() => claimNext()}>
+                        Check again
                       </Button>
-                      <Button size="md" variant="outline" onClick={skip}>
-                        <SkipForward size={18} /> Skip
-                      </Button>
-                    </div>
-                    <button onClick={stop} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-ink">
-                      {countdown != null ? <Pause size={14} /> : <Square size={14} />} Stop dialing
-                    </button>
-                  </div>
-                )}
-              </ContactCard>
-            </section>
-
-            {myCall && !failedToStart && (
+                    </>
+                  )}
+                  <Button size="md" onClick={() => navigate('/campaigns')}>
+                    <LogOut size={18} /> End dialling session
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <PhoneOutgoing className="text-brand" size={32} />
+                  <p className="font-display text-xl">{stage === 'paused' ? 'Paused' : 'Ready when you are'}</p>
+                  <p className="max-w-md text-ink-muted">
+                    Calls go out from your browser. Use a headset, and allow microphone access when your browser asks. After each call, fill in the wrap-up and move on to the next contact.
+                  </p>
+                  <Button size="md" onClick={begin} disabled={deviceState === 'starting'}>
+                    {deviceState === 'starting' ? <Spinner /> : <Phone size={18} />} {stage === 'paused' ? 'Resume dialing' : 'Start dialing'}
+                  </Button>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="animate-appear space-y-6">
               <section className="card p-5 sm:p-8">
-                <WrapUpForm key={myCall.callId} call={myCall} onDone={afterWrapUp} dialNextOption />
+                <ContactCard key={shown.id} contact={shown} centered history={false} sms={false}>
+                  {shown.status === 'callback' && <CallbackContext contact={shown} />}
+                  <CompanyContext contact={shown} />
+                  {myCall ? (
+                    <div className="border-t border-line pt-6">
+                      <CallControls call={myCall} />
+                      {failedToStart && (
+                        <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">
+                          <p>The call didn't go through: {myCall.error}</p>
+                          <div className="mt-3 flex justify-center gap-2">
+                            <Button size="sm" onClick={retryFailed}>
+                              Try again
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                clear();
+                                await skip();
+                              }}
+                            >
+                              Skip contact
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4 border-t border-line pt-6">
+                      {countdown != null && countdown > 0 && (
+                        <p className="font-display text-[15px] text-brand" role="status">
+                          Dialing in {countdown}…
+                        </p>
+                      )}
+                      <div className="flex flex-wrap justify-center gap-2">
+                        <Button size="md" onClick={callNow} disabled={!!active}>
+                          <Phone size={18} /> Call {formatPhone(shown.phone_e164)}
+                        </Button>
+                        <Button size="md" variant="outline" onClick={skip}>
+                          <SkipForward size={18} /> Skip
+                        </Button>
+                      </div>
+                      <button onClick={stop} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-ink">
+                        {countdown != null ? <Pause size={14} /> : <Square size={14} />} Stop dialing
+                      </button>
+                    </div>
+                  )}
+                </ContactCard>
               </section>
-            )}
+
+              {myCall && !failedToStart && (
+                <section className="card p-5 sm:p-8">
+                  <WrapUpForm key={myCall.callId} call={myCall} onDone={afterWrapUp} dialNextOption />
+                </section>
+              )}
+            </div>
+          )}
+        </div>
+        {showScript && shown && campaign && (
+          <div className="lg:sticky lg:top-24">
+            <ScriptPanel
+              clientId={campaign.airtable_client_id}
+              defaultScriptId={campaign.script_id}
+              ctx={{ contact: shown, agentName: me?.displayName ?? null, clientName: campaign.client_name, campaignName: campaign.name }}
+            />
           </div>
         )}
       </div>
+      {editingLast && lastSaved && campaign && <EditLastCallModal callId={lastSaved.callId} campaign={campaign} onClose={() => setEditingLast(false)} onSaved={afterEdit} />}
     </FocusLayout>
   );
 }

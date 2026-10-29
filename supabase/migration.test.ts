@@ -584,3 +584,69 @@ describe('stats', () => {
     await pg.exec(`delete from dialer_calls where user_id = '${TEAM2}' and started_at::date = '2026-10-20'`);
   });
 });
+
+describe('editing a saved call', () => {
+  it("re-saving an older call doesn't undo a newer call on the contact", async () => {
+    const [k] = await rows<{ id: string }>(`insert into dialer_contacts (campaign_id, full_name, phone_e164) values ('${CAMPAIGN}', 'Edit me', '+61477700001') returning id`);
+    const older = '20000000-0000-0000-0000-0000000000e1';
+    const newer = '20000000-0000-0000-0000-0000000000e2';
+    await pg.exec(`insert into dialer_calls (id, contact_id, campaign_id, user_id, started_at, phone_e164) values
+      ('${older}', '${k.id}', '${CAMPAIGN}', '${TEAM1}', now() - interval '10 minutes', '+61477700001'),
+      ('${newer}', '${k.id}', '${CAMPAIGN}', '${TEAM1}', now() - interval '5 minutes', '+61477700001')`);
+    const save = (call: string, disposition: string, status: string, pickup: string) =>
+      asServer(() => pg.query('select dialer_save_wrap_up($1, $2, $3, $4, $5, $6)', [call, TEAM1, pickup, disposition, 'n', status]));
+    await save(older, 'No Answer', 'new', 'Machine Pickup');
+    await save(newer, 'Not Interested', 'done', 'Human Pickup');
+    // Correcting the older call's pickup status updates that call only.
+    await save(older, 'No Answer', 'new', 'Unanswered');
+    expect(await rows(`select pickup_status from dialer_calls where id = '${older}'`)).toEqual([{ pickup_status: 'Unanswered' }]);
+    expect(await rows(`select status, last_disposition, attempts from dialer_contacts where id = '${k.id}'`)).toEqual([
+      { status: 'done', last_disposition: 'Not Interested', attempts: 2 },
+    ]);
+    // The latest call can be edited, and moves the contact; attempts don't go up again.
+    await save(newer, 'Callback', 'callback', 'Human Pickup');
+    expect(await rows(`select status, last_disposition, attempts from dialer_contacts where id = '${k.id}'`)).toEqual([
+      { status: 'callback', last_disposition: 'Callback', attempts: 2 },
+    ]);
+  });
+});
+
+describe('same-company history and scripts', () => {
+  it('finds human pickups at the same company for the same client, by name or website', async () => {
+    const add = async (campaign: string, name: string, phone: string, company: string | null, website: string | null) =>
+      (await rows<{ id: string }>('insert into dialer_contacts (campaign_id, full_name, phone_e164, company, website, title) values ($1, $2, $3, $4, $5, $6) returning id', [campaign, name, phone, company, website, 'CEO']))[0].id;
+    const shaun = await add(CAMPAIGN, 'Shaun', '+61477700011', 'Hunt St Pty Ltd', null);
+    const viaSite = await add(CAMPAIGN, 'Sam', '+61477700012', 'Something else', 'https://www.huntst.com/about');
+    const next = await add(CAMPAIGN, 'Next', '+61477700013', 'hunt st', 'huntst.com');
+    const otherClient = await add(OTHER_CAMPAIGN, 'Morf', '+61477700014', 'Hunt St', null);
+    await pg.exec(`insert into dialer_contacts (campaign_id, full_name, phone_e164, website) values ('${CAMPAIGN}', 'Sam site', '+61477700015', 'huntst.com')`);
+    await pg.exec(`insert into dialer_calls (contact_id, campaign_id, user_id, agent_name, pickup_status, disposition, notes, started_at) values
+      ('${shaun}', '${CAMPAIGN}', '${TEAM2}', 'T2', 'Human Pickup', 'Not Interested', 'Has self-recorded testimonials', now() - interval '2 days'),
+      ('${viaSite}', '${CAMPAIGN}', '${TEAM2}', 'T2', 'Human Pickup', 'Callback', 'Call back Friday', now() - interval '1 day'),
+      ('${shaun}', '${CAMPAIGN}', '${TEAM2}', 'T2', 'Machine Pickup', 'No Answer', null, now()),
+      ('${otherClient}', '${OTHER_CAMPAIGN}', '${ADMIN}', 'A', 'Human Pickup', 'Not Interested', 'other client', now())`);
+    // TEAM1 sees TEAM2's calls here (they can't read them directly), newest first; machine pickups and other clients are left out.
+    const history = await as(TEAM1, () => rows<{ full_name: string; notes: string }>('select full_name, notes from dialer_company_history($1)', [next]));
+    expect(history).toEqual([
+      { full_name: 'Sam', notes: 'Call back Friday' },
+      { full_name: 'Shaun', notes: 'Has self-recorded testimonials' },
+    ]);
+    // Shaun's company matches Next's name, but Next has no calls; Sam matches by website only, which Shaun has none of.
+    expect(await as(TEAM1, () => rows('select * from dialer_company_history($1)', [shaun]))).toEqual([]);
+    const [samSite] = await rows<{ id: string }>(`select id from dialer_contacts where full_name = 'Sam site'`);
+    expect(await as(TEAM1, () => rows('select * from dialer_company_history($1)', [samSite.id]))).toEqual([
+      { started_at: expect.anything(), agent_name: 'T2', full_name: 'Sam', title: 'CEO', disposition: 'Callback', notes: 'Call back Friday' },
+    ]);
+    await expect(as(TEAM1, () => pg.query('select * from dialer_company_history($1)', [otherClient]))).rejects.toThrow(/not assigned/);
+  });
+
+  it("scripts: admins manage them, reps read their clients' scripts only", async () => {
+    await as(ADMIN, () => pg.query(`insert into dialer_scripts (airtable_client_id, client_name, name, body) values ('recKintell', 'Kintell', 'Opener', 'Hi {{first_name}}'), ('recMorfless', 'Morfless', 'M', 'x')`));
+    expect(await as(TEAM1, () => rows<{ name: string }>('select name from dialer_scripts'))).toEqual([{ name: 'Opener' }]);
+    await expect(as(TEAM1, () => pg.query(`insert into dialer_scripts (airtable_client_id, client_name, name) values ('recKintell', 'Kintell', 'Mine')`))).rejects.toThrow(/row-level security/);
+    const [s] = await rows<{ id: string }>(`select id from dialer_scripts where name = 'Opener'`);
+    await as(ADMIN, () => pg.query(`update dialer_campaigns set script_id = $1 where id = $2`, [s.id, CAMPAIGN]));
+    await as(ADMIN, () => pg.query('delete from dialer_scripts where id = $1', [s.id]));
+    expect(await rows(`select script_id from dialer_campaigns where id = '${CAMPAIGN}'`)).toEqual([{ script_id: null }]);
+  });
+});

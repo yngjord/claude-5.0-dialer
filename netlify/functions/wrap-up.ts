@@ -23,8 +23,9 @@ const REFUSALS: Record<string, [number, string]> = {
  * then creates the lead in the CRM (Airtable), with a permanent link to the call recording (/r/{callId}.mp3), so
  * only those saves wait on Airtable.
  *
- * Safe to submit again: the contact's attempt count only goes up once, and a lead is only created once. If
- * Airtable fails, the call is still saved and `leadError` is returned so the rep can retry.
+ * Safe to submit again (the dialer's "Edit last call" does): the contact's attempt count only goes up once, and a
+ * lead is only created once. If Airtable fails, the call is still saved and `leadError` is returned so the rep can
+ * retry.
  */
 export default handler(async (req, context) => {
   const [user, body] = await Promise.all([requireSignedIn(req), readJson<WrapUpRequest>(req)]);
@@ -40,7 +41,12 @@ export default handler(async (req, context) => {
     callbackAt = at.toISOString();
   }
 
-  const needsLead = LEAD_DISPOSITIONS.includes(body.disposition);
+  let needsLead = LEAD_DISPOSITIONS.includes(body.disposition);
+  // Re-saving a call that already made its lead (correcting it from the dialer): the lead isn't made again.
+  if (needsLead && !body.lead) {
+    const existing = must(await db().from('dialer_calls').select('airtable_lead_id').eq('id', body.callId).maybeSingle()) as { airtable_lead_id: string | null } | null;
+    if (existing?.airtable_lead_id) needsLead = false;
+  }
   if (needsLead) {
     if (!body.lead) throw new HttpError(400, 'Fill in the lead details.');
     const problems = validateLead(body.disposition, body.lead);

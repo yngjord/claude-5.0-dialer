@@ -41,8 +41,21 @@ export interface Campaign {
   client_name: string;
   airtable_client_id: string;
   caller_number_id: string | null;
+  /** The call script reps see by default (one of the client's dialer_scripts). */
+  script_id: string | null;
   status: CampaignStatus;
   created_at: string;
+}
+
+/** A per-client call script (dialer_scripts). The body uses {{variables}}; see shared/script.ts. */
+export interface Script {
+  id: string;
+  airtable_client_id: string;
+  client_name: string;
+  name: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CampaignStats {

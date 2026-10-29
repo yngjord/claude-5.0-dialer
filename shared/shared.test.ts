@@ -6,6 +6,7 @@ import { formatPhone, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
 import { shouldTranscribe } from './pickup';
 import { buildBlocklistFields } from './blocklist';
+import { renderScript } from './script';
 import { decodeEntities } from './text';
 import { zonedTimeToUtc } from './time';
 
@@ -254,5 +255,27 @@ describe('buildBlocklistFields', () => {
       fldtWCAxtp7sD5crB: 'acme.com',
       fldHRM9yswPCVPomf: 'Kintell Oct',
     });
+  });
+});
+
+describe('renderScript', () => {
+  const ctx = {
+    contact: { full_name: 'Shaun Cunningham', first_name: null, company: 'Hunt St', title: 'CEO', email: null, website: 'https://www.huntst.com/', custom: { industry: 'HR tech' } },
+    agentName: 'Jordan Maroni',
+    clientName: 'Kintell',
+    campaignName: 'Kintell Oct',
+  };
+  const text = (body: string) => renderScript(body, ctx).map((p) => p.text).join('');
+
+  it('fills in contact, rep, client and custom variables', () => {
+    expect(text("Hi {{first_name}}, it's {{ agent_first_name }} from {{client_name}}. I was on {{website}} ({{industry}}).")).toBe(
+      "Hi Shaun, it's Jordan from Kintell. I was on huntst.com (HR tech).",
+    );
+  });
+
+  it('flags variables with no value, and leaves other braces alone', () => {
+    const parts = renderScript('Email {{email}} or {{nope}} {single}', ctx);
+    expect(parts.filter((p) => p.kind === 'missing').map((p) => p.text)).toEqual(['{{email}}', '{{nope}}']);
+    expect(text('{single}')).toBe('{single}');
   });
 });

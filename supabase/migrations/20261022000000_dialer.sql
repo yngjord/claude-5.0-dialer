@@ -585,7 +585,13 @@ begin
     pickup_status = p_pickup
   where id = x.id;
 
-  if x.contact_id is not null then
+  -- The contact follows this call's outcome unless it has been called again since (editing an older call later
+  -- mustn't undo what the newer call set); the attempt still counts.
+  if x.contact_id is not null and exists (
+    select 1 from dialer_calls n where n.contact_id = x.contact_id and n.started_at > x.started_at
+  ) then
+    update dialer_contacts set attempts = attempts + case when first_save then 1 else 0 end where id = x.contact_id;
+  elsif x.contact_id is not null then
     update dialer_contacts set
       attempts = attempts + case when first_save then 1 else 0 end,
       last_called_at = x.started_at,
@@ -924,3 +930,77 @@ drop policy if exists "Dialer admins manage greetings" on storage.objects;
 create policy "Dialer admins manage greetings" on storage.objects for all to authenticated
   using (bucket_id = 'dialer-greetings' and public.is_dialer_admin())
   with check (bucket_id = 'dialer-greetings' and public.is_dialer_admin());
+
+-- ── Call scripts ────────────────────────────────────────────────────────────────────────────────────────────
+-- Per client (by Airtable client id); a campaign can pick one as its default. Bodies use {{variables}} (see
+-- shared/script.ts). Admins write; reps read the scripts of clients whose campaigns they can open.
+create table if not exists public.dialer_scripts (
+  id uuid primary key default gen_random_uuid(),
+  airtable_client_id text not null,
+  client_name text not null,
+  name text not null check (length(trim(name)) > 0),
+  body text not null default '',
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists dialer_scripts_client on public.dialer_scripts (airtable_client_id, name);
+drop trigger if exists dialer_scripts_updated_at on public.dialer_scripts;
+create trigger dialer_scripts_updated_at before update on public.dialer_scripts for each row execute function public.dialer_set_updated_at();
+
+alter table public.dialer_scripts enable row level security;
+drop policy if exists "Reps read their clients' scripts" on public.dialer_scripts;
+create policy "Reps read their clients' scripts" on public.dialer_scripts for select to authenticated using (
+  is_dialer_admin() or exists (
+    select 1 from dialer_campaigns c where c.airtable_client_id = dialer_scripts.airtable_client_id and dialer_can_access_campaign(c.id)
+  )
+);
+drop policy if exists "Admins manage scripts" on public.dialer_scripts;
+create policy "Admins manage scripts" on public.dialer_scripts for all to authenticated using (is_dialer_admin()) with check (is_dialer_admin());
+
+alter table public.dialer_campaigns add column if not exists script_id uuid references public.dialer_scripts(id) on delete set null;
+
+-- ── Same-company heads-up ───────────────────────────────────────────────────────────────────────────────────
+-- Company names and websites compared loosely: "Hunt St Pty Ltd" = "hunt st", "https://www.huntst.com/about" =
+-- "huntst.com".
+create or replace function public.dialer_company_key(p text) returns text
+language sql immutable set search_path = public as $$
+  select nullif(regexp_replace(regexp_replace(lower(coalesce(p, '')), '\m(pty|ltd|limited|inc|llc|co|group|holdings)\M', '', 'g'), '[^a-z0-9]', '', 'g'), '')
+$$;
+create or replace function public.dialer_domain_key(p text) returns text
+language sql immutable set search_path = public as $$
+  select nullif(split_part(regexp_replace(lower(trim(coalesce(p, ''))), '^(https?://)?(www\.)?', ''), '/', 1), '')
+$$;
+
+-- For the contact about to be dialed: earlier calls where someone at the same company (same client, any campaign,
+-- any rep) actually spoke to us, newest first, with that call's notes. The contact's own calls are left out (a
+-- callback has its own panel). Security definer: reps only see their own calls otherwise.
+create or replace function public.dialer_company_history(p_contact_id uuid)
+returns table (started_at timestamptz, agent_name text, full_name text, title text, disposition text, notes text)
+language plpgsql stable security definer set search_path = public as $$
+declare
+  k public.dialer_contacts;
+begin
+  select * into k from dialer_contacts where id = p_contact_id;
+  if k.id is null or not dialer_can_access_campaign(k.campaign_id) then
+    raise exception 'You are not assigned to this campaign' using errcode = '42501';
+  end if;
+  if dialer_company_key(k.company) is null and dialer_domain_key(k.website) is null then
+    return;
+  end if;
+  return query
+    select x.started_at, x.agent_name, coalesce(o.full_name, x.full_name), o.title, x.disposition, x.notes
+    from dialer_calls x
+    join dialer_contacts o on o.id = x.contact_id
+    where x.pickup_status = 'Human Pickup'
+      and x.source = 'dialer'
+      and o.airtable_client_id = k.airtable_client_id
+      and o.id <> k.id
+      and o.phone_e164 <> k.phone_e164
+      and (dialer_company_key(o.company) = dialer_company_key(k.company) or dialer_domain_key(o.website) = dialer_domain_key(k.website))
+    order by x.started_at desc
+    limit 5;
+end $$;
+revoke execute on function public.dialer_company_history(uuid) from public, anon;
+grant execute on function public.dialer_company_history(uuid) to authenticated, service_role;
+
