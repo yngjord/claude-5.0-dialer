@@ -1,6 +1,6 @@
 import { ArrowLeft, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { SCRIPT_VARIABLES, type ScriptContext } from '../../../shared/script';
+import { ANSWER_KEY, SCRIPT_VARIABLES, type ScriptContext } from '../../../shared/script';
 import type { Script } from '../../../shared/types';
 import { ScriptText } from '../../components/ScriptView';
 import { Button } from '../../components/ui/Button';
@@ -49,12 +49,13 @@ export function ScriptsModal({ clientId, clientName, onClose }: { clientId: stri
     setError(null);
   };
 
-  // Inserts {{key}} where the cursor is in the script.
+  // Inserts {{key}} where the cursor is in the script. The answer pause goes on a line of its own.
   const insert = (key: string) => {
     const el = bodyRef.current;
-    const token = `{{${key}}}`;
     const at = el ? el.selectionStart : body.length;
     const end = el ? el.selectionEnd : body.length;
+    const ownLine = key === ANSWER_KEY;
+    const token = `${ownLine && at > 0 && body[at - 1] !== '\n' ? '\n' : ''}{{${key}}}${ownLine && body[end] !== '\n' ? '\n' : ''}`;
     setBody(body.slice(0, at) + token + body.slice(end));
     requestAnimationFrame(() => {
       el?.focus();
@@ -135,6 +136,14 @@ export function ScriptsModal({ clientId, clientName, onClose }: { clientId: stri
             />
             <p className="mb-1.5 mt-2 text-xs text-ink-muted">Insert a detail (filled in for each contact when the rep calls):</p>
             <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => insert(ANSWER_KEY)}
+                className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700"
+                title="A pause where the prospect answers: {{answer}}"
+              >
+                Prospect answers
+              </button>
               {variables.map((v) => (
                 <button
                   key={v.key}

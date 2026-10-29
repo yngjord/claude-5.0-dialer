@@ -8,6 +8,9 @@ export interface ScriptVariable {
   label: string;
 }
 
+/** {{answer}}: not a value but a pause, shown as a red "Prospect answers" block where the rep stops and listens. */
+export const ANSWER_KEY = 'answer';
+
 /** Built-in variables, in the order the editor lists them. */
 export const SCRIPT_VARIABLES: ScriptVariable[] = [
   { key: 'first_name', label: 'First name' },
@@ -38,7 +41,11 @@ export interface ScriptContext {
 }
 
 /** A piece of a rendered script: text, a filled-in variable, or a variable with no value for this contact. */
-export type ScriptPart = { kind: 'text'; text: string } | { kind: 'value'; key: string; text: string } | { kind: 'missing'; key: string; text: string };
+export type ScriptPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'value'; key: string; text: string }
+  | { kind: 'missing'; key: string; text: string }
+  | { kind: 'answer' };
 
 const VARIABLE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
@@ -66,7 +73,10 @@ export function scriptValues(ctx: ScriptContext): Record<string, string> {
   return values;
 }
 
-/** Splits a script into text and variables, filled in for this call. Unknown or empty variables come back as `missing`. */
+/**
+ * Splits a script into text and variables, filled in for this call. Unknown or empty variables come back as
+ * `missing`; {{answer}} comes back as an `answer` pause.
+ */
 export function renderScript(body: string, ctx: ScriptContext): ScriptPart[] {
   const values = scriptValues(ctx);
   const parts: ScriptPart[] = [];
@@ -75,7 +85,7 @@ export function renderScript(body: string, ctx: ScriptContext): ScriptPart[] {
     if (m.index! > last) parts.push({ kind: 'text', text: body.slice(last, m.index) });
     const key = m[1].toLowerCase();
     const value = values[key];
-    parts.push(value ? { kind: 'value', key, text: value } : { kind: 'missing', key, text: m[0] });
+    parts.push(key === ANSWER_KEY ? { kind: 'answer' } : value ? { kind: 'value', key, text: value } : { kind: 'missing', key, text: m[0] });
     last = m.index! + m[0].length;
   }
   if (last < body.length) parts.push({ kind: 'text', text: body.slice(last) });

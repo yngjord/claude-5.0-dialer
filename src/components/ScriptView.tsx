@@ -6,13 +6,20 @@ import { must, useLoad } from '../lib/api';
 import { formatDate } from '../lib/format';
 import { supabase } from '../lib/supabase';
 
-/** A script filled in for this call. Variables with no value stay as {{name}} on amber, so the rep notices. */
+/**
+ * A script filled in for this call. Variables with no value stay as {{name}} on amber, so the rep notices; {{answer}}
+ * is a red "Prospect answers" pause.
+ */
 export function ScriptText({ body, ctx }: { body: string; ctx: ScriptContext }) {
   return (
     <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink-soft">
       {renderScript(body, ctx).map((part, i) =>
         part.kind === 'text' ? (
           <span key={i}>{part.text}</span>
+        ) : part.kind === 'answer' ? (
+          <span key={i} className="mx-0.5 inline-flex items-center rounded-full bg-red-600 px-2.5 py-0.5 align-middle text-xs font-semibold uppercase tracking-wide text-white" title="Pause: let the prospect answer">
+            Prospect answers
+          </span>
         ) : part.kind === 'value' ? (
           <span key={i} className="font-medium text-ink" title={`{{${part.key}}}`}>
             {part.text}

@@ -265,12 +265,16 @@ describe('renderScript', () => {
     clientName: 'Kintell',
     campaignName: 'Kintell Oct',
   };
-  const text = (body: string) => renderScript(body, ctx).map((p) => p.text).join('');
+  const text = (body: string) => renderScript(body, ctx).map((p) => ('text' in p ? p.text : '[answer]')).join('');
 
   it('fills in contact, rep, client and custom variables', () => {
     expect(text("Hi {{first_name}}, it's {{ agent_first_name }} from {{client_name}}. I was on {{website}} ({{industry}}).")).toBe(
       "Hi Shaun, it's Jordan from Kintell. I was on huntst.com (HR tech).",
     );
+  });
+
+  it('turns {{answer}} into a pause for the prospect', () => {
+    expect(renderScript('Any happy clients?\n{{ Answer }}\nGreat.', ctx).map((p) => p.kind)).toEqual(['text', 'answer', 'text']);
   });
 
   it('flags variables with no value, and leaves other braces alone', () => {
