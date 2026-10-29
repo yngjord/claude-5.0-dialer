@@ -12,6 +12,14 @@ export function formatDateTime(value: string | null | undefined, { withZone = fa
   return `${date}, ${time}`;
 }
 
+/** e.g. "29 Oct 2026" (Sydney date). */
+export function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString('en-AU', { timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 export function formatTime(value: string | null | undefined): string {
   if (!value) return '';
   return new Date(value).toLocaleTimeString('en-AU', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });

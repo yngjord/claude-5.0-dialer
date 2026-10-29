@@ -12,6 +12,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { ErrorState, LoadingRows } from '../../components/ui/States';
 import { api, must, useLoad } from '../../lib/api';
 import { removeAvatar, uploadAvatar } from '../../lib/avatars';
+import { formatDate } from '../../lib/format';
 import { setTeamMember, type CampaignRow } from '../../lib/campaigns';
 import { supabase } from '../../lib/supabase';
 import { ScriptsModal } from './ScriptsModal';
@@ -185,7 +186,7 @@ export function CampaignForm({
               <option value="">{!clientId ? 'Choose the client first' : scripts.data?.length ? 'No script' : 'No scripts for this client yet'}</option>
               {scripts.data?.map((x) => (
                 <option key={x.id} value={x.id}>
-                  {x.name}
+                  {x.name} · created {formatDate(x.created_at)}
                 </option>
               ))}
             </select>

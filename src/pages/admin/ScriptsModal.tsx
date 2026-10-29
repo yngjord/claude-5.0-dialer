@@ -8,6 +8,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Spinner } from '../../components/ui/Spinner';
 import { useAuth } from '../../auth/AuthProvider';
 import { must, useLoad } from '../../lib/api';
+import { formatDate } from '../../lib/format';
 import { supabase } from '../../lib/supabase';
 
 // A made-up contact, so the editor can show the script as a rep will read it.
@@ -117,7 +118,7 @@ export function ScriptsModal({ clientId, clientName, onClose }: { clientId: stri
             <label htmlFor="s-name" className="mb-2 block text-sm font-medium text-ink-soft">
               Name
             </label>
-            <input id="s-name" className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Opener – testimonial videos" />
+            <input id="s-name" autoFocus className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Opener – testimonial videos" />
           </div>
           <div>
             <label htmlFor="s-body" className="mb-2 block text-sm font-medium text-ink-soft">
@@ -193,7 +194,9 @@ export function ScriptsModal({ clientId, clientName, onClose }: { clientId: stri
           {scripts.data.map((s) => (
             <li key={s.id} className="flex items-start gap-3 py-3">
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{s.name}</p>
+                <p className="truncate font-medium">
+                  {s.name} <span className="ml-1 text-xs font-normal text-ink-muted">created {formatDate(s.created_at)}</span>
+                </p>
                 <p className="line-clamp-2 text-sm text-ink-muted">{s.body || 'Empty script'}</p>
               </div>
               {confirmDelete?.id === s.id ? (

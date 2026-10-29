@@ -16,18 +16,23 @@ export function Modal({
   size?: 'md' | 'lg';
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // The latest onClose, so the effect below runs once per opening. (Re-running it whenever the parent passed a new
+  // onClose, e.g. an inline arrow on every keystroke, moved focus back to the dialog and out of the field being typed in.)
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current();
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    ref.current?.focus();
+    // Focus the dialog itself unless something inside (an autoFocus field) already has focus.
+    if (!ref.current?.contains(document.activeElement)) ref.current?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 backdrop-blur-[2px] sm:items-center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>

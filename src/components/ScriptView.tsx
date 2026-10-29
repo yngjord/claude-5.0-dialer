@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { renderScript, type ScriptContext } from '../../shared/script';
 import type { Script } from '../../shared/types';
 import { must, useLoad } from '../lib/api';
+import { formatDate } from '../lib/format';
 import { supabase } from '../lib/supabase';
 
 /** A script filled in for this call. Variables with no value stay as {{name}} on amber, so the rep notices. */
@@ -48,12 +49,15 @@ export function ScriptPanel({ clientId, defaultScriptId, ctx }: { clientId: stri
           <select aria-label="Script" className="field !py-1.5 text-sm" value={script?.id ?? ''} onChange={(e) => setPicked(e.target.value)}>
             {list.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name}
+                {s.name} · created {formatDate(s.created_at)}
               </option>
             ))}
           </select>
         ) : (
-          <p className="truncate font-display text-[15px] font-medium">{script?.name ?? 'Script'}</p>
+          <p className="min-w-0 truncate">
+            <span className="font-display text-[15px] font-medium">{script?.name ?? 'Script'}</span>
+            {script && <span className="ml-2 text-xs text-ink-muted">created {formatDate(script.created_at)}</span>}
+          </p>
         )}
       </div>
       {scripts.loading ? (
