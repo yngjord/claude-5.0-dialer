@@ -14,8 +14,11 @@ export interface ActiveCall {
   callId: string;
   contact: Contact;
   campaign: Campaign;
-  /** 'power' calls are wrapped up on the Dialer page; 'click' calls get the wrap-up popup. */
-  mode: 'power' | 'click';
+  /**
+   * 'power' calls are wrapped up on the Dialer page; 'click' (a contact's call button) and 'oneoff' (admin
+   * click-to-call to any number, no campaign or contact: `contact` and `campaign` are stand-ins) get the wrap-up popup.
+   */
+  mode: 'power' | 'click' | 'oneoff';
   phase: CallPhase;
   muted: boolean;
   /** When the prospect answered (ms), for the call timer. */
@@ -128,7 +131,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       applySpeaker(device);
 
       try {
-        const call = await device.connect({ params: { callId, contactId: contact.id } });
+        const params: Record<string, string> =
+          mode === 'oneoff'
+            ? { callId, to: contact.phone_e164, name: contact.full_name ?? '', company: contact.company ?? '', client: campaign.client_name ?? '' }
+            : { callId, contactId: contact.id };
+        const call = await device.connect({ params });
         callRef.current = call;
         call.on('ringing', () => patch(callId, { phase: 'ringing' }));
         call.on('accept', () => patch(callId, { phase: 'live', answeredAt: Date.now() }));

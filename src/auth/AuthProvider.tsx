@@ -19,6 +19,36 @@ interface AuthContextValue {
   isAdmin: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Admins: switch this browser to a team member's login (see /api/admin/view-as), and back. */
+  viewAs: (userId: string) => Promise<void>;
+  /** Set while an admin is viewing as a team member: who they're viewing as, and how to switch back. */
+  viewingAs: { name: string; adminName: string } | null;
+  backToAdmin: () => Promise<void>;
+}
+
+// The admin's own session while they view as a team member (this browser only).
+const VIEW_AS_KEY = 'dialer.viewAs';
+interface ViewAsState {
+  name: string;
+  adminName: string;
+  access_token: string;
+  refresh_token: string;
+}
+function readViewAs(): ViewAsState | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_AS_KEY) ?? 'null') as ViewAsState | null;
+    return v?.refresh_token ? v : null;
+  } catch {
+    return null;
+  }
+}
+function writeViewAs(v: ViewAsState | null) {
+  try {
+    if (v) localStorage.setItem(VIEW_AS_KEY, JSON.stringify(v));
+    else localStorage.removeItem(VIEW_AS_KEY);
+  } catch {
+    // storage blocked: switching back then means signing in again
+  }
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -54,8 +84,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    writeViewAs(null);
     await supabase.auth.signOut();
   }, []);
+
+  // Viewing as a team member swaps this browser's session, then reloads so everything (the phone included) starts
+  // fresh as them. The admin's session is kept to switch back.
+  const viewAs = useCallback(async (userId: string) => {
+    const { data } = await supabase.auth.getSession();
+    const admin = data.session;
+    if (!admin) throw new Error('Not signed in.');
+    const res = await api<{ tokenHash: string; name: string }>('admin/view-as', { method: 'POST', body: JSON.stringify({ userId }) });
+    const adminName = state.status === 'signed-in' ? (state.me?.displayName ?? admin.user.email ?? 'Admin') : 'Admin';
+    writeViewAs({ name: res.name, adminName, access_token: admin.access_token, refresh_token: admin.refresh_token });
+    const { error } = await supabase.auth.verifyOtp({ token_hash: res.tokenHash, type: 'magiclink' });
+    if (error) {
+      writeViewAs(null);
+      await supabase.auth.setSession({ access_token: admin.access_token, refresh_token: admin.refresh_token });
+      throw new Error(`Could not switch: ${error.message}`);
+    }
+    window.location.assign('/campaigns');
+  }, [state]);
+
+  const backToAdmin = useCallback(async () => {
+    const saved = readViewAs();
+    writeViewAs(null);
+    if (saved) {
+      const { error } = await supabase.auth.setSession({ access_token: saved.access_token, refresh_token: saved.refresh_token });
+      if (!error) return window.location.assign('/campaigns');
+    }
+    // The admin session couldn't be restored (e.g. signed out elsewhere): sign in again.
+    await supabase.auth.signOut();
+  }, []);
+
+  const viewing = readViewAs();
 
   const me = state.status === 'signed-in' ? state.me : null;
   const value: AuthContextValue = {
@@ -66,6 +128,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAdmin: me?.role === 'admin',
     signIn,
     signOut,
+    viewAs,
+    viewingAs: viewing && state.status === 'signed-in' ? { name: viewing.name, adminName: viewing.adminName } : null,
+    backToAdmin,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

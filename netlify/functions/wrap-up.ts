@@ -42,10 +42,14 @@ export default handler(async (req, context) => {
   }
 
   let needsLead = LEAD_DISPOSITIONS.includes(body.disposition);
-  // Re-saving a call that already made its lead (correcting it from the dialer): the lead isn't made again.
+  // No lead details sent: a call that already made its lead (correcting it from the dialer) or a click-to-call
+  // call (no campaign, so no client to make one for; the CRM it came from has the lead).
   if (needsLead && !body.lead) {
-    const existing = must(await db().from('dialer_calls').select('airtable_lead_id').eq('id', body.callId).maybeSingle()) as { airtable_lead_id: string | null } | null;
-    if (existing?.airtable_lead_id) needsLead = false;
+    const existing = must(await db().from('dialer_calls').select('airtable_lead_id, campaign_id').eq('id', body.callId).maybeSingle()) as {
+      airtable_lead_id: string | null;
+      campaign_id: string | null;
+    } | null;
+    if (existing?.airtable_lead_id || (existing && !existing.campaign_id)) needsLead = false;
   }
   if (needsLead) {
     if (!body.lead) throw new HttpError(400, 'Fill in the lead details.');

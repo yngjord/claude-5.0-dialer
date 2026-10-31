@@ -1,4 +1,5 @@
 import { parsePhoneNumberFromString, type CountryCode } from 'libphonenumber-js/mobile';
+import { parsePhoneNumberFromString as parseAnyNumber } from 'libphonenumber-js/min';
 
 // We only call Australian (+61) and New Zealand (+64) mobiles. The `mobile` metadata build of libphonenumber
 // only treats mobile numbers as valid, so landlines, 1300 numbers etc. are rejected here.
@@ -32,6 +33,24 @@ export function normalizePhone(raw: string | number | null | undefined): PhoneRe
   const parsed = parsePhoneNumberFromString(cleaned, 'AU');
   if (parsed?.country && parsed.country !== 'AU' && parsed.country !== 'NZ') return { ok: false, reason: 'Not an AU/NZ number' };
   return { ok: false, reason: 'Not a valid AU/NZ mobile' };
+}
+
+/**
+ * Click-to-call (one-off calls from the CRM): any valid Australian or New Zealand number, landlines and 13/1300
+ * numbers included, not just mobiles. Written locally ("02 9876 5432") it's read as Australian.
+ */
+export function normalizeCallable(raw: string | number | null | undefined): PhoneResult {
+  const mobile = normalizePhone(raw);
+  if (mobile.ok) return mobile;
+  let cleaned = String(raw ?? '').trim().replace(/(?!^\+)[^\d]/g, '');
+  if (!cleaned) return { ok: false, reason: 'No phone number' };
+  if (/^(61|64)\d{8,10}$/.test(cleaned)) cleaned = `+${cleaned}`;
+  if (/^00(61|64)/.test(cleaned)) cleaned = `+${cleaned.slice(2)}`;
+  for (const country of COUNTRIES) {
+    const parsed = parseAnyNumber(cleaned, country);
+    if (parsed?.isValid() && (parsed.country === 'AU' || parsed.country === 'NZ')) return { ok: true, e164: parsed.number, country: parsed.country };
+  }
+  return { ok: false, reason: 'Not a valid AU/NZ phone number' };
 }
 
 /** +61412345678 → 0412 345 678; +6421234567 → 021 234 567. Anything unparseable is returned as-is. */

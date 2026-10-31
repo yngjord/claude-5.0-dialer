@@ -1004,3 +1004,39 @@ end $$;
 revoke execute on function public.dialer_company_history(uuid) from public, anon;
 grant execute on function public.dialer_company_history(uuid) to authenticated, service_role;
 
+-- ── Click-to-call (one-off calls, e.g. from MaronlyOS's CRM) ───────────────────────────────────────────────────
+-- The number one-off calls go out from (at most one; the default number is used if none is set).
+alter table public.dialer_phone_numbers add column if not exists is_click_to_call boolean not null default false;
+create unique index if not exists dialer_phone_numbers_one_click_to_call on public.dialer_phone_numbers (is_click_to_call) where is_click_to_call;
+
+-- Logs a one-off call to any AU/NZ number (checked by the server) with no campaign or contact. Admins only for now.
+-- Returns the caller number and the number to call, or {error}.
+create or replace function public.dialer_start_oneoff_call(p_call_id uuid, p_user_id uuid, p_to text, p_name text, p_company text,
+                                                         p_client_name text, p_twilio_call_sid text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  prof public.profiles;
+  caller text;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Only the server can start calls' using errcode = '42501';
+  end if;
+  select * into prof from profiles where id = p_user_id;
+  if prof.id is null or prof.role::text <> 'admin' then
+    return jsonb_build_object('error', 'user');
+  end if;
+  caller := coalesce(
+    (select e164 from dialer_phone_numbers where is_click_to_call limit 1),
+    (select e164 from dialer_phone_numbers where is_default order by created_at limit 1)
+  );
+  insert into dialer_calls (id, direction, user_id, agent_name, client_name, campaign_name, full_name, company, phone_e164, from_number,
+                            to_number, twilio_call_sid, twilio_status)
+  values (p_call_id, 'outbound', p_user_id, coalesce(nullif(trim(prof.display_name), ''), prof.email), nullif(trim(p_client_name), ''),
+          'Click-to-call', nullif(trim(p_name), ''), nullif(trim(p_company), ''), p_to, caller, p_to, p_twilio_call_sid,
+          case when caller is null then 'failed' else 'initiated' end)
+  on conflict (id) do nothing;
+  return jsonb_build_object('from', caller, 'to', p_to);
+end $$;
+revoke execute on function public.dialer_start_oneoff_call(uuid, uuid, text, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.dialer_start_oneoff_call(uuid, uuid, text, text, text, text, text) to service_role;
+

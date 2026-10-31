@@ -28,6 +28,8 @@ export interface PhoneNumber {
   label: string | null;
   client_name: string | null;
   is_default: boolean;
+  /** The number admins' click-to-call (one-off) calls go out from; at most one. */
+  is_click_to_call: boolean;
   voicemail_greeting_path: string | null;
   created_at: string;
 }

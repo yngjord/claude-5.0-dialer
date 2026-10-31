@@ -31,6 +31,11 @@ export default function Numbers() {
       const { error } = await supabase.from('dialer_phone_numbers').update({ is_default: false }).neq('id', id);
       if (error) return setError(error.message);
     }
+    // Only one click-to-call number: unset the old one first (the database allows just one).
+    if (fields.is_click_to_call) {
+      const { error } = await supabase.from('dialer_phone_numbers').update({ is_click_to_call: false }).neq('id', id).eq('is_click_to_call', true);
+      if (error) return setError(error.message);
+    }
     const { error } = await supabase.from('dialer_phone_numbers').update(fields).eq('id', id);
     if (error) setError(error.message);
     list.reload({ quiet: true });
@@ -112,13 +117,14 @@ export default function Numbers() {
                   <th className="th">Label</th>
                   <th className="th">Client</th>
                   <th className="th">Default</th>
+                  <th className="th" title="Admins' one-off calls (Click-to-call) go out from this number">Click-to-call</th>
                   <th className="th">Voicemail greeting</th>
                   <th className="th text-right">Health</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {!list.data?.length ? (
-                  <EmptyRow colSpan={6}>No numbers yet. Use Buy number, or Sync from Twilio if you bought them in Twilio directly.</EmptyRow>
+                  <EmptyRow colSpan={7}>No numbers yet. Use Buy number, or Sync from Twilio if you bought them in Twilio directly.</EmptyRow>
                 ) : (
                   list.data.map((n) => (
                     <Fragment key={n.id}>
@@ -159,6 +165,17 @@ export default function Numbers() {
                         )}
                       </td>
                       <td className="td">
+                        {n.is_click_to_call ? (
+                          <button onClick={() => update(n.id, { is_click_to_call: false })} title="Stop using this number for click-to-call">
+                            <Badge tone="blue">Click-to-call</Badge>
+                          </button>
+                        ) : (
+                          <button onClick={() => update(n.id, { is_click_to_call: true })} className="text-sm text-brand hover:underline">
+                            Use for click-to-call
+                          </button>
+                        )}
+                      </td>
+                      <td className="td">
                         <div className="flex items-center gap-3 text-sm">
                           {n.voicemail_greeting_path ? (
                             <>
@@ -190,7 +207,7 @@ export default function Numbers() {
                     </tr>
                     {open === n.id && (
                       <tr>
-                        <td colSpan={6} className="bg-neutral-50/60 px-4 py-5 sm:px-6">
+                        <td colSpan={7} className="bg-neutral-50/60 px-4 py-5 sm:px-6">
                           <NumberHealth e164={n.e164} />
                         </td>
                       </tr>

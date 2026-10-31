@@ -67,7 +67,7 @@ export function ClickToCallBar() {
       {(open || ended) && (
         <Modal title={ended ? 'Wrap up the call' : 'On a call'} onClose={() => (ended ? undefined : setOpen(false))} size="lg">
           <div className="space-y-6">
-            {!ended && <ContactCard contact={active.contact} />}
+            {!ended && <ContactCard contact={active.contact} sms={active.mode !== 'oneoff'} />}
             <WrapUpForm
               call={active}
               onDone={() => {

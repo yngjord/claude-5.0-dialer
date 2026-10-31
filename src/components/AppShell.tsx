@@ -1,4 +1,4 @@
-import { CalendarCheck, CalendarClock, Contact as ContactIcon, LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
+import { CalendarCheck, CalendarClock, ChevronDown, PhoneOutgoing, Contact as ContactIcon, LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { TwilioBalance } from '../../shared/types';
 import { api } from '../lib/api';
@@ -6,6 +6,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { useVoice } from '../voice/VoiceProvider';
 import { AudioDevicesLine } from './AudioSettings';
+import { ViewAsButton } from './ViewAs';
 import Brand from './Brand';
 import { ClickToCallBar } from './ClickToCall';
 import LoadingBar from './LoadingBar';
@@ -22,10 +23,64 @@ const ADMIN_NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/admin/performance', label: 'Performance', icon: TrendingUp },
   { to: '/admin/contacts', label: 'Contacts', icon: ContactIcon },
   { to: '/admin/numbers', label: 'Phone numbers', icon: Smartphone },
+  { to: '/call', label: 'Click-to-call', icon: PhoneOutgoing },
 ];
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-3 rounded-xl px-4 py-3 text-[16px] font-medium transition-colors ${isActive ? 'bg-white/20' : 'text-white/85 hover:bg-white/10 hover:text-white'}`;
+
+const PANEL_KEY = 'dialer.phonePanelOpen';
+const readPanelOpen = () => {
+  try {
+    return localStorage.getItem(PANEL_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Phone, audio devices and (admins) Twilio balance, collapsed by default to one bar with a green (on) / red (off)
+ * dot so the sidebar stays quiet. The open/closed choice is remembered on this computer.
+ */
+function PhonePanel({ isAdmin }: { isAdmin: boolean }) {
+  const { deviceState, start } = useVoice();
+  const [open, setOpen] = useState(readPanelOpen);
+  const toggle = () =>
+    setOpen((o) => {
+      try {
+        localStorage.setItem(PANEL_KEY, o ? '0' : '1');
+      } catch {
+        // per-computer convenience only
+      }
+      return !o;
+    });
+  const dot = { off: 'bg-red-400', starting: 'bg-amber-300', ready: 'bg-emerald-400', error: 'bg-red-400' }[deviceState];
+  const label = { off: 'Phone off', starting: 'Connecting…', ready: 'Phone on', error: 'Phone error' }[deviceState];
+
+  return (
+    <div className="mb-3 border-b border-white/15 pb-3">
+      <div className="flex items-center gap-2 text-xs text-white/80">
+        <button onClick={toggle} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1 py-1 text-left hover:text-white" title={open ? 'Hide phone details' : 'Show phone details'}>
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} aria-hidden />
+          <span className="truncate">{label}</span>
+          <ChevronDown size={14} className={`ml-auto shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {!open && (deviceState === 'off' || deviceState === 'error') && (
+          <button onClick={() => start().catch(() => undefined)} className="shrink-0 underline hover:text-white">
+            {deviceState === 'off' ? 'Turn on' : 'Retry'}
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-1 animate-fade-in">
+          <PhoneStatus />
+          <AudioDevicesLine />
+          {isAdmin && <TwilioBalanceLine />}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PhoneStatus() {
   const { deviceState, deviceError, start } = useVoice();
@@ -147,10 +202,8 @@ export default function AppShell() {
         </nav>
 
         <div className="m-3 rounded-2xl bg-white/10 p-4">
-          <PhoneStatus />
-          <AudioDevicesLine />
-          {isAdmin && <TwilioBalanceLine />}
-          <p className="mt-3 flex items-center gap-2 text-xs text-white/70">
+          <PhonePanel isAdmin={isAdmin} />
+          <p className="flex items-center gap-2 text-xs text-white/70">
             Logged in as
             {me && <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">{me.role === 'admin' ? 'Admin' : 'Team'}</span>}
           </p>
@@ -160,6 +213,7 @@ export default function AppShell() {
           <button onClick={signOut} className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-white/15 py-2 text-sm font-medium transition-colors hover:bg-white/25">
             <LogOut size={15} /> Sign out
           </button>
+          {isAdmin && <ViewAsButton />}
         </div>
       </aside>
 

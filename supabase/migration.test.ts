@@ -650,3 +650,18 @@ describe('same-company history and scripts', () => {
     expect(await rows(`select script_id from dialer_campaigns where id = '${CAMPAIGN}'`)).toEqual([{ script_id: null }]);
   });
 });
+
+describe('click-to-call', () => {
+  it('logs a one-off call from the click-to-call number, for admins only', async () => {
+    await pg.exec(`insert into dialer_phone_numbers (e164, is_click_to_call) values ('+61400000077', true)`);
+    await expect(pg.query(`insert into dialer_phone_numbers (e164, is_click_to_call) values ('+61400000078', true)`)).rejects.toThrow(/unique/);
+    const start = (id: string, user: string) =>
+      asServer(async () => (await rows<{ r: Record<string, string> }>('select dialer_start_oneoff_call($1, $2, $3, $4, $5, $6, $7) as r', [id, user, '+61298765432', 'Jane Doe', 'Acme', 'Kintell', `CA-${id}`]))[0].r);
+    const id = '20000000-0000-0000-0000-0000000000c1';
+    expect(await start(id, ADMIN)).toEqual({ from: '+61400000077', to: '+61298765432' });
+    expect(await start('20000000-0000-0000-0000-0000000000c2', TEAM1)).toEqual({ error: 'user' });
+    const [call] = await rows<Record<string, unknown>>('select campaign_id, contact_id, campaign_name, client_name, full_name, company, from_number, user_id from dialer_calls where id = $1', [id]);
+    expect(call).toEqual({ campaign_id: null, contact_id: null, campaign_name: 'Click-to-call', client_name: 'Kintell', full_name: 'Jane Doe', company: 'Acme', from_number: '+61400000077', user_id: ADMIN });
+    await expect(as(TEAM1, () => pg.query('select dialer_start_oneoff_call($1, $2, $3, $4, $5, $6, $7)', [id, TEAM1, 'x', 'x', 'x', 'x', 'x']))).rejects.toThrow(/permission denied/);
+  });
+});

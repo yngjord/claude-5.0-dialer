@@ -102,7 +102,9 @@ export function WrapUpForm({
 
   // A lead already made from this call isn't made again (or changed), so its details aren't asked for again.
   const leadExists = !!saved?.leadCreated;
-  const needsLead = !!disposition && LEAD_DISPOSITIONS.includes(disposition) && !leadExists;
+  // Click-to-call calls have no campaign: they don't make CRM leads or book callbacks.
+  const oneOff = call.mode === 'oneoff';
+  const needsLead = !!disposition && LEAD_DISPOSITIONS.includes(disposition) && !leadExists && !oneOff;
   const lead = useMemo(
     () => ({
       fullName,
@@ -202,7 +204,7 @@ export function WrapUpForm({
           }}
         >
           {!disposition && <option value="">Choose…</option>}
-          {DISPOSITIONS.map((d) => (
+          {DISPOSITIONS.filter((d) => !oneOff || d !== CALLBACK).map((d) => (
             <option key={d} value={d}>
               {d}
             </option>
@@ -212,6 +214,9 @@ export function WrapUpForm({
 
       {leadExists && !!disposition && LEAD_DISPOSITIONS.includes(disposition) && (
         <p className="rounded-2xl bg-brand-tint px-4 py-3 text-sm text-brand">This call already created its lead in the CRM. Saving here won't change the lead.</p>
+      )}
+      {oneOff && !!disposition && LEAD_DISPOSITIONS.includes(disposition) && (
+        <p className="rounded-2xl bg-brand-tint px-4 py-3 text-sm text-brand">Click-to-call calls don't create CRM leads: update the lead in MaronlyOS.</p>
       )}
 
       {needsLead && (

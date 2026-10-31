@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
 import { buildLeadFields, LEAD_FIELDS as F, leadTranscriptText, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
-import { formatPhone, normalizePhone } from './phone';
+import { formatPhone, normalizeCallable, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
 import { shouldTranscribe } from './pickup';
 import { buildBlocklistFields } from './blocklist';
@@ -281,5 +281,16 @@ describe('renderScript', () => {
     const parts = renderScript('Email {{email}} or {{nope}} {single}', ctx);
     expect(parts.filter((p) => p.kind === 'missing').map((p) => p.text)).toEqual(['{{email}}', '{{nope}}']);
     expect(text('{single}')).toBe('{single}');
+  });
+});
+
+describe('normalizeCallable', () => {
+  it('accepts AU/NZ mobiles, landlines and 1300 numbers, nothing else', () => {
+    expect(normalizeCallable('0412 345 678')).toMatchObject({ ok: true, e164: '+61412345678' });
+    expect(normalizeCallable('02 9876 5432')).toMatchObject({ ok: true, e164: '+61298765432' });
+    expect(normalizeCallable('1300 123 456')).toMatchObject({ ok: true, e164: '+611300123456' });
+    expect(normalizeCallable('+64 9 123 4567')).toMatchObject({ ok: true, e164: '+6491234567' });
+    expect(normalizeCallable('+1 978 481 4042').ok).toBe(false);
+    expect(normalizeCallable('12').ok).toBe(false);
   });
 });
