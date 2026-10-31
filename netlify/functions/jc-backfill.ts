@@ -10,6 +10,8 @@ type Body =
   | { action: 'import'; calls: Record<string, unknown>[] }
   | { action: 'match' }
   | { action: 'status' }
+  | { action: 'probe'; mode: 'matched' | 'unmatched'; offset: number; limit: number }
+  | { action: 'assign'; pairs: { id: string; callId: number }[] }
   | { action: 'leads'; dry?: boolean; baseUrl: string };
 
 interface JcCall {
@@ -20,6 +22,24 @@ interface JcCall {
   notes: string | null;
   disposition: string | null;
   justcall_call_id: number | null;
+}
+
+/** A recording's length in seconds, from its WAV header and file size (one small ranged download). */
+async function recordingSeconds(url: string): Promise<number | null> {
+  try {
+    const res = await fetch(url, { headers: { Range: 'bytes=0-4095' } });
+    if (!res.ok) return null;
+    const total = Number(res.headers.get('content-range')?.split('/')[1] ?? res.headers.get('content-length'));
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.toString('ascii', 0, 4) !== 'RIFF') return null;
+    const fmt = buf.indexOf('fmt ');
+    const data = buf.indexOf('data');
+    if (fmt < 0 || data < 0) return null;
+    const byteRate = buf.readUInt32LE(fmt + 16);
+    return byteRate ? Math.round(((total - (data + 8)) / byteRate) * 10) / 10 : null;
+  } catch {
+    return null;
+  }
 }
 
 const sydneyDate = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
@@ -92,6 +112,43 @@ export default handler(async (req) => {
       matched++;
     }
     return json({ calls: calls.length, already, matched, unmatched: unmatched.length, unmatchedList: unmatched });
+  }
+
+  // Recording lengths for calls (matched: their record; unmatched: every candidate with the same phone number).
+  if (body.action === 'probe') {
+    const { byPhone, byCallId } = await loadJustCallStorage();
+    const all = (await allJcCalls()).filter((c) => (body.mode === 'matched' ? !!c.justcall_call_id : !c.justcall_call_id));
+    const used = new Set((await allJcCalls()).map((c) => c.justcall_call_id).filter(Boolean));
+    const slice = all.slice(body.offset, body.offset + body.limit);
+    const durations = must(await db().from('dialer_calls').select('id, duration_s').in('id', slice.map((c) => c.id))) as { id: string; duration_s: number }[];
+    const dur = new Map(durations.map((d) => [d.id, d.duration_s]));
+    const out = await Promise.all(
+      slice.map(async (c) => {
+        const cands =
+          body.mode === 'matched'
+            ? [byCallId.get(c.justcall_call_id!)].filter((r): r is JcRecord => !!r)
+            : (byPhone.get((c.phone_e164 ?? '').replace(/\D/g, '')) ?? []).filter((r) => !used.has(r.callId));
+        return {
+          id: c.id,
+          at: c.started_at,
+          duration: dur.get(c.id) ?? null,
+          candidates: await Promise.all(cands.map(async (r) => ({ callId: r.callId, hasRecording: !!r.recording, seconds: r.recording ? await recordingSeconds(r.recording) : null }))),
+        };
+      }),
+    );
+    return json({ total: all.length, calls: out });
+  }
+
+  if (body.action === 'assign') {
+    const { byCallId } = await loadJustCallStorage();
+    let assigned = 0;
+    for (const p of body.pairs) {
+      const r = byCallId.get(p.callId);
+      if (!r) continue;
+      must(await db().from('dialer_calls').update({ justcall_call_id: r.callId, justcall_contact_id: r.contactId }).eq('id', p.id).eq('source', 'justcall').is('justcall_call_id', null));
+      assigned++;
+    }
+    return json({ assigned });
   }
 
   if (body.action === 'status') {
