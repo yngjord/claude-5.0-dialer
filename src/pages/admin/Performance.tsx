@@ -203,7 +203,7 @@ export default function Performance() {
             <Metric label="Connects" value={total.connects.toLocaleString()} loading={loading} />
             <Metric label="Connect rate" value={percent(total.connects, total.dials)} loading={loading} />
             <Metric label="Appointments" value={total.appointments.toLocaleString()} loading={loading} />
-            <Metric label="Booking rate" value={percent(total.appointments, total.dials)} note="Appointments ÷ dials" loading={loading} />
+            <Metric label="Booking rate" value={percent(total.appointments, total.dials)} loading={loading} />
             <Metric label="Leads" value={total.follow_ups.toLocaleString()} loading={loading} />
             <Metric label="Talk time" value={formatTalkTime(total.talk_seconds)} loading={loading} />
             <Metric

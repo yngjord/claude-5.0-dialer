@@ -107,7 +107,6 @@ export default function CampaignPage() {
         <Metric
           label="Booking rate"
           value={percent(stats?.appointments_total ?? 0, stats?.dials_total ?? 0)}
-          note={`${stats?.appointments_total ?? 0} appointments ÷ dials`}
           loading={head.loading}
         />
       </div>
