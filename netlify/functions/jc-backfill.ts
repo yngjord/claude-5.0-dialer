@@ -3,7 +3,8 @@ import type { Config } from '@netlify/functions';
 import { updateRecord, listAll } from './_lib/airtable';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json, readJson } from './_lib/http';
-import { loadJustCallStorage, requireBackfillKey, type JcRecord } from './_lib/jcBackfill';
+import { loadJustCallStorage, requireBackfillKey, toMp3, type JcRecord } from './_lib/jcBackfill';
+import { RECORDINGS_BUCKET } from './_lib/media';
 import { LEAD_FIELDS } from '../../shared/leads';
 
 type Body =
@@ -12,6 +13,10 @@ type Body =
   | { action: 'status' }
   | { action: 'probe'; mode: 'matched' | 'unmatched'; offset: number; limit: number }
   | { action: 'assign'; pairs: { id: string; callId: number }[] }
+  // A lead's JustCall recording: copied onto an existing call (callId), or onto a new JustCall call built from its
+  // Airtable JustCall Storage record plus the lead's details (newCall). The lead's link then points to it.
+  | { action: 'leftover'; lead: string; url: string; baseUrl: string; callId?: string; newCall?: Record<string, unknown> }
+  | { action: 'jcapi'; path: string }
   | { action: 'leads'; dry?: boolean; baseUrl: string };
 
 interface JcCall {
@@ -149,6 +154,36 @@ export default handler(async (req) => {
       assigned++;
     }
     return json({ assigned });
+  }
+
+  if (body.action === 'leftover') {
+    if (!/^https:\/\/[a-z0-9.-]+$/i.test(body.baseUrl ?? '') || !/^https:\/\/jc-recordings\.s3\.amazonaws\.com\//.test(body.url)) throw new HttpError(400, 'Bad input');
+    let id = body.callId;
+    if (!id) {
+      const { byCallId } = await loadJustCallStorage();
+      const rec = [...byCallId.values()].find((r) => r.recording === body.url);
+      const row = { ...body.newCall, justcall_call_id: rec?.callId ?? null, justcall_contact_id: rec?.contactId ?? null, source: 'justcall', direction: 'outbound', kind: 'call', twilio_status: 'completed', pickup_source: 'import', visible: true };
+      id = (must(await db().from('dialer_calls').insert(row).select('id').single()) as { id: string }).id;
+    }
+    const res = await fetch(body.url);
+    if (!res.ok) throw new HttpError(502, `download ${res.status}`);
+    const path = `${id}.mp3`;
+    const { error } = await db().storage.from(RECORDINGS_BUCKET).upload(path, toMp3(Buffer.from(await res.arrayBuffer())), { contentType: 'audio/mpeg', upsert: true });
+    if (error) throw new HttpError(502, `upload: ${error.message}`);
+    must(await db().from('dialer_calls').update({ recording_path: path, airtable_lead_id: body.lead }).eq('id', id).eq('source', 'justcall'));
+    await updateRecord('Leads', body.lead, { [LEAD_FIELDS.callRecordingLink]: `${body.baseUrl}/r/${id}.mp3` });
+    return json({ id, path });
+  }
+
+  // Raw GET against JustCall's API (keys from Netlify env), to work out its fields; trimmed.
+  if (body.action === 'jcapi') {
+    if (!/^\/v2\.1\/[a-z_/]+(\?[\w=&:.+%-]*)?$/i.test(body.path ?? '')) throw new HttpError(400, 'Bad path');
+    const key = process.env.JUSTCALL_API_KEY?.trim();
+    const secret = process.env.JUSTCALL_API_SECRET?.trim();
+    if (!key || !secret) throw new HttpError(503, 'JustCall keys missing');
+    const res = await fetch(`https://api.justcall.io${body.path}`, { headers: { Authorization: `${key}:${secret}`, Accept: 'application/json' } });
+    const text = await res.text();
+    return json({ status: res.status, body: text.slice(0, 20000) });
   }
 
   if (body.action === 'status') {
