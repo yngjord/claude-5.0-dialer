@@ -1,8 +1,7 @@
 import { PhoneMissed, Voicemail } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { formatPhone } from '../../shared/phone';
-import type { CallRow } from '../../shared/types';
-import { useAuth } from '../auth/AuthProvider';
+import type { CallRow, DialerUser } from '../../shared/types';
 import { CallDetailModal } from '../components/CallDetail';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/States';
 import { must, useLoad } from '../lib/api';
@@ -10,12 +9,17 @@ import { formatDateTime, formatDuration } from '../lib/format';
 import { supabase } from '../lib/supabase';
 
 /**
- * Calls back from prospects: there are no live inbound calls, so callers hear the number's greeting and can leave a
- * message (recorded and transcribed). Each one goes to the rep who last called that number; admins see them all.
+ * Admins (for now): calls back from prospects. There are no live inbound calls, so callers hear the number's greeting
+ * and can leave a message (recorded and transcribed). Each is linked to the rep who last called that number.
  * Bold = not yet opened; opening one marks it heard.
  */
 export default function Voicemails() {
-  const { isAdmin } = useAuth();
+  // Voicemails carry the rep's id (who last called them); show their name.
+  const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
+  const repName = (id: string | null) => {
+    const u = id ? users.data?.find((x) => x.id === id) : undefined;
+    return u ? u.display_name || u.email : '—';
+  };
   const [open, setOpen] = useState<string | null>(null);
   const { data, error, loading, reload } = useLoad(
     async () => must(await supabase.from('dialer_calls').select('*').eq('kind', 'voicemail').order('started_at', { ascending: false }).limit(300)) as CallRow[],
@@ -41,7 +45,7 @@ export default function Voicemails() {
     <>
       <PageHeader
         title="Voicemails"
-        subtitle={isAdmin ? 'Calls back to any of our numbers, with their messages.' : 'Calls back from people you called, with their messages.'}
+        subtitle="Calls back to any of our numbers, with their messages. Each shows who last called them."
       />
       {error ? (
         <ErrorState message={error} onRetry={reload} />
@@ -57,13 +61,14 @@ export default function Voicemails() {
                     <th className="th w-8" />
                     <th className="th">Caller</th>
                     <th className="th">Called</th>
+                    <th className="th">Last called by</th>
                     <th className="th">Campaign</th>
                     <th className="th text-right">When</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
                   {!data?.length ? (
-                    <EmptyRow colSpan={5}>No voicemails yet. When someone calls one of our numbers back, it shows here.</EmptyRow>
+                    <EmptyRow colSpan={6}>No voicemails yet. When someone calls one of our numbers back, it shows here.</EmptyRow>
                   ) : (
                     data.map((v) => {
                       const unread = !v.read_at;
@@ -83,6 +88,7 @@ export default function Voicemails() {
                             </p>
                           </td>
                           <td className="td whitespace-nowrap tabular-nums text-ink-muted">{v.to_number ? formatPhone(v.to_number) : '—'}</td>
+                          <td className="td whitespace-nowrap text-ink-muted">{repName(v.user_id)}</td>
                           <td className="td max-w-[220px] truncate text-ink-muted">{v.campaign_name ?? ''}</td>
                           <td className="td whitespace-nowrap text-right tabular-nums text-ink-muted">
                             {formatDateTime(v.started_at)}

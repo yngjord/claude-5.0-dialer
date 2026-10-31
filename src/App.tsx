@@ -90,7 +90,7 @@ export default function App() {
           <Route path="/calls" element={<Calls />} />
           <Route path="/leads" element={<Leads />} />
           <Route path="/callbacks" element={<Callbacks />} />
-          <Route path="/voicemails" element={<Voicemails />} />
+          {isAdmin && <Route path="/voicemails" element={<Voicemails />} />}
           <Route path="/calls/:id" element={<CallDetailPage />} />
           {/* Campaign management moved onto the Campaigns page. */}
           <Route path="/admin/campaigns" element={<Navigate to="/campaigns" replace />} />

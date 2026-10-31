@@ -19,13 +19,13 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/calls', label: 'Call logs', icon: PhoneCall },
   { to: '/leads', label: 'Leads', icon: CalendarCheck },
   { to: '/callbacks', label: 'Callbacks', icon: CalendarClock },
-  { to: '/voicemails', label: 'Voicemails', icon: Voicemail },
 ];
 const ADMIN_NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/admin/performance', label: 'Performance', icon: TrendingUp },
   { to: '/admin/contacts', label: 'Contacts', icon: ContactIcon },
   { to: '/admin/numbers', label: 'Phone numbers', icon: Smartphone },
   { to: '/call', label: 'Click-to-call', icon: PhoneOutgoing },
+  { to: '/voicemails', label: 'Voicemails', icon: Voicemail },
 ];
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
@@ -146,7 +146,8 @@ export default function AppShell() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const dueCallbacks = useDueCallbacks(me?.userId);
-  const unheardVoicemails = useVoicemailCount(me?.userId);
+  // Voicemails are admin-only for now (the count is off for team members).
+  const unheardVoicemails = useVoicemailCount(isAdmin ? me?.userId : undefined);
 
   useEffect(() => setOpen(false), [location.pathname]);
 
@@ -189,11 +190,7 @@ export default function AppShell() {
                   {dueCallbacks}
                 </span>
               )}
-              {to === '/voicemails' && unheardVoicemails > 0 && (
-                <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-semibold tabular-nums text-brand" aria-label={`${unheardVoicemails} new`}>
-                  {unheardVoicemails}
-                </span>
-              )}
+
             </NavLink>
           ))}
           {isAdmin && (
@@ -203,6 +200,11 @@ export default function AppShell() {
                 <NavLink key={to} to={to} className={navClass}>
                   <Icon size={20} strokeWidth={1.75} />
                   {label}
+                  {to === '/voicemails' && unheardVoicemails > 0 && (
+                    <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-semibold tabular-nums text-brand" aria-label={`${unheardVoicemails} new`}>
+                      {unheardVoicemails}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </>
