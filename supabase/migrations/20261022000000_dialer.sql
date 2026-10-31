@@ -757,7 +757,9 @@ select
   (select count(*) from dialer_calls x, today where x.campaign_id = c.id and x.direction = 'outbound' and x.started_at >= today.start)::int as dials_today,
   (select count(*) from dialer_calls x, today where x.campaign_id = c.id and x.direction = 'outbound' and x.started_at >= today.start and x.pickup_status = 'Human Pickup')::int as connects_today,
   (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound')::int as dials_total,
-  (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound' and x.pickup_status = 'Human Pickup')::int as connects_total
+  (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound' and x.pickup_status = 'Human Pickup')::int as connects_total,
+  -- For the booking rate (appointments ÷ dials). Added last so the view can be replaced in place.
+  (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound' and x.disposition = 'Interested - Appointment Set')::int as appointments_total
 from dialer_campaigns c;
 
 -- Retry rules were removed: every call takes a contact out of the queue, and admins re-run by disposition.

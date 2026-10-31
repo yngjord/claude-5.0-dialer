@@ -40,7 +40,7 @@ type View = 'team' | 'client';
 type Totals = Omit<PerfRow, 'user_id' | 'agent_name' | 'client_name'>;
 // active_seconds: the rep's dialing time (team view only), for calls per hour.
 type Line = Totals & { key: string; name: string; userId: string | null; clientName: string | null; active_seconds: number | null };
-type SortKey = 'name' | 'dials' | 'connects' | 'rate' | 'appointments' | 'follow_ups' | 'talk_seconds' | 'active_seconds' | 'calls_per_hour' | 'last_call_at';
+type SortKey = 'name' | 'dials' | 'connects' | 'rate' | 'appointments' | 'booking_rate' | 'follow_ups' | 'talk_seconds' | 'active_seconds' | 'calls_per_hour' | 'last_call_at';
 
 const EMPTY: Totals = { dials: 0, connects: 0, machine: 0, unanswered: 0, appointments: 0, follow_ups: 0, talk_seconds: 0, last_call_at: null };
 
@@ -63,6 +63,7 @@ const COLUMNS: { key: SortKey; label: string; numeric?: boolean; teamOnly?: bool
   { key: 'connects', label: 'Connects', numeric: true },
   { key: 'rate', label: 'Connect rate', numeric: true },
   { key: 'appointments', label: 'Appointments', numeric: true },
+  { key: 'booking_rate', label: 'Booking rate', numeric: true },
   { key: 'follow_ups', label: 'Leads', numeric: true },
   { key: 'talk_seconds', label: 'Talk time', numeric: true },
   { key: 'active_seconds', label: 'Dialing time', numeric: true, teamOnly: true },
@@ -73,16 +74,15 @@ const COLUMNS: { key: SortKey; label: string; numeric?: boolean; teamOnly?: bool
 /** Dials per hour of dialing time, or null when there's no dialing time to divide by. */
 const callsPerHour = (dials: number, seconds: number | null) => (seconds ? dials / (seconds / 3600) : null);
 
-const sortValue = (l: Line, key: SortKey): string | number =>
-  key === 'name'
-    ? l.name.toLowerCase()
-    : key === 'rate'
-      ? l.dials
-        ? l.connects / l.dials
-        : -1
-      : key === 'calls_per_hour'
-        ? (callsPerHour(l.dials, l.active_seconds) ?? -1)
-        : (l[key] ?? '');
+const ratio = (part: number, whole: number) => (whole ? part / whole : -1);
+
+function sortValue(l: Line, key: SortKey): string | number {
+  if (key === 'name') return l.name.toLowerCase();
+  if (key === 'rate') return ratio(l.connects, l.dials);
+  if (key === 'booking_rate') return ratio(l.appointments, l.dials);
+  if (key === 'calls_per_hour') return callsPerHour(l.dials, l.active_seconds) ?? -1;
+  return l[key] ?? '';
+}
 
 /**
  * Admin-only: how each team member and each client is performing over a date range, optionally narrowed to one
@@ -198,11 +198,12 @@ export default function Performance() {
         <ErrorState message={stats.error} onRetry={stats.reload} />
       ) : (
         <>
-          <div className="grid animate-appear grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-7">
+          <div className="grid animate-appear grid-cols-2 gap-4 lg:grid-cols-4">
             <Metric label="Dials" value={total.dials.toLocaleString()} loading={loading} />
             <Metric label="Connects" value={total.connects.toLocaleString()} loading={loading} />
             <Metric label="Connect rate" value={percent(total.connects, total.dials)} loading={loading} />
             <Metric label="Appointments" value={total.appointments.toLocaleString()} loading={loading} />
+            <Metric label="Booking rate" value={percent(total.appointments, total.dials)} note="Appointments ÷ dials" loading={loading} />
             <Metric label="Leads" value={total.follow_ups.toLocaleString()} loading={loading} />
             <Metric label="Talk time" value={formatTalkTime(total.talk_seconds)} loading={loading} />
             <Metric
@@ -303,6 +304,7 @@ function Cells({ line: l, team }: { line: Line; team: boolean }) {
       <td className="td text-right tabular-nums">{l.connects.toLocaleString()}</td>
       <td className="td text-right tabular-nums">{percent(l.connects, l.dials)}</td>
       <td className="td text-right tabular-nums">{l.appointments.toLocaleString()}</td>
+      <td className="td text-right tabular-nums">{percent(l.appointments, l.dials)}</td>
       <td className="td text-right tabular-nums">{l.follow_ups.toLocaleString()}</td>
       <td className="td text-right tabular-nums">{formatTalkTime(l.talk_seconds)}</td>
       {team && (

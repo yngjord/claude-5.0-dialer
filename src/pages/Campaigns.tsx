@@ -304,11 +304,12 @@ function CallMetrics({ campaigns }: { campaigns: Pick<Campaign, 'id' | 'name' | 
       {stats.error ? (
         <ErrorState message={stats.error} onRetry={stats.reload} />
       ) : (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-7">
           <Metric label="Dials" value={t.dials.toLocaleString()} loading={loading} />
           <Metric label="Connects" value={t.connects.toLocaleString()} loading={loading} />
           <Metric label="Connect rate" value={percent(t.connects, t.dials)} loading={loading} />
           <Metric label="Appointments" value={t.appointments.toLocaleString()} loading={loading} />
+          <Metric label="Booking rate" value={percent(t.appointments, t.dials)} note="Appointments ÷ dials" loading={loading} />
           <Metric label="Leads" value={t.followUps.toLocaleString()} loading={loading} />
           <Metric label="Talk time" value={formatTalkTime(t.talk)} loading={loading} />
         </div>

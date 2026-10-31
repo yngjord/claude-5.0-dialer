@@ -240,6 +240,12 @@ export default function Dialer() {
     if (!endBlocked) navigate('/campaigns');
   };
 
+  // Each new contact starts at the top of the screen, even if the rep had scrolled down through the script.
+  const shownId = (myCall?.contact ?? contact)?.id;
+  useEffect(() => {
+    if (shownId) window.scrollTo({ top: 0 });
+  }, [shownId]);
+
   if (campaignQuery.error || (!campaignQuery.loading && !campaign)) {
     return (
       <FocusLayout title="Power dialer" onEnd={endSession} endBlocked={false}>

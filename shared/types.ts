@@ -68,6 +68,8 @@ export interface CampaignStats {
   connects_today: number;
   dials_total: number;
   connects_total: number;
+  /** Calls saved as Interested - Appointment Set, for the booking rate. */
+  appointments_total: number;
 }
 
 export interface Contact {
