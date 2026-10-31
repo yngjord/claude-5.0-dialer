@@ -3,7 +3,47 @@ import type { Config } from '@netlify/functions';
 import { updateRecord, listAll } from './_lib/airtable';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json, readJson } from './_lib/http';
-import { loadJustCallApi, loadJustCallStorage, requireBackfillKey, toMp3, type JcRecord } from './_lib/jcBackfill';
+import { loadJustCallApi, loadJustCallStorage, requireBackfillKey, toMp3, type JcApiRaw, type JcRecord } from './_lib/jcBackfill';
+import { decodeEntities } from '../../shared/text';
+
+const DISPOSITIONS = ['Interested - Appointment Set', 'Interested - Needs Follow-Up', 'Callback', 'Not Interested', 'Left Voicemail', 'No Answer', 'Unqualified Lead', 'Wrong Number', 'Do Not Call', 'Disconnected Number'];
+const DISPOSITION_MAP: Record<string, string> = { 'Product/Service Not Needed': 'Not Interested', 'Already Using Competitor': 'Not Interested', 'Language Barrier': 'Unqualified Lead' };
+const PICKUPS = ['Human Pickup', 'Machine Pickup', 'Unanswered', 'Unclassified Pickup', 'Busy', 'Failed'];
+
+/** A dialer_calls row from a JustCall API call, the same way the CSV export was mapped. */
+async function rowFromApi(c: JcApiRaw, extra: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const started = new Date(`${c.call_date}T${c.call_time}Z`);
+  const duration = c.call_info?.duration ?? 0;
+  const campaign = decodeEntities(c.campaign?.name ?? '').trim() || null;
+  const client = ['Rubric IQ', 'Kintell', 'Morfless'].find((x) => (campaign ?? '').replace(/^Re:\s*/, '').startsWith(x)) ?? null;
+  const code = (c.call_info?.disposition ?? '').trim();
+  let notes = (c.call_info?.notes ?? '').trim() || null;
+  const disposition = DISPOSITIONS.includes(code) ? code : (DISPOSITION_MAP[code] ?? null);
+  if (code && !DISPOSITIONS.includes(code)) notes = `[JustCall: ${code}]${notes ? ` ${notes}` : ''}`;
+  const user = must(await db().from('profiles').select('id').ilike('email', c.agent_email || '-').maybeSingle()) as { id: string } | null;
+  const ended = new Date(started.getTime() + duration * 1000).toISOString();
+  return {
+    ...extra,
+    twilio_call_sid: c.call_sid,
+    justcall_call_id: c.call_id,
+    justcall_contact_id: c.contact_id ?? null,
+    started_at: started.toISOString(),
+    ended_at: ended,
+    wrapped_up_at: ended,
+    duration_s: duration,
+    user_id: user?.id ?? null,
+    agent_name: c.agent_name || null,
+    client_name: client,
+    campaign_name: campaign,
+    full_name: (extra.full_name as string | undefined) ?? (c.contact_name || null),
+    phone_e164: `+${c.contact_number.replace(/\D/g, '')}`,
+    to_number: `+${c.contact_number.replace(/\D/g, '')}`,
+    from_number: `+${c.sales_dialer_number.replace(/\D/g, '')}`,
+    pickup_status: PICKUPS.includes(c.call_info?.call_answered_by ?? '') ? c.call_info!.call_answered_by : null,
+    disposition,
+    notes,
+  };
+}
 import { RECORDINGS_BUCKET } from './_lib/media';
 import { LEAD_FIELDS } from '../../shared/leads';
 
@@ -161,10 +201,21 @@ export default handler(async (req) => {
     if (!/^https:\/\/[a-z0-9.-]+$/i.test(body.baseUrl ?? '') || !/^https:\/\/jc-recordings\.s3\.amazonaws\.com\//.test(body.url)) throw new HttpError(400, 'Bad input');
     let id = body.callId;
     if (!id) {
-      const { byCallId } = await loadJustCallStorage();
-      const rec = [...byCallId.values()].find((r) => r.recording === body.url);
-      const row = { ...body.newCall, justcall_call_id: rec?.callId ?? null, justcall_contact_id: rec?.contactId ?? null, source: 'justcall', direction: 'outbound', kind: 'call', twilio_status: 'completed', pickup_source: 'import', visible: true };
-      id = (must(await db().from('dialer_calls').insert(row).select('id').single()) as { id: string }).id;
+      // A call that isn't in the export: built from JustCall's API record for this recording.
+      const api = [...(await loadJustCallApi()).values()].find((a) => a.recording === body.url);
+      if (!api) throw new HttpError(404, 'Recording not found in the JustCall API');
+      const existing = must(await db().from('dialer_calls').select('id').eq('twilio_call_sid', api.raw.call_sid).maybeSingle()) as { id: string } | null;
+      id =
+        existing?.id ??
+        (
+          must(
+            await db()
+              .from('dialer_calls')
+              .insert({ ...(await rowFromApi(api.raw, body.newCall ?? {})), source: 'justcall', direction: 'outbound', kind: 'call', twilio_status: 'completed', pickup_source: 'import', visible: true })
+              .select('id')
+              .single(),
+          ) as { id: string }
+        ).id;
     }
     const res = await fetch(body.url);
     if (!res.ok) throw new HttpError(502, `download ${res.status}`);
@@ -226,6 +277,7 @@ export default handler(async (req) => {
     const { byCallId } = await loadJustCallStorage();
     const s3ToCallId = new Map<string, number>();
     for (const r of byCallId.values()) if (r.recording) s3ToCallId.set(r.recording, r.callId);
+    for (const a of (await loadJustCallApi()).values()) if (a.recording) s3ToCallId.set(a.recording, a.callId);
     const calls = must(
       await db().from('dialer_calls').select('id, justcall_call_id, recording_path, airtable_lead_id').eq('source', 'justcall').not('justcall_call_id', 'is', null),
     ) as { id: string; justcall_call_id: number; recording_path: string | null; airtable_lead_id: string | null }[];

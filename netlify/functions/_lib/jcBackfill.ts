@@ -109,6 +109,24 @@ export interface JcApiCall {
   contactId: number | null;
   recording: string | null;
   hasAi: boolean;
+  raw: JcApiRaw;
+}
+
+export interface JcApiRaw {
+  call_id: number;
+  call_sid: string;
+  contact_id: number;
+  contact_number: string;
+  contact_name: string;
+  contact_email: string;
+  sales_dialer_number: string;
+  agent_name: string;
+  agent_email: string;
+  call_date: string;
+  call_time: string;
+  campaign?: { name?: string };
+  call_info?: { recording?: string; duration?: number; call_answered_by?: string; disposition?: string; notes?: string };
+  justcall_ai?: Record<string, unknown>;
 }
 
 /** Every Sales Dialer call from JustCall's API (keys in Netlify env), by Twilio call SID. */
@@ -125,12 +143,15 @@ export async function loadJustCallApi(): Promise<Map<string, JcApiCall>> {
       await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
     }
     if (!res?.ok) throw new HttpError(502, `JustCall API page ${page}: ${res?.status}`);
-    const body = (await res.json()) as {
-      data: { call_id: number; call_sid: string; contact_id: number; call_info?: { recording?: string }; justcall_ai?: Record<string, unknown> }[];
-      next_page_link?: string;
-    };
+    const body = (await res.json()) as { data: JcApiRaw[]; next_page_link?: string };
     for (const c of body.data ?? []) {
-      out.set(c.call_sid, { callId: c.call_id, contactId: c.contact_id ?? null, recording: c.call_info?.recording?.trim() || null, hasAi: !!c.justcall_ai && Object.keys(c.justcall_ai).length > 0 });
+      out.set(c.call_sid, {
+        callId: c.call_id,
+        contactId: c.contact_id ?? null,
+        recording: c.call_info?.recording?.trim() || null,
+        hasAi: !!c.justcall_ai && Object.keys(c.justcall_ai).length > 0,
+        raw: c,
+      });
     }
     if (!body.next_page_link || !body.data?.length) break;
   }
