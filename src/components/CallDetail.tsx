@@ -2,7 +2,6 @@ import { Check, CheckCircle2, Copy } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { formatPhone } from '../../shared/phone';
 import type { CallMediaResponse, CallRow } from '../../shared/types';
-import { useAuth } from '../auth/AuthProvider';
 import { api, must, useLoad } from '../lib/api';
 import { formatDateTime, formatDuration } from '../lib/format';
 import { supabase } from '../lib/supabase';
@@ -14,7 +13,6 @@ import { ErrorState } from './ui/States';
 
 /** One call or voicemail: details, recording and transcript. Opening a voicemail marks it as heard. */
 export function CallDetail({ callId }: { callId: string }) {
-  const { isAdmin } = useAuth();
   const call = useLoad(async () => must(await supabase.from('dialer_calls').select('*').eq('id', callId).maybeSingle()) as CallRow | null, [callId]);
   const media = useLoad(() => api<CallMediaResponse>(`call-media?id=${encodeURIComponent(callId)}`), [callId]);
 
@@ -32,11 +30,12 @@ export function CallDetail({ callId }: { callId: string }) {
       // clipboard blocked by the browser: nothing to do
     }
   };
+  // Opening a voicemail marks it heard (reps their own, admins any), which updates the sidebar count.
   useEffect(() => {
-    if (row?.kind === 'voicemail' && !row.read_at && isAdmin) {
-      supabase.from('dialer_calls').update({ read_at: new Date().toISOString() }).eq('id', row.id).then(() => window.dispatchEvent(new Event('inbox:changed')));
+    if (row?.kind === 'voicemail' && !row.read_at) {
+      supabase.from('dialer_calls').update({ read_at: new Date().toISOString() }).eq('id', row.id).then(() => window.dispatchEvent(new Event('voicemails:changed')));
     }
-  }, [row, isAdmin]);
+  }, [row]);
 
   if (call.error) return <ErrorState message={call.error} onRetry={call.reload} />;
   if (call.loading) return <Spinner className="text-brand" />;

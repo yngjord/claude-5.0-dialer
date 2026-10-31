@@ -1,7 +1,8 @@
 import type { Config } from '@netlify/functions';
-import { normalizePhone } from '../../shared/phone';
+import { normalizeCallable } from '../../shared/phone';
 import { db, must } from './_lib/db';
 import { handler, twiml, xml } from './_lib/http';
+import { markLeadsCalledBack } from './_lib/leadCallback';
 import { routeInbound } from './_lib/routing';
 import { callbackUrl, verifyTwilioWebhook } from './_lib/webhook';
 
@@ -10,11 +11,12 @@ const DEFAULT_GREETING = "Hi, sorry we can't take your call right now. Please le
 /**
  * POST /api/twilio/inbound-voice: the Voice URL on each of our numbers. No live inbound calls: callers hear the
  * number's greeting (a custom recording if one is uploaded) and can leave a voicemail, which is transcribed and
- * shows up in the Inbox of the rep who last called them.
+ * shows up on the Voicemails page of the rep who last called them. Their Airtable lead is set to follow up today.
  */
-export default handler(async (req) => {
+export default handler(async (req, context) => {
   const p = await verifyTwilioWebhook(req);
-  const phone = normalizePhone(p.From);
+  // Any AU/NZ number (landlines too: click-to-call reaches those).
+  const phone = normalizeCallable(p.From);
   const caller = phone.ok ? phone.e164 : null;
   const route = caller ? await routeInbound(caller) : { contact: null, campaign: null, userId: null };
 
@@ -46,6 +48,15 @@ export default handler(async (req) => {
       .select('id')
       .single(),
   ) as { id: string };
+
+  // Put the caller's lead(s) back on the team's list in Airtable (follow up today, Open), without delaying the greeting.
+  if (caller) {
+    context.waitUntil(
+      markLeadsCalledBack(caller)
+        .then((ids) => ids.length && console.log(`Callback from ${caller}: leads ${ids.join(', ')} set to follow up today`))
+        .catch((err) => console.error('Callback lead update failed', caller, err)),
+    );
+  }
 
   let greeting = `<Say voice="Polly.Olivia-Neural" language="en-AU">${xml(DEFAULT_GREETING)}</Say>`;
   if (number?.voicemail_greeting_path) {
