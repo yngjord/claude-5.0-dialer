@@ -3,7 +3,7 @@ import type { Config } from '@netlify/functions';
 import { updateRecord, listAll } from './_lib/airtable';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json, readJson } from './_lib/http';
-import { loadJustCallStorage, requireBackfillKey, toMp3, type JcRecord } from './_lib/jcBackfill';
+import { loadJustCallApi, loadJustCallStorage, requireBackfillKey, toMp3, type JcRecord } from './_lib/jcBackfill';
 import { RECORDINGS_BUCKET } from './_lib/media';
 import { LEAD_FIELDS } from '../../shared/leads';
 
@@ -17,6 +17,7 @@ type Body =
   // Airtable JustCall Storage record plus the lead's details (newCall). The lead's link then points to it.
   | { action: 'leftover'; lead: string; url: string; baseUrl: string; callId?: string; newCall?: Record<string, unknown> }
   | { action: 'jcapi'; path: string }
+  | { action: 'apimatch' }
   | { action: 'leads'; dry?: boolean; baseUrl: string };
 
 interface JcCall {
@@ -173,6 +174,34 @@ export default handler(async (req) => {
     must(await db().from('dialer_calls').update({ recording_path: path, airtable_lead_id: body.lead }).eq('id', id).eq('source', 'justcall'));
     await updateRecord('Leads', body.lead, { [LEAD_FIELDS.callRecordingLink]: `${body.baseUrl}/r/${id}.mp3` });
     return json({ id, path });
+  }
+
+  // Exact matches from JustCall's API (by Twilio call SID): fills in missing ids and reports any disagreement.
+  if (body.action === 'apimatch') {
+    const api = await loadJustCallApi();
+    const calls = must(await db().from('dialer_calls').select('id, twilio_call_sid, justcall_call_id, recording_path').eq('source', 'justcall')) as {
+      id: string;
+      twilio_call_sid: string;
+      justcall_call_id: number | null;
+      recording_path: string | null;
+    }[];
+    const r = { apiCalls: api.size, calls: calls.length, notInApi: 0, agreed: 0, disagreed: [] as { id: string; ours: number; api: number }[], filled: 0, apiHasRecording: 0, apiHasAi: 0 };
+    for (const c of calls) {
+      const a = api.get(c.twilio_call_sid);
+      if (!a) {
+        r.notInApi++;
+        continue;
+      }
+      if (a.recording) r.apiHasRecording++;
+      if (a.hasAi) r.apiHasAi++;
+      if (c.justcall_call_id === a.callId) r.agreed++;
+      else if (c.justcall_call_id) r.disagreed.push({ id: c.id, ours: c.justcall_call_id, api: a.callId });
+      else {
+        must(await db().from('dialer_calls').update({ justcall_call_id: a.callId, justcall_contact_id: a.contactId }).eq('id', c.id));
+        r.filled++;
+      }
+    }
+    return json(r);
   }
 
   // Raw GET against JustCall's API (keys from Netlify env), to work out its fields; trimmed.

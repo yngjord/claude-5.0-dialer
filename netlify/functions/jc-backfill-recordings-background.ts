@@ -1,6 +1,6 @@
 // TEMPORARY: one-off JustCall backfill (Oct 2026). Delete with _lib/jcBackfill.ts and jc-backfill.ts.
 import { db, must } from './_lib/db';
-import { requireBackfillKey, loadJustCallStorage, toMp3 } from './_lib/jcBackfill';
+import { requireBackfillKey, loadJustCallApi, loadJustCallStorage, toMp3 } from './_lib/jcBackfill';
 import { RECORDINGS_BUCKET } from './_lib/media';
 
 /**
@@ -16,6 +16,9 @@ export default async (req: Request) => {
   }
   const deadline = Date.now() + 13 * 60_000;
   const { byCallId } = await loadJustCallStorage();
+  // JustCall's API has the recording link for calls Airtable never captured.
+  const api = process.env.JUSTCALL_API_KEY ? await loadJustCallApi().catch(() => null) : null;
+  const apiByCallId = new Map([...(api?.values() ?? [])].map((a) => [a.callId, a.recording]));
   const failed = new Set<string>();
   let copied = 0;
 
@@ -37,7 +40,7 @@ export default async (req: Request) => {
     await Promise.all(
       batch.map(async (c) => {
         try {
-          const url = byCallId.get(c.justcall_call_id)?.recording;
+          const url = byCallId.get(c.justcall_call_id)?.recording ?? apiByCallId.get(c.justcall_call_id);
           if (!url) throw new Error('no recording link in JustCall Storage');
           const res = await fetch(url);
           if (!res.ok) throw new Error(`download ${res.status}`);

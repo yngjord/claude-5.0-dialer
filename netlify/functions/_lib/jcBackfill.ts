@@ -103,3 +103,36 @@ export function toMp3(buf: Buffer): Buffer {
   if (buf.toString('ascii', 0, 3) === 'ID3' || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) return buf;
   throw new Error(`Unknown audio format (${buf.subarray(0, 4).toString('hex')})`);
 }
+
+export interface JcApiCall {
+  callId: number;
+  contactId: number | null;
+  recording: string | null;
+  hasAi: boolean;
+}
+
+/** Every Sales Dialer call from JustCall's API (keys in Netlify env), by Twilio call SID. */
+export async function loadJustCallApi(): Promise<Map<string, JcApiCall>> {
+  const key = process.env.JUSTCALL_API_KEY?.trim();
+  const secret = process.env.JUSTCALL_API_SECRET?.trim();
+  if (!key || !secret) throw new HttpError(503, 'JustCall keys missing');
+  const out = new Map<string, JcApiCall>();
+  for (let page = 0; page < 100; page++) {
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      res = await fetch(`https://api.justcall.io/v2.1/sales_dialer/calls?per_page=100&page=${page}&sort=id`, { headers: { Authorization: `${key}:${secret}`, Accept: 'application/json' } });
+      if (res.status !== 429) break;
+      await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+    }
+    if (!res?.ok) throw new HttpError(502, `JustCall API page ${page}: ${res?.status}`);
+    const body = (await res.json()) as {
+      data: { call_id: number; call_sid: string; contact_id: number; call_info?: { recording?: string }; justcall_ai?: Record<string, unknown> }[];
+      next_page_link?: string;
+    };
+    for (const c of body.data ?? []) {
+      out.set(c.call_sid, { callId: c.call_id, contactId: c.contact_id ?? null, recording: c.call_info?.recording?.trim() || null, hasAi: !!c.justcall_ai && Object.keys(c.justcall_ai).length > 0 });
+    }
+    if (!body.next_page_link || !body.data?.length) break;
+  }
+  return out;
+}
