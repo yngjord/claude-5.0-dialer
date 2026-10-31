@@ -58,6 +58,7 @@ type Body =
   | { action: 'leftover'; lead: string; url: string; baseUrl: string; callId?: string; newCall?: Record<string, unknown> }
   | { action: 'jcapi'; path: string }
   | { action: 'apimatch' }
+  | { action: 'apigap' }
   | { action: 'leads'; dry?: boolean; baseUrl: string };
 
 interface JcCall {
@@ -253,6 +254,25 @@ export default handler(async (req) => {
       }
     }
     return json(r);
+  }
+
+  // API calls of 30s+ that aren't imported (the export may have left some out).
+  if (body.action === 'apigap') {
+    const api = await loadJustCallApi();
+    const sids = new Set((must(await db().from('dialer_calls').select('twilio_call_sid').eq('source', 'justcall')) as { twilio_call_sid: string }[]).map((r) => r.twilio_call_sid));
+    const gap = [...api.values()].filter((a) => (a.raw.call_info?.duration ?? 0) >= 30 && !sids.has(a.raw.call_sid));
+    const count = (f: (a: (typeof gap)[number]) => string) => gap.reduce<Record<string, number>>((m, a) => ((m[f(a)] = (m[f(a)] ?? 0) + 1), m), {});
+    return json({
+      apiCalls: api.size,
+      apiCalls30sPlus: [...api.values()].filter((a) => (a.raw.call_info?.duration ?? 0) >= 30).length,
+      missing: gap.length,
+      byMonth: count((a) => a.raw.call_date.slice(0, 7)),
+      byPickup: count((a) => a.raw.call_info?.call_answered_by ?? '?'),
+      byDisposition: count((a) => a.raw.call_info?.disposition || '(none)'),
+      byCampaign: count((a) => a.raw.campaign?.name ?? '?'),
+      withRecording: gap.filter((a) => a.recording).length,
+      sample: gap.slice(0, 5).map((a) => ({ date: a.raw.call_date, time: a.raw.call_time, dur: a.raw.call_info?.duration, name: a.raw.contact_name, agent: a.raw.agent_name })),
+    });
   }
 
   // Raw GET against JustCall's API (keys from Netlify env), to work out its fields; trimmed.
