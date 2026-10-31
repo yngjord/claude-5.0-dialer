@@ -44,7 +44,7 @@ export default function Calls() {
   const list = useLoad(async () => {
     let q = supabase
       .from('dialer_calls')
-      .select('id, started_at, full_name, phone_e164, from_number, campaign_name, agent_name, pickup_status, disposition, notes, duration_s, recording_path, recording_sid, transcript_status', {
+      .select('id, source, started_at, full_name, phone_e164, from_number, campaign_name, agent_name, pickup_status, disposition, notes, duration_s, recording_path, recording_sid, transcript_status', {
         count: 'exact',
       })
       .eq('direction', 'outbound');
@@ -140,6 +140,12 @@ export default function Calls() {
                             <p className="text-xs tabular-nums text-ink-muted">{formatPhone(c.phone_e164)}</p>
                           </td>
                           <td className="td max-w-[180px] truncate text-ink-muted" title={c.campaign_name ?? undefined}>
+                            {/* Calls made in JustCall before the dialer, imported with their recordings. */}
+                            {c.source === 'justcall' && (
+                              <span className="mr-1.5 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-ink-soft" title="Made in JustCall, before this dialer">
+                                JustCall
+                              </span>
+                            )}
                             {c.campaign_name ?? '—'}
                           </td>
                           <td className="td whitespace-nowrap">{c.agent_name ?? <span className="text-ink-faint">—</span>}</td>
