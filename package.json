@@ -14,7 +14,6 @@
     "setup:twilio": "tsx scripts/setup-twilio.ts"
   },
   "dependencies": {
-    "@breezystack/lamejs": "^1.2.7",
     "@supabase/supabase-js": "^2.118.0",
     "@twilio/voice-sdk": "^2.18.5",
     "libphonenumber-js": "^1.13.15",
