@@ -500,7 +500,7 @@ function FocusLayout({
   return (
     <div className="min-h-screen">
       <LoadingBar />
-      <header className="sticky top-0 z-30 border-b border-line bg-white/90 backdrop-blur">
+      <header className="sticky top-[var(--viewas-h,0px)] z-30 border-b border-line bg-white/90 backdrop-blur">
         <div className="mx-auto flex min-h-16 max-w-[1400px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 sm:px-6 lg:px-10">
           <img src="/maronly-mark.png" alt="Maronly" className="h-8 w-8" />
           <div className="min-w-0 flex-1">

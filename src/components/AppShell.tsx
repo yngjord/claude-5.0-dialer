@@ -157,7 +157,7 @@ export default function AppShell() {
       <LoadingBar />
 
       {/* Mobile top bar */}
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between bg-brand px-4 lg:hidden">
+      <header className="sticky top-[var(--viewas-h,0px)] z-30 flex h-16 items-center justify-between bg-brand px-4 lg:hidden">
         <NavLink to="/campaigns" aria-label="Maronly dialer home">
           <Brand tone="light" />
         </NavLink>
@@ -169,7 +169,7 @@ export default function AppShell() {
 
       {open && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setOpen(false)} aria-hidden />}
 
-      <aside className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-brand text-white transition-transform duration-300 ease-out lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`fixed bottom-0 left-0 top-[var(--viewas-h,0px)] z-50 flex w-64 flex-col bg-brand text-white transition-transform duration-300 ease-out lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex h-20 items-center justify-between px-6">
           <NavLink to="/campaigns" aria-label="Maronly dialer home">
             <Brand tone="light" />

@@ -21,15 +21,21 @@ import { supabase } from '../lib/supabase';
 import { CAMPAIGN_STATUS } from '../lib/tones';
 import { CampaignForm, MembersModal, RerunModal } from './admin/CampaignModals';
 
-type Tab = 'active' | 'completed' | 'draft';
+type Tab = 'all' | 'active' | 'completed' | 'draft';
 
-// Paused campaigns sit with the active ones (team members can see them but not open them). Drafts are admin-only.
-const TAB_STATUSES: Record<Tab, Campaign['status'][]> = { active: ['active', 'paused'], completed: ['completed'], draft: ['draft'] };
+// Paused campaigns sit with the active ones (team members can see them but not open them). Drafts are admin-only
+// (the database only returns them to admins, so All includes them for admins only). Newest first in every tab.
+const TAB_STATUSES: Record<Tab, Campaign['status'][]> = {
+  all: ['active', 'paused', 'completed', 'draft'],
+  active: ['active', 'paused'],
+  completed: ['completed'],
+  draft: ['draft'],
+};
 
 export default function Campaigns() {
   const { isAdmin } = useAuth();
   const logos = useClientLogos();
-  const [tab, setTab] = useState<Tab>('active');
+  const [tab, setTab] = useState<Tab>('all');
   const { data, error, loading, reload } = useLoad(async () => {
     const [campaigns, stats] = await Promise.all([
       supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false }),
@@ -59,6 +65,7 @@ export default function Campaigns() {
   const count = (t: Tab) => data?.filter((d) => TAB_STATUSES[t].includes(d.campaign.status)).length ?? 0;
   const shown = data?.filter((d) => TAB_STATUSES[tab].includes(d.campaign.status)) ?? [];
   const tabs: { value: Tab; label: string; count?: number }[] = [
+    { value: 'all', label: 'All', count: data ? count('all') : undefined },
     { value: 'active', label: 'Active', count: data ? count('active') : undefined },
     { value: 'completed', label: 'Completed', count: data ? count('completed') : undefined },
     ...(isAdmin ? [{ value: 'draft' as const, label: 'Drafts', count: data ? count('draft') : undefined }] : []),
@@ -115,7 +122,7 @@ export default function Campaigns() {
                       : tab === 'draft'
                         ? 'No drafts. Use Create campaign and save it as a draft.'
                         : isAdmin
-                          ? 'No active campaigns. Use Create campaign to add one.'
+                          ? `No ${tab === 'all' ? '' : 'active '}campaigns. Use Create campaign to add one.`
                           : "You aren't assigned any campaigns yet."}
                   </EmptyRow>
                 ) : (

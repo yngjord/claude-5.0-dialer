@@ -1,5 +1,5 @@
 import { Eye, LogOut } from 'lucide-react';
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { DialerUser } from '../../shared/types';
 import { useAuth } from '../auth/AuthProvider';
 import { must, useLoad } from '../lib/api';
@@ -9,13 +9,35 @@ import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
 import { Spinner } from './ui/Spinner';
 
-/** Across the top of every page while an admin is viewing as a team member, with the way back. */
+/** At the top of every page while an admin is viewing as a team member, with the way back. */
 export function ViewAsBanner() {
   const { viewingAs, backToAdmin } = useAuth();
   const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // The bar is fixed at the top and everything else moves down by its height (--viewas-h: page padding, sidebar,
+  // sticky headers), so it never covers the app, e.g. when screen-recording as a team member.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const el = ref.current;
+    if (!el) return;
+    const apply = () => {
+      root.style.setProperty('--viewas-h', `${el.offsetHeight}px`);
+      document.body.style.paddingTop = `${el.offsetHeight}px`;
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--viewas-h');
+      document.body.style.paddingTop = '';
+    };
+  }, [viewingAs]);
+
   if (!viewingAs) return null;
   return (
-    <div role="status" className="sticky top-0 z-[60] flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-amber-400 px-4 py-2 text-sm text-amber-950">
+    <div ref={ref} role="status" className="fixed inset-x-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-amber-400 px-4 py-2 text-sm text-amber-950">
       <Eye size={16} className="shrink-0" />
       <span>
         Viewing as <b>{viewingAs.name}</b>. Calls and changes you make are saved as them.

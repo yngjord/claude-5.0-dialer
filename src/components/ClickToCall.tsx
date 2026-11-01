@@ -47,7 +47,7 @@ export function ClickToCallBar() {
 
   return (
     <>
-      <div className="card sticky top-20 z-20 mb-6 animate-appear p-4 lg:top-4">
+      <div className="card sticky top-[calc(var(--viewas-h,0px)+5rem)] z-20 mb-6 animate-appear p-4 lg:top-[calc(var(--viewas-h,0px)+1rem)]">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <p className="truncate font-display text-[17px] font-medium">{active.contact.full_name || formatPhone(active.contact.phone_e164)}</p>
