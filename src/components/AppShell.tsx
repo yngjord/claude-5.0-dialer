@@ -1,4 +1,4 @@
-import { CalendarCheck, CalendarClock, ChevronDown, PhoneOutgoing, Voicemail, Contact as ContactIcon, LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
+import { CalendarCheck, CalendarClock, ChevronDown, PhoneOutgoing, Voicemail, LayoutList, LogOut, Menu, PhoneCall, Smartphone, TrendingUp, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { TwilioBalance } from '../../shared/types';
 import { api } from '../lib/api';
@@ -21,7 +21,6 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
 ];
 const ADMIN_NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/admin/performance', label: 'Performance', icon: TrendingUp },
-  { to: '/admin/contacts', label: 'Contacts', icon: ContactIcon },
   { to: '/admin/numbers', label: 'Phone numbers', icon: Smartphone },
   { to: '/call', label: 'Click-to-call', icon: PhoneOutgoing },
   { to: '/voicemails', label: 'Voicemails', icon: Voicemail },

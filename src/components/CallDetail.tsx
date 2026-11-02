@@ -3,10 +3,11 @@ import { useEffect, useState } from 'react';
 import { formatPhone } from '../../shared/phone';
 import type { CallMediaResponse, CallRow } from '../../shared/types';
 import { api, must, useLoad } from '../lib/api';
-import { formatDateTime, formatDuration } from '../lib/format';
+import { formatDateTime, formatDuration, withProtocol } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import { DISPOSITION_TONES, PICKUP_TONES } from '../lib/tones';
 import { Badge } from './ui/Badge';
+import { ShareRecordingButton } from './ShareRecordingButton';
 import { Modal } from './ui/Modal';
 import { Spinner } from './ui/Spinner';
 import { ErrorState } from './ui/States';
@@ -49,6 +50,16 @@ export function CallDetail({ callId }: { callId: string }) {
         <p className="mt-1 text-sm text-ink-muted">
           {[voicemail ? 'Voicemail from' : null, formatPhone(row.phone_e164), row.company, row.campaign_name].filter(Boolean).join(' · ')}
         </p>
+        {(row.linkedin || row.from_number) && (
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+            {row.linkedin && (
+              <a href={withProtocol(row.linkedin)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-brand-tint px-3 py-1 text-brand hover:bg-brand hover:text-white">
+                <span className="text-[11px] font-semibold">in</span> LinkedIn
+              </a>
+            )}
+            {row.from_number && !voicemail && <span className="text-ink-muted">Dialled from {formatPhone(row.from_number)}</span>}
+          </div>
+        )}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-ink-muted">{formatDateTime(row.started_at)}</span>
           {row.agent_name && <span className="text-ink-faint">· {row.agent_name}</span>}
@@ -73,7 +84,10 @@ export function CallDetail({ callId }: { callId: string }) {
       )}
 
       <div>
-        <h3 className="mb-2 font-display text-[13px] font-medium text-ink-muted">Recording</h3>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h3 className="font-display text-[13px] font-medium text-ink-muted">Recording</h3>
+          {(row.recording_path || row.recording_sid) && <ShareRecordingButton callId={row.id} />}
+        </div>
         {media.loading ? (
           <div className="skeleton h-10 w-full" />
         ) : media.data?.recordingUrl ? (
