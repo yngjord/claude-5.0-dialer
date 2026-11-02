@@ -11,7 +11,6 @@ import Brand from './Brand';
 import { ClickToCallBar } from './ClickToCall';
 import LoadingBar from './LoadingBar';
 import { useDueCallbacks } from '../lib/useDueCallbacks';
-import { useVoicemailCount } from '../lib/useVoicemailCount';
 
 // Everyone gets Campaigns (with their numbers) and Call logs; admins also get ADMIN_NAV.
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
@@ -65,7 +64,8 @@ function PhonePanel({ isAdmin }: { isAdmin: boolean }) {
         <button onClick={toggle} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1 py-1 text-left hover:text-white" title={open ? 'Hide phone details' : 'Show phone details'}>
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} aria-hidden />
           <span className="truncate">{label}</span>
-          <ChevronDown size={14} className={`ml-auto shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+          {/* Points up to open, down to close. */}
+          <ChevronDown size={14} className={`ml-auto shrink-0 transition-transform ${open ? '' : 'rotate-180'}`} />
         </button>
         {!open && (deviceState === 'off' || deviceState === 'error') && (
           <button onClick={() => start().catch(() => undefined)} className="shrink-0 underline hover:text-white">
@@ -146,8 +146,6 @@ export default function AppShell() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const dueCallbacks = useDueCallbacks(me?.userId);
-  // Voicemails are admin-only for now (the count is off for team members).
-  const unheardVoicemails = useVoicemailCount(isAdmin ? me?.userId : undefined);
 
   useEffect(() => setOpen(false), [location.pathname]);
 
@@ -163,7 +161,7 @@ export default function AppShell() {
         </NavLink>
         <button className="relative flex h-10 w-10 items-center justify-center rounded-xl text-white hover:bg-white/10" aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(true)}>
           <Menu size={22} />
-          {dueCallbacks + unheardVoicemails > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-white ring-2 ring-brand" aria-label="Callbacks due or new voicemails" />}
+          {dueCallbacks > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-white ring-2 ring-brand" aria-label="Callbacks due" />}
         </button>
       </header>
 
@@ -200,11 +198,7 @@ export default function AppShell() {
                 <NavLink key={to} to={to} className={navClass}>
                   <Icon size={20} strokeWidth={1.75} />
                   {label}
-                  {to === '/voicemails' && unheardVoicemails > 0 && (
-                    <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-semibold tabular-nums text-brand" aria-label={`${unheardVoicemails} new`}>
-                      {unheardVoicemails}
-                    </span>
-                  )}
+
                 </NavLink>
               ))}
             </>

@@ -1042,3 +1042,7 @@ end $$;
 revoke execute on function public.dialer_start_oneoff_call(uuid, uuid, text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.dialer_start_oneoff_call(uuid, uuid, text, text, text, text, text) to service_role;
 
+-- When someone copied a share link for this call's recording (Call logs). /r/{callId}.mp3 then plays it without a
+-- login, like lead recordings; null = not shared.
+alter table public.dialer_calls add column if not exists recording_shared_at timestamptz;
+

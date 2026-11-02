@@ -12,22 +12,22 @@ const text = (body: string, status: number) =>
 /**
  * GET /r/{callId}.mp3: the permanent recording link written to Airtable Leads → Call Recording Link, which the
  * portal and OS open like the old JustCall S3 links. No login: the call id can't be guessed, and only calls that
- * created a lead (the two "Interested" dispositions, or a call linked to a lead) are served. Redirects to a fresh
- * short-lived signed URL, so the recordings bucket stays private and deleting a recording kills its link.
+ * created a lead (the two "Interested" dispositions, or a call linked to a lead) or were shared from Call logs are
+ * served. Redirects to a fresh short-lived signed URL, so the recordings bucket stays private and deleting a
+ * recording kills its link.
  */
 export default async (req: Request): Promise<Response> => {
   try {
     const id = (new URL(req.url).pathname.split('/').pop() ?? '').replace(/\.mp3$/i, '');
     if (!UUID.test(id)) return text('Recording not found.', 404);
 
-    const row = must(await db().from('dialer_calls').select('disposition, recording_path, airtable_lead_id').eq('id', id).maybeSingle()) as Pick<
-      CallRow,
-      'disposition' | 'recording_path' | 'airtable_lead_id'
-    > | null;
+    const row = must(await db().from('dialer_calls').select('disposition, recording_path, airtable_lead_id, recording_shared_at').eq('id', id).maybeSingle()) as
+      | (Pick<CallRow, 'disposition' | 'recording_path' | 'airtable_lead_id'> & { recording_shared_at: string | null })
+      | null;
     // Calls that created (or are linked to) a lead: the two Interested dispositions, or a lead id on the call (JustCall
-    // calls whose lead was made with another disposition).
+    // calls whose lead was made with another disposition). Plus any call whose link was shared from Call logs.
     const leadCall = !!row && (!!row.airtable_lead_id || (!!row.disposition && LEAD_DISPOSITIONS.includes(row.disposition)));
-    if (!row || !leadCall) return text('Recording not found.', 404);
+    if (!row || !(leadCall || row.recording_shared_at)) return text('Recording not found.', 404);
 
     let path = row.recording_path;
     if (!path) {

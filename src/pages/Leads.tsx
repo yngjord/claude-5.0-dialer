@@ -13,6 +13,9 @@ import { sydneyToday } from '../lib/format';
 
 type Period = 'last' | 'this' | 'all';
 
+// Manual lead entry (the Leads tab's "Add new lead"). Off for now: leads come from wrap-ups after a call.
+const MANUAL_LEADS = false;
+
 const STAGE_TONES: Record<string, Tone> = { Booking: 'green', Closed: 'greenSolid' };
 
 /** YYYY-MM of an ISO timestamp, in Sydney time. */
@@ -74,10 +77,13 @@ export default function Leads() {
       <PageHeader
         title="Leads"
         subtitle="Leads attributed to you: meetings booked on your calls, and leads that booked after we followed up."
+        // "Add new lead" is turned off for now: leads are added after a call. Set to true to bring it back.
         actions={
-          <Button onClick={() => setAdding(true)}>
-            <Plus size={16} /> Add new lead
-          </Button>
+          MANUAL_LEADS ? (
+            <Button onClick={() => setAdding(true)}>
+              <Plus size={16} /> Add new lead
+            </Button>
+          ) : undefined
         }
       />
 
