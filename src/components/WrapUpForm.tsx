@@ -222,7 +222,7 @@ export function WrapUpForm({
       {needsLead && (
         <div className="space-y-4 rounded-card border-2 border-brand/20 bg-brand-tint/50 p-4 sm:p-5">
           <p className="flex items-center gap-2 font-display text-[15px] font-medium text-brand">
-            <CheckCircle2 size={18} /> Creates a new lead inside the CRM
+            <CheckCircle2 size={18} /> {disposition === APPOINTMENT_SET ? 'Creates a new lead and booking request inside the CRM' : 'Creates a new lead inside the CRM'}
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field id="lead-name" label="Prospect full name" value={fullName} onChange={setFullName} required />
@@ -314,7 +314,7 @@ export function WrapUpForm({
       {leadError && (
         <div role="alert" className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="flex items-center gap-2 font-medium">
-            <AlertTriangle size={16} /> The call was saved, but the lead couldn't be created in the CRM.
+            <AlertTriangle size={16} /> The call was saved, but the CRM didn't take everything.
           </p>
           <p className="mt-1 text-amber-800">{leadError}</p>
           <div className="mt-3 flex gap-2">

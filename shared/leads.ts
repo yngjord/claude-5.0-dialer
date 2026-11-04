@@ -6,7 +6,7 @@ export interface LeadInput {
   email: string;
   phone: string;
   notes: string;
-  /** YYYY-MM-DD. Appointment Set only (required). */
+  /** YYYY-MM-DD. Appointment Set only (required); goes on the Booking Request, not the lead. */
   bookedFor?: string | null;
   /** Free text, e.g. "2:30pm AEDT". Appointment Set only (required). */
   timeBookedFor?: string | null;
@@ -29,13 +29,22 @@ export const LEAD_FIELDS = {
   recordStatus: 'fld87WbJl40UGTLiX', // Record Status
   stage: 'fldCNcQQLsHuo6pAy', // Stage
   nextFollowUp: 'fldOhKAOIgQDdaRy0', // Next Follow-up
-  dateBookedFor: 'fld94vlZrBFMg8z2W', // Date Booked For
-  timeBookedFor: 'fldkqUeG60gLfosxD', // Time Booked for (plain text)
   dateBookingMade: 'fldcea5C6NrjJPdHM', // Date Booking Made
   callRecordingLink: 'fldd8s4r5ZYx31Tdz', // Call Recording Link
   attributedTo: 'fldKG3QEhKosSdvxc', // Attributed to - new dialer: the email of the rep who created the lead
   recordCreated: 'fldBWnRJxBXSXIYSy', // Record Created
   transcript: 'fldJSugGAtJaRppT2', // Cold Call Transcript (long text): written once Twilio's transcript is ready
+  bookings: 'fldujowUw1gZFjQHE', // Bookings (link to Booking Requests)
+} as const;
+
+/** Airtable table "Booking Requests": one per meeting booked, linked to its lead. Fields by id, names as comments. */
+export const BOOKING_TABLE = 'Booking Requests';
+export const BOOKING_FIELDS = {
+  origin: 'fldEjCo8lP3rMUFuS', // Origin (single select)
+  lead: 'fldYr7l4NPtmGqdNC', // Maronly Lead Reference (link to Leads)
+  notes: 'fldRf1JAmOuhWC6W6', // Booking Notes
+  date: 'fldYYNXMGejZvsNPT', // Booking Date
+  time: 'fld6ciVrRFrX6qWe1', // Booking Time & Timezone (plain text)
 } as const;
 
 /** A Leads record's fields, keyed by field id. */
@@ -104,9 +113,8 @@ export function buildLeadFields(
   };
 
   if (disposition === APPOINTMENT_SET) {
+    // The date and time go on the Booking Request (buildBookingFields), created right after the lead.
     fields[F.stage] = 'Booking';
-    fields[F.dateBookedFor] = lead.bookedFor ?? '';
-    fields[F.timeBookedFor] = lead.timeBookedFor?.trim() ?? '';
     fields[F.dateBookingMade] = ctx.todaySydney;
   } else {
     // Needs Follow-Up leads are always due for follow-up from today.
@@ -115,6 +123,23 @@ export function buildLeadFields(
   }
 
   return Object.fromEntries(Object.entries(fields).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : v !== '' && v != null)));
+}
+
+/**
+ * The Booking Request for an Appointment Set lead. The lead link is set in the same create call: Airtable's "New
+ * booking request" automation fires on creation and reads the linked lead then. The notes are the call notes, also
+ * on the lead's Notes (Maronly). Primary Contact fields stay empty (they're for meetings with someone else).
+ */
+export function buildBookingFields(leadId: string, lead: LeadInput): Record<string, string | string[]> {
+  const B = BOOKING_FIELDS;
+  const fields: Record<string, string | string[]> = {
+    [B.origin]: 'Cold Call Campaign',
+    [B.lead]: [leadId],
+    [B.date]: lead.bookedFor ?? '',
+    [B.time]: lead.timeBookedFor?.trim() ?? '',
+    [B.notes]: lead.notes.trim(),
+  };
+  return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== ''));
 }
 
 /** The permanent recording link for a call (served by netlify/functions/recording-link.ts). */

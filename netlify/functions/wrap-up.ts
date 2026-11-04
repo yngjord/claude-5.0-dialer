@@ -1,11 +1,12 @@
 import type { Config } from '@netlify/functions';
-import { CALLBACK, CONNECTED_PICKUP_STATUS, isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
+import { APPOINTMENT_SET, CALLBACK, CONNECTED_PICKUP_STATUS, isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
 import { buildLeadFields, recordingLink, todayInSydney, validateLead } from '../../shared/leads';
 import { contactOutcome } from '../../shared/outcomes';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { createRecord } from './_lib/airtable';
 import { requireSignedIn } from './_lib/auth';
 import { addToBlocklist } from './_lib/blocklist';
+import { createLeadBooking } from './_lib/booking';
 import { db, must } from './_lib/db';
 import { syncLeadTranscript } from './_lib/leadTranscript';
 import { handler, HttpError, json, readJson } from './_lib/http';
@@ -21,7 +22,8 @@ const REFUSALS: Record<string, [number, string]> = {
  * corrected by the rep), disposition and notes, and moves the contact on (or, for Callback, holds it for this rep
  * until the callback time). For the two "Interested" dispositions it
  * then creates the lead in the CRM (Airtable), with a permanent link to the call recording (/r/{callId}.mp3), so
- * only those saves wait on Airtable.
+ * only those saves wait on Airtable. Appointment Set then also creates a Booking Request linked to that lead (date,
+ * time and notes), which is what triggers the booking automation in Airtable.
  *
  * Safe to submit again (the dialer's "Edit last call" does): the contact's attempt count only goes up once, and a
  * lead is only created once. If Airtable fails, the call is still saved and `leadError` is returned so the rep can
@@ -91,6 +93,8 @@ export default handler(async (req, context) => {
 
   let leadId = saved.airtable_lead_id;
   let leadError: string | null = null;
+  // 1. The lead (once per call).
+  let leadJustCreated = false;
   if (needsLead && body.lead && !leadId) {
     if (!saved.airtable_client_id) throw new HttpError(400, "This call's campaign no longer exists, so a lead can't be created.");
     try {
@@ -111,11 +115,25 @@ export default handler(async (req, context) => {
         db().from('dialer_calls').update({ airtable_lead_id: leadId, lead_sync_error: null }).eq('id', body.callId).then(must),
         saved.contact_id ? db().from('dialer_contacts').update({ airtable_lead_id: leadId }).eq('id', saved.contact_id).then(must) : null,
       ]);
+      leadJustCreated = true;
       // A transcript that finished before the rep saved goes on the new lead now (otherwise it's added when it lands).
       context.waitUntil(syncLeadTranscript(body.callId).catch((err) => console.error('Lead transcript sync failed', body.callId, err)));
     } catch (err) {
       leadError = err instanceof Error ? err.message : 'Could not create the lead in the CRM.';
       console.error('Lead creation failed for call', body.callId, err);
+      must(await db().from('dialer_calls').update({ lead_sync_error: leadError }).eq('id', body.callId));
+    }
+  }
+
+  // 2. Appointment Set: the Booking Request, linked to that lead. On "Retry" (lead made earlier by this call) it's
+  // only created if this call's lead doesn't have one yet.
+  if (needsLead && body.lead && leadId && !leadError && body.disposition === APPOINTMENT_SET) {
+    try {
+      const bookingId = await createLeadBooking(leadId, body.lead, leadJustCreated);
+      if (bookingId && !leadJustCreated) must(await db().from('dialer_calls').update({ lead_sync_error: null }).eq('id', body.callId));
+    } catch (err) {
+      leadError = `The lead was created, but not its booking request. ${err instanceof Error ? err.message : ''}`.trim();
+      console.error('Booking request failed for call', body.callId, err);
       must(await db().from('dialer_calls').update({ lead_sync_error: leadError }).eq('id', body.callId));
     }
   }

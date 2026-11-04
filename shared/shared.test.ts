@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
-import { buildLeadFields, LEAD_FIELDS as F, leadTranscriptText, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
+import { buildBookingFields, buildLeadFields, LEAD_FIELDS as F, leadTranscriptText, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
 import { formatPhone, normalizeCallable, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
@@ -84,9 +84,24 @@ describe('leads', () => {
 
   it('builds a Booking lead for Appointment Set', () => {
     const fields = buildLeadFields('Interested - Appointment Set', { ...lead, bookedFor: '2026-10-30', timeBookedFor: '2:30pm AEDT' }, ctx);
-    expect(fields).toMatchObject({ [F.stage]: 'Booking', [F.dateBookedFor]: '2026-10-30', [F.timeBookedFor]: '2:30pm AEDT', [F.dateBookingMade]: '2026-10-22' });
+    expect(fields).toMatchObject({ [F.stage]: 'Booking', [F.dateBookingMade]: '2026-10-22', [F.notes]: lead.notes });
+    // The date and time go on the Booking Request, not the lead (those two Leads fields are being removed).
+    expect(fields).not.toHaveProperty('fld94vlZrBFMg8z2W');
+    expect(fields).not.toHaveProperty('fldkqUeG60gLfosxD');
     expect(fields).not.toHaveProperty(F.nextFollowUp);
     expect(fields).not.toHaveProperty(F.website);
+  });
+
+  it('builds the Booking Request linked to the lead', () => {
+    expect(buildBookingFields('recLEAD000000000A', { ...lead, notes: ' Keen, send invite ', bookedFor: '2026-10-30', timeBookedFor: '2:30pm AEDT ' })).toEqual({
+      fldEjCo8lP3rMUFuS: 'Cold Call Campaign',
+      fldYr7l4NPtmGqdNC: ['recLEAD000000000A'],
+      fldYYNXMGejZvsNPT: '2026-10-30',
+      fld6ciVrRFrX6qWe1: '2:30pm AEDT',
+      fldRf1JAmOuhWC6W6: 'Keen, send invite',
+    });
+    // No notes: the field is left out rather than sent blank. Primary Contact fields are never set.
+    expect(buildBookingFields('recLEAD000000000A', { ...lead, notes: '', bookedFor: '2026-10-30', timeBookedFor: '9am AEDT' })).not.toHaveProperty('fldRf1JAmOuhWC6W6');
   });
 
   it('validates hand-added bookings like the Airtable form', () => {

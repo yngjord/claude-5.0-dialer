@@ -5,6 +5,7 @@ import type { NewBookingRequest, NewBookingResponse } from '../../shared/types';
 import { requireDialerUser } from './_lib/auth';
 import { assignedClients, isAssigned } from './_lib/clients';
 import { createRecord, getRecord } from './_lib/airtable';
+import { createLeadBooking } from './_lib/booking';
 import { handler, HttpError, json, readJson } from './_lib/http';
 
 /**
@@ -33,6 +34,8 @@ export default handler(async (req) => {
       attributedTo: me.email,
     }),
   );
+  // Then its Booking Request (date, time, notes), linked to the lead; this triggers Airtable's booking automation.
+  await createLeadBooking(leadId, body.lead, true);
   return json({ leadId } satisfies NewBookingResponse);
 });
 

@@ -58,9 +58,10 @@ export async function listAll<F>(
   return records;
 }
 
-/** Reads one record by id. */
-export async function getRecord<F>(table: string, id: string): Promise<AirtableRecord<F>> {
-  return request<AirtableRecord<F>>(`${encodeURIComponent(table)}/${encodeURIComponent(id)}`);
+/** Reads one record by id (fields keyed by id instead of name with `byFieldId`). */
+export async function getRecord<F>(table: string, id: string, opts: { byFieldId?: boolean } = {}): Promise<AirtableRecord<F>> {
+  const query = opts.byFieldId ? '?returnFieldsByFieldId=true' : '';
+  return request<AirtableRecord<F>>(`${encodeURIComponent(table)}/${encodeURIComponent(id)}${query}`);
 }
 
 /** Creates one record and returns its id. */
