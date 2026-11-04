@@ -33,7 +33,7 @@ export default handler(async (req) => {
       `OR(${STAGES.map((s) => `{Stage} = '${s}'`).join(', ')})`,
       ')',
     ].join(' '),
-    fields: [F.fullName, F.email, F.phone, F.linkedin, F.client, F.stage, F.bookings, F.recordCreated, F.notes],
+    fields: [F.fullName, F.email, F.phone, F.linkedin, F.client, F.stage, F.dateBookedFor, F.timeBookedFor, F.bookings, F.recordCreated, F.notes],
     byFieldId: true,
   });
 
@@ -46,7 +46,7 @@ export default handler(async (req) => {
     : [];
   const byId = new Map(clients.map((c) => [c.id, c.fields]));
 
-  // The meeting's date and time come from the lead's Booking Requests (the latest one if it has several).
+  // The meeting's date and time: the lead's latest Booking Request (a reschedule adds one), else the lead's own fields.
   const bookingIds = [...new Set(leads.flatMap((l) => l.fields[F.bookings] ?? []))];
   const bookings = await listChunked(bookingIds, (ids) =>
     listAll<Record<string, string>>(BOOKING_TABLE, {
@@ -79,8 +79,8 @@ export default handler(async (req) => {
         clientName: client?.['Client Company']?.trim() || null,
         clientLogo: logo?.thumbnails?.large?.url ?? logo?.url ?? null,
         stage: l.fields[F.stage] ?? null,
-        bookedFor: booking?.fields[B.date] ?? null,
-        timeBookedFor: booking?.fields[B.time]?.trim() || null,
+        bookedFor: booking?.fields[B.date] ?? l.fields[F.dateBookedFor] ?? null,
+        timeBookedFor: booking?.fields[B.time]?.trim() || l.fields[F.timeBookedFor]?.trim() || null,
         opened: l.fields[F.recordCreated] ?? l.createdTime,
         notes: text(l.fields[F.notes]),
       };

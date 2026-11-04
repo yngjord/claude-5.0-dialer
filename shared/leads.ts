@@ -6,7 +6,7 @@ export interface LeadInput {
   email: string;
   phone: string;
   notes: string;
-  /** YYYY-MM-DD. Appointment Set only (required); goes on the Booking Request, not the lead. */
+  /** YYYY-MM-DD. Appointment Set only (required); goes on the lead and its Booking Request. */
   bookedFor?: string | null;
   /** Free text, e.g. "2:30pm AEDT". Appointment Set only (required). */
   timeBookedFor?: string | null;
@@ -29,6 +29,8 @@ export const LEAD_FIELDS = {
   recordStatus: 'fld87WbJl40UGTLiX', // Record Status
   stage: 'fldCNcQQLsHuo6pAy', // Stage
   nextFollowUp: 'fldOhKAOIgQDdaRy0', // Next Follow-up
+  dateBookedFor: 'fld94vlZrBFMg8z2W', // Date Booked For (kept alongside the Booking Request)
+  timeBookedFor: 'fldkqUeG60gLfosxD', // Time Booked for (plain text) (kept alongside the Booking Request)
   dateBookingMade: 'fldcea5C6NrjJPdHM', // Date Booking Made
   callRecordingLink: 'fldd8s4r5ZYx31Tdz', // Call Recording Link
   attributedTo: 'fldKG3QEhKosSdvxc', // Attributed to - new dialer: the email of the rep who created the lead
@@ -113,8 +115,10 @@ export function buildLeadFields(
   };
 
   if (disposition === APPOINTMENT_SET) {
-    // The date and time go on the Booking Request (buildBookingFields), created right after the lead.
+    // Also on the Booking Request (buildBookingFields), created right after the lead.
     fields[F.stage] = 'Booking';
+    fields[F.dateBookedFor] = lead.bookedFor ?? '';
+    fields[F.timeBookedFor] = lead.timeBookedFor?.trim() ?? '';
     fields[F.dateBookingMade] = ctx.todaySydney;
   } else {
     // Needs Follow-Up leads are always due for follow-up from today.

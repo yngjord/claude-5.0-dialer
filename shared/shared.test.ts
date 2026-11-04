@@ -84,10 +84,7 @@ describe('leads', () => {
 
   it('builds a Booking lead for Appointment Set', () => {
     const fields = buildLeadFields('Interested - Appointment Set', { ...lead, bookedFor: '2026-10-30', timeBookedFor: '2:30pm AEDT' }, ctx);
-    expect(fields).toMatchObject({ [F.stage]: 'Booking', [F.dateBookingMade]: '2026-10-22', [F.notes]: lead.notes });
-    // The date and time go on the Booking Request, not the lead (those two Leads fields are being removed).
-    expect(fields).not.toHaveProperty('fld94vlZrBFMg8z2W');
-    expect(fields).not.toHaveProperty('fldkqUeG60gLfosxD');
+    expect(fields).toMatchObject({ [F.stage]: 'Booking', [F.dateBookedFor]: '2026-10-30', [F.timeBookedFor]: '2:30pm AEDT', [F.dateBookingMade]: '2026-10-22', [F.notes]: lead.notes });
     expect(fields).not.toHaveProperty(F.nextFollowUp);
     expect(fields).not.toHaveProperty(F.website);
   });
