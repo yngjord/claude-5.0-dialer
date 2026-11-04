@@ -1,5 +1,5 @@
 import type { Config } from '@netlify/functions';
-import { ATTRIBUTED_TO_FIELD_NAME, BOOKING_FIELDS as B, BOOKING_TABLE, LEAD_FIELDS as F } from '../../shared/leads';
+import { ATTRIBUTED_TO_FIELD_NAME, LEAD_FIELDS as F } from '../../shared/leads';
 import { decodeEntities } from '../../shared/text';
 import type { MyLead } from '../../shared/types';
 import { listAll } from './_lib/airtable';
@@ -33,7 +33,7 @@ export default handler(async (req) => {
       `OR(${STAGES.map((s) => `{Stage} = '${s}'`).join(', ')})`,
       ')',
     ].join(' '),
-    fields: [F.fullName, F.email, F.phone, F.linkedin, F.client, F.stage, F.dateBookedFor, F.timeBookedFor, F.bookings, F.recordCreated, F.notes],
+    fields: [F.fullName, F.email, F.phone, F.linkedin, F.client, F.stage, F.dateBookedFor, F.timeBookedFor, F.recordCreated, F.notes],
     byFieldId: true,
   });
 
@@ -46,28 +46,11 @@ export default handler(async (req) => {
     : [];
   const byId = new Map(clients.map((c) => [c.id, c.fields]));
 
-  // The meeting's date and time: the lead's latest Booking Request (a reschedule adds one), else the lead's own fields.
-  const bookingIds = [...new Set(leads.flatMap((l) => l.fields[F.bookings] ?? []))];
-  const bookings = await listChunked(bookingIds, (ids) =>
-    listAll<Record<string, string>>(BOOKING_TABLE, {
-      filterByFormula: `OR(${ids.map((id) => `RECORD_ID() = '${id}'`).join(', ')})`,
-      fields: [B.date, B.time],
-      byFieldId: true,
-    }),
-  );
-  const bookingById = new Map(bookings.map((b) => [b.id, b]));
-  const latestBooking = (ids: string[] | undefined) =>
-    (ids ?? [])
-      .map((id) => bookingById.get(id))
-      .filter((b) => !!b)
-      .sort((a, b) => b.createdTime.localeCompare(a.createdTime))[0];
-
   const rows: MyLead[] = leads
     .map((l) => {
       const clientId = l.fields[F.client]?.[0] ?? null;
       const client = clientId ? byId.get(clientId) : undefined;
       const logo = client?.['Client Logo Image']?.[0];
-      const booking = latestBooking(l.fields[F.bookings]);
       const text = (v: string | undefined) => (v?.trim() ? decodeEntities(v.trim()) : null);
       return {
         id: l.id,
@@ -79,8 +62,8 @@ export default handler(async (req) => {
         clientName: client?.['Client Company']?.trim() || null,
         clientLogo: logo?.thumbnails?.large?.url ?? logo?.url ?? null,
         stage: l.fields[F.stage] ?? null,
-        bookedFor: booking?.fields[B.date] ?? l.fields[F.dateBookedFor] ?? null,
-        timeBookedFor: booking?.fields[B.time]?.trim() || l.fields[F.timeBookedFor]?.trim() || null,
+        bookedFor: l.fields[F.dateBookedFor] ?? null,
+        timeBookedFor: l.fields[F.timeBookedFor]?.trim() || null,
         opened: l.fields[F.recordCreated] ?? l.createdTime,
         notes: text(l.fields[F.notes]),
       };
@@ -88,12 +71,5 @@ export default handler(async (req) => {
     .sort((a, b) => b.opened.localeCompare(a.opened));
   return json(rows);
 });
-
-/** Runs `fetch` over the ids 50 at a time (keeps Airtable's formula and URL short). */
-async function listChunked<T>(ids: string[], fetch: (ids: string[]) => Promise<T[]>): Promise<T[]> {
-  const out: T[] = [];
-  for (let i = 0; i < ids.length; i += 50) out.push(...(await fetch(ids.slice(i, i + 50))));
-  return out;
-}
 
 export const config: Config = { path: '/api/my-leads', method: 'GET' };
