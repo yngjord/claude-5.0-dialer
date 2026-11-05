@@ -1,3 +1,4 @@
+import type { InviteInput } from './calendar';
 import type { ContactStatus, Disposition, PickupStatus } from './constants';
 import type { LeadInput } from './leads';
 
@@ -192,13 +193,17 @@ export interface WrapUpRequest {
   /** Callback only: when to call back (ISO timestamp). */
   callbackAt?: string | null;
   lead?: LeadInput;
+  /** Appointment Set for a client with invites switched on: the Google Calendar invite to send. */
+  invite?: InviteInput;
 }
 
 export interface WrapUpResponse {
   ok: true;
   leadId: string | null;
-  /** Set when the call was saved but the Airtable Lead couldn't be created. Retry by submitting again. */
+  /** Set when the call was saved but the lead, booking request or invite couldn't be created. Retry by submitting again. */
   leadError: string | null;
+  /** The invite went out (or had already gone out on an earlier try). */
+  inviteSent?: boolean;
 }
 
 export interface AirtableClient {

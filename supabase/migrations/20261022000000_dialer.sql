@@ -1046,3 +1046,44 @@ grant execute on function public.dialer_start_oneoff_call(uuid, uuid, text, text
 -- login, like lead recordings; null = not shared.
 alter table public.dialer_calls add column if not exists recording_shared_at timestamptz;
 
+
+-- ── Google Calendar (per client: the host's calendar, for meeting invites) ─────────────────────────────────────
+-- One row per Airtable client. The host (e.g. the founder) connects their own Google Calendar from a link an admin
+-- sends them (OAuth, scopes calendar.freebusy + calendar.events.owned). Settings are readable by reps of that
+-- client's campaigns; connection fields are written by the server only.
+create table if not exists public.dialer_client_calendars (
+  airtable_client_id text primary key,
+  client_name text not null default '',
+  invites_enabled boolean not null default false,
+  meeting_minutes integer not null default 30 check (meeting_minutes between 5 and 240),
+  title_template text not null default '{{client}} × {{company}}',
+  description_template text not null default '',
+  google_email text,
+  status text not null default 'not_connected' check (status in ('not_connected', 'connected', 'disconnected')),
+  connected_at timestamptz,
+  last_error text,
+  updated_at timestamptz not null default now()
+);
+drop trigger if exists dialer_client_calendars_updated_at on public.dialer_client_calendars;
+create trigger dialer_client_calendars_updated_at before update on public.dialer_client_calendars for each row execute function public.dialer_set_updated_at();
+
+alter table public.dialer_client_calendars enable row level security;
+drop policy if exists "Reps read their clients' calendar settings" on public.dialer_client_calendars;
+create policy "Reps read their clients' calendar settings" on public.dialer_client_calendars for select to authenticated using (
+  is_dialer_admin() or exists (
+    select 1 from dialer_campaigns c where c.airtable_client_id = dialer_client_calendars.airtable_client_id and dialer_can_access_campaign(c.id)
+  )
+);
+drop policy if exists "Admins edit calendar settings" on public.dialer_client_calendars;
+create policy "Admins edit calendar settings" on public.dialer_client_calendars for update to authenticated using (is_dialer_admin()) with check (is_dialer_admin());
+drop policy if exists "Admins add calendar settings" on public.dialer_client_calendars;
+create policy "Admins add calendar settings" on public.dialer_client_calendars for insert to authenticated with check (is_dialer_admin());
+
+-- The host's Google refresh token, encrypted (AES-256-GCM, key in Netlify). No policies: server (service role) only.
+create table if not exists public.dialer_calendar_tokens (
+  airtable_client_id text primary key references public.dialer_client_calendars(airtable_client_id) on delete cascade,
+  refresh_token_enc text not null,
+  scopes text not null default '',
+  updated_at timestamptz not null default now()
+);
+alter table public.dialer_calendar_tokens enable row level security;

@@ -1,5 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { APPOINTMENT_SET, CALLBACK, CONNECTED_PICKUP_STATUS, isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
+import { sendsInvites, validateInvite, type ClientCalendar } from '../../shared/calendar';
 import { buildLeadFields, recordingLink, todayInSydney, validateLead } from '../../shared/leads';
 import { contactOutcome } from '../../shared/outcomes';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
@@ -8,6 +9,7 @@ import { requireSignedIn } from './_lib/auth';
 import { addToBlocklist } from './_lib/blocklist';
 import { createLeadBooking } from './_lib/booking';
 import { db, must } from './_lib/db';
+import { calendarAccessToken, createInvite, inviteEventId } from './_lib/google';
 import { syncLeadTranscript } from './_lib/leadTranscript';
 import { handler, HttpError, json, readJson } from './_lib/http';
 
@@ -23,7 +25,8 @@ const REFUSALS: Record<string, [number, string]> = {
  * until the callback time). For the two "Interested" dispositions it
  * then creates the lead in the CRM (Airtable), with a permanent link to the call recording (/r/{callId}.mp3), so
  * only those saves wait on Airtable. Appointment Set then also creates a Booking Request linked to that lead (date,
- * time and notes), which is what triggers the booking automation in Airtable.
+ * time and notes), which is what triggers the booking automation in Airtable. If the client has Google Calendar
+ * invites switched on, it then sends the invite from the host's calendar (one per call, so retries don't repeat it).
  *
  * Safe to submit again (the dialer's "Edit last call" does): the contact's attempt count only goes up once, and a
  * lead is only created once. If Airtable fails, the call is still saved and `leadError` is returned so the rep can
@@ -56,6 +59,11 @@ export default handler(async (req, context) => {
   if (needsLead) {
     if (!body.lead) throw new HttpError(400, 'Fill in the lead details.');
     const problems = validateLead(body.disposition, body.lead);
+    if (problems.length) throw new HttpError(400, problems.join(' '));
+  }
+  const sendInvite = needsLead && body.disposition === APPOINTMENT_SET && !!body.invite;
+  if (sendInvite) {
+    const problems = validateInvite(body.invite!);
     if (problems.length) throw new HttpError(400, problems.join(' '));
   }
 
@@ -138,7 +146,34 @@ export default handler(async (req, context) => {
     }
   }
 
-  return json({ ok: true, leadId, leadError } satisfies WrapUpResponse);
+  // 3. The Google Calendar invite, from the client's connected calendar (only if the rep's form sent one).
+  let inviteSent = false;
+  if (sendInvite && leadId && !leadError && saved.airtable_client_id) {
+    try {
+      const settings = must(
+        await db().from('dialer_client_calendars').select('invites_enabled, status').eq('airtable_client_id', saved.airtable_client_id).maybeSingle(),
+      ) as Pick<ClientCalendar, 'invites_enabled' | 'status'> | null;
+      if (!sendsInvites(settings)) throw new HttpError(409, "This client's calendar invites are switched off or not connected.");
+      const inv = body.invite!;
+      await createInvite(await calendarAccessToken(saved.airtable_client_id), {
+        id: inviteEventId(body.callId),
+        summary: inv.title.trim(),
+        description: inv.description.trim(),
+        start: new Date(inv.startsAt),
+        minutes: inv.minutes,
+        timeZone: inv.timeZone,
+        guests: inv.guests,
+      });
+      inviteSent = true;
+      must(await db().from('dialer_calls').update({ lead_sync_error: null }).eq('id', body.callId));
+    } catch (err) {
+      leadError = `The lead and booking request were saved, but the calendar invite wasn't sent. ${err instanceof Error ? err.message : ''}`.trim();
+      console.error('Calendar invite failed for call', body.callId, err);
+      must(await db().from('dialer_calls').update({ lead_sync_error: leadError }).eq('id', body.callId));
+    }
+  }
+
+  return json({ ok: true, leadId, leadError, inviteSent } satisfies WrapUpResponse);
 });
 
 export const config: Config = { path: '/api/wrap-up', method: 'POST' };

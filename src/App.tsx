@@ -9,6 +9,7 @@ import { Button } from './components/ui/Button';
 import Callbacks from './pages/Callbacks';
 import Leads from './pages/Leads';
 import Voicemails from './pages/Voicemails';
+import Calendars from './pages/admin/Calendars';
 import Numbers from './pages/admin/Numbers';
 import Performance from './pages/admin/Performance';
 import CallDetailPage from './pages/CallDetailPage';
@@ -95,6 +96,7 @@ export default function App() {
           <Route path="/admin/campaigns" element={<Navigate to="/campaigns" replace />} />
           {isAdmin && <Route path="/admin/numbers" element={<Numbers />} />}
           {isAdmin && <Route path="/admin/performance" element={<Performance />} />}
+          {isAdmin && <Route path="/admin/calendars" element={<Calendars />} />}
           {isAdmin && <Route path="/call" element={<CallNumber />} />}
         </Route>
         <Route path="/login" element={<AfterLogin />} />

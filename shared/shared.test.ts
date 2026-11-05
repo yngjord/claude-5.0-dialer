@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseGuests, renderTemplate, sendsInvites, validateInvite } from './calendar';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
 import { buildBookingFields, buildLeadFields, LEAD_FIELDS as F, leadTranscriptText, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
 import { contactOutcome } from './outcomes';
@@ -304,5 +305,34 @@ describe('normalizeCallable', () => {
     expect(normalizeCallable('+64 9 123 4567')).toMatchObject({ ok: true, e164: '+6491234567' });
     expect(normalizeCallable('+1 978 481 4042').ok).toBe(false);
     expect(normalizeCallable('12').ok).toBe(false);
+  });
+});
+
+describe('calendar invites', () => {
+  it('fills invite templates and tidies empty parts', () => {
+    expect(renderTemplate('{{client}} × {{company}}', { client: 'Morfless', company: 'Spotto' })).toBe('Morfless × Spotto');
+    expect(renderTemplate('{{client}} × {{company}}', { client: 'Morfless', company: null })).toBe('Morfless');
+    expect(renderTemplate('Hi {{first_name}}, {{unknown}}chat', { prospect: 'Steve Mann' })).toBe('Hi Steve, chat');
+  });
+
+  it('only sends when switched on and connected', () => {
+    expect(sendsInvites({ invites_enabled: true, status: 'connected' })).toBe(true);
+    expect(sendsInvites({ invites_enabled: true, status: 'disconnected' })).toBe(false);
+    expect(sendsInvites({ invites_enabled: false, status: 'connected' })).toBe(false);
+    expect(sendsInvites(null)).toBe(false);
+  });
+
+  it('validates invites', () => {
+    const now = Date.parse('2026-11-05T00:00:00Z');
+    const ok = { title: 'Morfless × Spotto', description: '', startsAt: '2026-11-10T03:30:00Z', minutes: 30, timeZone: 'Australia/Sydney', guests: ['steve@spotto.io'] };
+    expect(validateInvite(ok, now)).toEqual([]);
+    expect(parseGuests(' a@x.com, b@y.com;a@x.com  ')).toEqual(['a@x.com', 'b@y.com']);
+    expect(validateInvite({ ...ok, guests: [], minutes: 3, startsAt: '2026-11-01T00:00:00Z', title: ' ' }, now)).toEqual([
+      'Invite title is required.',
+      'Prospect email is required to send the invite.',
+      'The meeting time is in the past.',
+      'Meeting length must be 5 to 240 minutes.',
+    ]);
+    expect(validateInvite({ ...ok, guests: ['steve@spotto.io', 'nope'] }, now)).toEqual(['Check these email addresses: nope.']);
   });
 });

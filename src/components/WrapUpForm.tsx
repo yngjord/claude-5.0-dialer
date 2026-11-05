@@ -1,10 +1,12 @@
-import { AlertTriangle, CalendarClock, CheckCircle2, Phone } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CalendarPlus, CheckCircle2, Phone } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { APPOINTMENT_SET, CALLBACK, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, type Disposition, type PickupStatus } from '../../shared/constants';
+import { parseGuests, renderTemplate, sendsInvites, validateInvite, type ClientCalendar, type InviteInput } from '../../shared/calendar';
 import { validateLead } from '../../shared/leads';
 import { zonedTimeToUtc } from '../../shared/time';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { api } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { timeBookedText, ZONES } from '../lib/bookingTime';
 import type { ActiveCall } from '../voice/VoiceProvider';
 import { Button } from './ui/Button';
@@ -105,6 +107,44 @@ export function WrapUpForm({
   // Click-to-call calls have no campaign: they don't make CRM leads or book callbacks.
   const oneOff = call.mode === 'oneoff';
   const needsLead = !!disposition && LEAD_DISPOSITIONS.includes(disposition) && !leadExists && !oneOff;
+  // Google Calendar invite: only for clients whose host connected their calendar and has invites switched on.
+  const clientId = call.contact.airtable_client_id;
+  const [calendar, setCalendar] = useState<ClientCalendar | null>(null);
+  useEffect(() => {
+    if (!clientId || oneOff) return;
+    let live = true;
+    supabase
+      .from('dialer_client_calendars')
+      .select('*')
+      .eq('airtable_client_id', clientId)
+      .maybeSingle()
+      .then(({ data }) => live && setCalendar((data as ClientCalendar | null) ?? null));
+    return () => {
+      live = false;
+    };
+  }, [clientId, oneOff]);
+  const invites = needsLead && disposition === APPOINTMENT_SET && sendsInvites(calendar);
+  const vars = { client: call.contact.client_name ?? call.campaign.client_name, company: call.contact.company, prospect: fullName, firstName: call.contact.first_name };
+  const [inviteTitle, setInviteTitle] = useState<string | null>(null);
+  const [inviteDesc, setInviteDesc] = useState<string | null>(null);
+  const [inviteMinutes, setInviteMinutes] = useState<number | null>(null);
+  const [extraGuests, setExtraGuests] = useState('');
+  // Until the rep edits them, the title and description follow the client's templates (and the prospect's name).
+  const title = inviteTitle ?? (calendar ? renderTemplate(calendar.title_template, vars) : '');
+  const description = inviteDesc ?? (calendar ? renderTemplate(calendar.description_template, vars) : '');
+  const minutes = inviteMinutes ?? calendar?.meeting_minutes ?? 30;
+  const invite: InviteInput | null =
+    invites && bookedFor && time
+      ? {
+          title,
+          description,
+          startsAt: zonedTimeToUtc(bookedFor, time, tz).toISOString(),
+          minutes,
+          timeZone: tz,
+          guests: parseGuests([email, extraGuests].join(',')),
+        }
+      : null;
+
   const lead = useMemo(
     () => ({
       fullName,
@@ -127,6 +167,11 @@ export function WrapUpForm({
       const problems = validateLead(disposition, lead);
       if (problems.length) return setError(problems.join(' '));
     }
+    if (invites) {
+      if (!email.trim()) return setError('Prospect email is required to send the calendar invite.');
+      const problems = invite ? validateInvite(invite) : ['Choose when the meeting is.'];
+      if (problems.length) return setError(problems.join(' '));
+    }
     if (disposition === CALLBACK && !callbackAt) return setError('Choose when to call back.');
     if (callbackAt && callbackAt.getTime() < Date.now()) return setError('The callback time is in the past.');
     setSubmitting(true);
@@ -138,6 +183,7 @@ export function WrapUpForm({
         disposition,
         notes,
         ...(needsLead ? { lead } : {}),
+        ...(invites && invite ? { invite } : {}),
         ...(callbackAt ? { callbackAt: callbackAt.toISOString() } : {}),
       };
       const res = await api<WrapUpResponse>('wrap-up', { method: 'POST', body: JSON.stringify(body) });
@@ -226,7 +272,7 @@ export function WrapUpForm({
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field id="lead-name" label="Prospect full name" value={fullName} onChange={setFullName} required />
-            <Field id="lead-email" label="Email address" type="email" value={email} onChange={setEmail} />
+            <Field id="lead-email" label="Email address" type="email" value={email} onChange={setEmail} required={invites} />
             <Field id="lead-phone" label="Phone number" type="tel" value={phone} onChange={setPhone} />
             {disposition === APPOINTMENT_SET && (
               <>
@@ -250,6 +296,39 @@ export function WrapUpForm({
               </>
             )}
           </div>
+          {invites && calendar && (
+            <div className="space-y-4 rounded-2xl border border-brand/20 bg-white p-4">
+              <p className="flex items-center gap-2 text-sm font-medium text-brand">
+                <CalendarPlus size={16} /> Sends a Google Calendar invite from {calendar.google_email ?? 'the client’s calendar'}, with a Meet link
+              </p>
+              <p className="-mt-2 text-xs text-ink-muted">The prospect’s email above is invited. Notes below aren’t sent; only the title and description are.</p>
+              <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
+                <Field id="invite-title" label="Invite title" value={title} onChange={setInviteTitle} required />
+                <div>
+                  <label htmlFor="invite-minutes" className="mb-2 block text-sm font-medium text-ink-soft">
+                    Length (min)
+                  </label>
+                  <input
+                    id="invite-minutes"
+                    type="number"
+                    min={5}
+                    max={240}
+                    step={5}
+                    className="field"
+                    value={minutes}
+                    onChange={(e) => setInviteMinutes(Number(e.target.value))}
+                  />
+                </div>
+              </div>
+              <Field id="invite-guests" label="Extra guests (optional)" value={extraGuests} onChange={setExtraGuests} placeholder="name@company.com, another@company.com" />
+              <div>
+                <label htmlFor="invite-description" className="mb-2 block text-sm font-medium text-ink-soft">
+                  Invite description (optional)
+                </label>
+                <textarea id="invite-description" rows={3} className="field resize-y" value={description} onChange={(e) => setInviteDesc(e.target.value)} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -361,13 +440,29 @@ export function WrapUpForm({
   );
 }
 
-function Field({ id, label, value, onChange, type = 'text', required }: { id: string; label: string; value: string; onChange: (v: string) => void; type?: string; required?: boolean }) {
+function Field({
+  id,
+  label,
+  value,
+  onChange,
+  type = 'text',
+  required,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  required?: boolean;
+  placeholder?: string;
+}) {
   return (
     <div>
       <label htmlFor={id} className="mb-2 block text-sm font-medium text-ink-soft">
         {label} {required && <span className="text-red-600">*</span>}
       </label>
-      <input id={id} type={type} className="field" value={value} onChange={(e) => onChange(e.target.value)} />
+      <input id={id} type={type} className="field" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
 }
