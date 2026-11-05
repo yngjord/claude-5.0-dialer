@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, Copy, Link2Off, Send } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Copy, Link2Off, RefreshCw, Send } from 'lucide-react';
 import { useState } from 'react';
 import { invitesBroken, type ClientCalendar } from '../../../shared/calendar';
 import type { AirtableClient } from '../../../shared/types';
@@ -90,6 +90,19 @@ function ClientCard({ row, onChanged }: { row: Row; onChanged: () => void }) {
       return `Connect link copied (valid until ${new Date(res.expiresAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}). Send it to the person whose calendar the invites should come from. ${res.url}`;
     });
 
+  const check = () =>
+    run('check', async () => {
+      const res = await api<{ status: string; googleEmail: string | null }>('admin/calendar/check', {
+        method: 'POST',
+        body: JSON.stringify({ airtableClientId: client.id }),
+      });
+      return res.status === 'connected'
+        ? `Connected${res.googleEmail ? ` as ${res.googleEmail}` : ''}: Google access is working.`
+        : res.status === 'disconnected'
+          ? 'Not connected: Google access was removed. Send a new connect link.'
+          : 'Not connected yet.';
+    });
+
   const disconnect = () =>
     run('disconnect', async () => {
       if (!window.confirm(`Disconnect ${client.name}'s calendar? Invites stop until they connect again.`)) return;
@@ -143,6 +156,9 @@ function ClientCard({ row, onChanged }: { row: Row; onChanged: () => void }) {
           </div>
         </button>
         <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" onClick={check} disabled={!!busy} title="Check connection" aria-label="Check connection" className="!px-3">
+            <RefreshCw size={16} className={busy === 'check' ? 'animate-spin' : ''} />
+          </Button>
           <Button variant="outline" onClick={copyLink} disabled={!!busy}>
             {busy === 'link' ? <Spinner /> : <Copy size={16} />} {status === 'connected' ? 'Copy reconnect link' : 'Copy connect link'}
           </Button>
