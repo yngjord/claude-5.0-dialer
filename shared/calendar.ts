@@ -28,6 +28,9 @@ export interface InviteInput {
 /** Whether a client's settings mean Appointment Set sends an invite. */
 export const sendsInvites = (c: Pick<ClientCalendar, 'invites_enabled' | 'status'> | null | undefined) => !!c && c.invites_enabled && c.status === 'connected';
 
+/** Invites are switched on but the calendar isn't connected (e.g. the host removed access): invites won't send. */
+export const invitesBroken = (c: Pick<ClientCalendar, 'invites_enabled' | 'status'> | null | undefined) => !!c && c.invites_enabled && c.status !== 'connected';
+
 /** Fills {{client}}, {{company}}, {{prospect}} and {{first_name}}; unknown or empty variables become blank. */
 export function renderTemplate(template: string, vars: { client?: string | null; company?: string | null; prospect?: string | null; firstName?: string | null }): string {
   const values: Record<string, string> = {

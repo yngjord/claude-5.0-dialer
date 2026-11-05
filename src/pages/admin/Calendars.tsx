@@ -1,6 +1,6 @@
-import { Copy, Link2Off, Send } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Copy, Link2Off, Send } from 'lucide-react';
 import { useState } from 'react';
-import type { ClientCalendar } from '../../../shared/calendar';
+import { invitesBroken, type ClientCalendar } from '../../../shared/calendar';
 import type { AirtableClient } from '../../../shared/types';
 import { useAuth } from '../../auth/AuthProvider';
 import { Badge } from '../../components/ui/Badge';
@@ -53,7 +53,7 @@ function ClientCard({ row, onChanged }: { row: Row; onChanged: () => void }) {
   const { me } = useAuth();
   const { client, cal } = row;
   const status = cal?.status ?? 'not_connected';
-  const [open, setOpen] = useState(status === 'connected');
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +117,9 @@ function ClientCard({ row, onChanged }: { row: Row; onChanged: () => void }) {
   return (
     <section className="card animate-appear p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
+        <button type="button" className="flex min-w-0 flex-1 items-start gap-3 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <ChevronDown size={20} className={`mt-1.5 shrink-0 text-ink-muted transition-transform ${open ? '' : '-rotate-90'}`} />
+          <div className="min-w-0">
           <h2 className="font-display text-xl">{client.name}</h2>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
             {status === 'connected' ? (
@@ -132,8 +134,14 @@ function ClientCard({ row, onChanged }: { row: Row; onChanged: () => void }) {
             ) : (
               <Badge tone="grey">Not connected</Badge>
             )}
+            {invitesBroken(cal) && (
+              <span className="inline-flex items-center gap-1 text-amber-800">
+                <AlertTriangle size={14} /> Invites are on but won’t send
+              </span>
+            )}
           </p>
-        </div>
+          </div>
+        </button>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={copyLink} disabled={!!busy}>
             {busy === 'link' ? <Spinner /> : <Copy size={16} />} {status === 'connected' ? 'Copy reconnect link' : 'Copy connect link'}
@@ -143,9 +151,6 @@ function ClientCard({ row, onChanged }: { row: Row; onChanged: () => void }) {
               {busy === 'disconnect' ? <Spinner /> : <Link2Off size={16} />} Disconnect
             </Button>
           )}
-          <Button variant="ghost" onClick={() => setOpen((o) => !o)}>
-            {open ? 'Hide settings' : 'Settings'}
-          </Button>
         </div>
       </div>
 

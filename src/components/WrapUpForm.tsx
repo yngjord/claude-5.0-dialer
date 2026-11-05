@@ -1,12 +1,12 @@
 import { AlertTriangle, CalendarClock, CalendarPlus, CheckCircle2, Phone } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { APPOINTMENT_SET, CALLBACK, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, type Disposition, type PickupStatus } from '../../shared/constants';
-import { parseGuests, renderTemplate, sendsInvites, validateInvite, type ClientCalendar, type InviteInput } from '../../shared/calendar';
+import { invitesBroken, parseGuests, renderTemplate, sendsInvites, validateInvite, type InviteInput } from '../../shared/calendar';
 import { validateLead } from '../../shared/leads';
 import { zonedTimeToUtc } from '../../shared/time';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { api } from '../lib/api';
-import { supabase } from '../lib/supabase';
+import { useClientCalendar } from '../lib/useClientCalendar';
 import { timeBookedText, ZONES } from '../lib/bookingTime';
 import type { ActiveCall } from '../voice/VoiceProvider';
 import { Button } from './ui/Button';
@@ -108,21 +108,7 @@ export function WrapUpForm({
   const oneOff = call.mode === 'oneoff';
   const needsLead = !!disposition && LEAD_DISPOSITIONS.includes(disposition) && !leadExists && !oneOff;
   // Google Calendar invite: only for clients whose host connected their calendar and has invites switched on.
-  const clientId = call.contact.airtable_client_id;
-  const [calendar, setCalendar] = useState<ClientCalendar | null>(null);
-  useEffect(() => {
-    if (!clientId || oneOff) return;
-    let live = true;
-    supabase
-      .from('dialer_client_calendars')
-      .select('*')
-      .eq('airtable_client_id', clientId)
-      .maybeSingle()
-      .then(({ data }) => live && setCalendar((data as ClientCalendar | null) ?? null));
-    return () => {
-      live = false;
-    };
-  }, [clientId, oneOff]);
+  const calendar = useClientCalendar(oneOff ? null : call.contact.airtable_client_id);
   const invites = needsLead && disposition === APPOINTMENT_SET && sendsInvites(calendar);
   const vars = { client: call.contact.client_name ?? call.campaign.client_name, company: call.contact.company, prospect: fullName, firstName: call.contact.first_name };
   const [inviteTitle, setInviteTitle] = useState<string | null>(null);
@@ -296,6 +282,12 @@ export function WrapUpForm({
               </>
             )}
           </div>
+          {needsLead && disposition === APPOINTMENT_SET && invitesBroken(calendar) && (
+            <p role="alert" className="flex items-start gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" /> The client’s Google Calendar is disconnected, so no invite will be sent. The lead and booking request are
+              still saved: let an admin know so the invite can be sent by hand.
+            </p>
+          )}
           {invites && calendar && (
             <div className="space-y-4 rounded-2xl border border-brand/20 bg-white p-4">
               <p className="flex items-center gap-2 text-sm font-medium text-brand">

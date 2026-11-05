@@ -1,4 +1,4 @@
-import { CheckCircle2, FileText, LogOut, Pause, Pencil, Phone, PhoneOutgoing, SkipForward, Square } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, LogOut, Pause, Pencil, Phone, PhoneOutgoing, SkipForward, Square } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { APPOINTMENT_SET, CONNECTED_PICKUP_STATUS, NEEDS_FOLLOW_UP } from '../../shared/constants';
@@ -20,6 +20,8 @@ import { must, useLoad } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { CAMPAIGN_STATUS } from '../lib/tones';
 import { useVoice } from '../voice/VoiceProvider';
+import { invitesBroken } from '../../shared/calendar';
+import { useClientCalendar } from '../lib/useClientCalendar';
 
 type Stage = 'idle' | 'claiming' | 'ready' | 'calling' | 'empty' | 'paused';
 
@@ -60,6 +62,8 @@ export default function Dialer() {
   const { active, dial, clear, start, deviceState, deviceError } = useVoice();
   const campaignQuery = useLoad(async () => must(await supabase.from('dialer_campaigns').select('*').eq('id', id).maybeSingle()) as Campaign | null, [id]);
   const campaign = campaignQuery.data;
+  // Invites switched on but the client's calendar disconnected: warn before the rep books anything.
+  const calendar = useClientCalendar(campaign?.airtable_client_id);
   const progress = useLoad(
     async () => must(await supabase.from('dialer_campaign_stats').select('contacts_total, contacts_remaining').eq('campaign_id', id).maybeSingle()) as Pick<CampaignStats, 'contacts_total' | 'contacts_remaining'> | null,
     [id],
@@ -333,6 +337,15 @@ export default function Dialer() {
         </>
       }
     >
+      {invitesBroken(calendar) && (
+        <p role="alert" className="mx-auto mb-4 flex max-w-3xl items-start gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>
+            <b className="font-medium">{campaign?.client_name}’s Google Calendar is disconnected</b>, so meeting invites won’t be sent automatically. Check with an admin
+            before booking meetings.
+          </span>
+        </p>
+      )}
       {/* With the script showing, the contact column keeps its width and the script sits to its right. */}
       <div className={showScript && shown && campaign ? 'mx-auto grid max-w-[1320px] items-start gap-6 lg:grid-cols-[minmax(0,48rem)_minmax(0,1fr)]' : ''}>
         <div className="mx-auto w-full max-w-3xl">
