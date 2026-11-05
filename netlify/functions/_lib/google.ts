@@ -174,6 +174,8 @@ export interface InviteEvent {
   minutes: number;
   timeZone: string;
   guests: string[];
+  /** The host (the connected account), listed first and already accepted, as Google does for events made by hand. */
+  hostEmail?: string | null;
 }
 
 /** The event id for a call's invite ("md" + the call id's hex digits, which Google accepts). */
@@ -194,7 +196,10 @@ export async function createInvite(accessToken: string, e: InviteEvent): Promise
       description: e.description || undefined,
       start: { dateTime: e.start.toISOString(), timeZone: e.timeZone },
       end: { dateTime: end.toISOString(), timeZone: e.timeZone },
-      attendees: e.guests.map((email) => ({ email })),
+      attendees: [
+        ...(e.hostEmail ? [{ email: e.hostEmail, organizer: true, responseStatus: 'accepted' }] : []),
+        ...e.guests.filter((g) => g.toLowerCase() !== e.hostEmail?.toLowerCase()).map((email) => ({ email })),
+      ],
       conferenceData: { createRequest: { requestId: e.id, conferenceSolutionKey: { type: 'hangoutsMeet' } } },
       reminders: { useDefault: true },
     }),

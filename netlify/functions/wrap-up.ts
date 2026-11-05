@@ -151,8 +151,8 @@ export default handler(async (req, context) => {
   if (sendInvite && leadId && !leadError && saved.airtable_client_id) {
     try {
       const settings = must(
-        await db().from('dialer_client_calendars').select('invites_enabled, status').eq('airtable_client_id', saved.airtable_client_id).maybeSingle(),
-      ) as Pick<ClientCalendar, 'invites_enabled' | 'status'> | null;
+        await db().from('dialer_client_calendars').select('invites_enabled, status, google_email').eq('airtable_client_id', saved.airtable_client_id).maybeSingle(),
+      ) as Pick<ClientCalendar, 'invites_enabled' | 'status' | 'google_email'> | null;
       if (!sendsInvites(settings)) throw new HttpError(409, "This client's calendar invites are switched off or not connected.");
       const inv = body.invite!;
       await createInvite(await calendarAccessToken(saved.airtable_client_id), {
@@ -163,6 +163,7 @@ export default handler(async (req, context) => {
         minutes: inv.minutes,
         timeZone: inv.timeZone,
         guests: inv.guests,
+        hostEmail: settings!.google_email,
       });
       inviteSent = true;
       must(await db().from('dialer_calls').update({ lead_sync_error: null }).eq('id', body.callId));

@@ -1,6 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { randomBytes } from 'node:crypto';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
+import { db, must } from './_lib/db';
 import { calendarAccessToken, createInvite } from './_lib/google';
 import { handler, HttpError, json, readJson } from './_lib/http';
 import { zonedTimeToUtc } from '../../shared/time';
@@ -16,6 +17,9 @@ export default handler(async (req) => {
   requireAdmin(me);
   const email = (body.email ?? '').trim();
   if (!EMAIL.test(email)) throw new HttpError(400, 'Enter an email address to invite.');
+  const cal = must(await db().from('dialer_client_calendars').select('google_email').eq('airtable_client_id', body.airtableClientId).maybeSingle()) as {
+    google_email: string | null;
+  } | null;
   const tomorrow = new Date(Date.now() + 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
   const res = await createInvite(await calendarAccessToken(body.airtableClientId), {
     id: `mt${randomBytes(12).toString('hex')}`,
@@ -25,6 +29,7 @@ export default handler(async (req) => {
     minutes: 15,
     timeZone: 'Australia/Sydney',
     guests: [email],
+    hostEmail: cal?.google_email,
   });
   return json({ ok: true, htmlLink: res.htmlLink ?? null });
 });
