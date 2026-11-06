@@ -32,11 +32,15 @@ const readPageSize = () => {
 // Pickups where someone or something answered; the rest never connected.
 const CONNECTED: PickupStatus[] = ['Human Pickup', 'Machine Pickup', 'Unclassified Pickup'];
 
+/** The campaign filter's option for calls imported from JustCall. */
+const JUSTCALL = 'justcall';
+
 export default function Calls() {
   const { isAdmin } = useAuth();
   const [range, setRange] = useState<DateRange>(() => defaultRange('month'));
   const bounds = rangeBounds(range);
-  const [campaignId, setCampaignId] = useState('');
+  // Campaign ids, plus JUSTCALL for every call imported from JustCall (their old campaigns aren't dialer campaigns).
+  const [campaignIds, setCampaignIds] = useState<string[]>([]);
   const [pickup, setPickup] = useState('');
   const [dispositions, setDispositions] = useState<string[]>([]);
   const [clientName, setClientName] = useState('');
@@ -52,7 +56,7 @@ export default function Calls() {
     const t = setTimeout(() => setDebounced(query.trim()), 300);
     return () => clearTimeout(t);
   }, [query]);
-  useEffect(() => setPage(0), [bounds.from, bounds.to, campaignId, clientName, userId, pickup, dispositions, debounced, perPage]);
+  useEffect(() => setPage(0), [bounds.from, bounds.to, campaignIds, clientName, userId, pickup, dispositions, debounced, perPage]);
   const users = useLoad(async () => (isAdmin ? (must(await supabase.rpc('dialer_users')) as DialerUser[]) : []), [isAdmin]);
 
   // Campaigns the user can see (reps: theirs), and their clients for the client filter.
@@ -72,7 +76,10 @@ export default function Calls() {
       .eq('direction', 'outbound');
     if (bounds.from) q = q.gte('started_at', bounds.from);
     if (bounds.to) q = q.lt('started_at', bounds.to);
-    if (campaignId) q = q.eq('campaign_id', campaignId);
+    if (campaignIds.length) {
+      const ids = campaignIds.filter((id) => id !== JUSTCALL);
+      q = q.or([...(ids.length ? [`campaign_id.in.(${ids.join(',')})`] : []), ...(campaignIds.includes(JUSTCALL) ? ['source.eq.justcall'] : [])].join(','));
+    }
     // By the client on the call itself, so JustCall and click-to-call calls (no campaign) are included.
     if (clientName) q = q.eq('client_name', clientName);
     if (userId) q = q.eq('user_id', userId);
@@ -85,7 +92,7 @@ export default function Calls() {
     }
     const res = await q.order('started_at', { ascending: false }).range(page * perPage, page * perPage + perPage - 1);
     return { calls: must(res) as CallRow[], total: res.count ?? 0 };
-  }, [bounds.from, bounds.to, campaignId, clientName, userId, pickup, dispositions, debounced, page, perPage]);
+  }, [bounds.from, bounds.to, campaignIds, clientName, userId, pickup, dispositions, debounced, page, perPage]);
 
   const select = 'field !w-auto !rounded-full !py-2 text-sm';
 
@@ -103,7 +110,7 @@ export default function Calls() {
               value={clientName}
               onChange={(e) => {
                 setClientName(e.target.value);
-                setCampaignId('');
+                setCampaignIds([]);
               }}
             >
               {/* One client (e.g. a rep on one client's campaigns): just that one, which is every call they can see. */}
@@ -120,14 +127,14 @@ export default function Calls() {
                 </>
               )}
             </select>
-            <select aria-label="Campaign" className={select} value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
-              <option value="">All campaigns</option>
-              {campaignOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <MultiSelect
+              label="Campaign"
+              anyLabel="All campaigns"
+              options={[{ value: JUSTCALL, label: 'JustCall (all old campaigns)' }, ...campaignOptions.map((c) => ({ value: c.id, label: c.name }))]}
+              value={campaignIds}
+              onChange={setCampaignIds}
+              className="!w-auto !rounded-full !py-2 text-sm"
+            />
             {isAdmin && (
               <select aria-label="Team member" className={select} value={userId} onChange={(e) => setUserId(e.target.value)}>
                 <option value="">Everyone</option>

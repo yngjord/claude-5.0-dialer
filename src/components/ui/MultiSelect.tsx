@@ -16,7 +16,8 @@ export function MultiSelect({
   label: string;
   /** Shown when nothing is ticked, e.g. "Any disposition". */
   anyLabel: string;
-  options: readonly string[];
+  /** Plain strings, or { value, label } when what's shown differs from what's stored (e.g. campaign ids). */
+  options: readonly (string | { value: string; label: string })[];
   value: string[];
   onChange: (value: string[]) => void;
   className?: string;
@@ -36,8 +37,10 @@ export function MultiSelect({
     };
   }, [open]);
 
+  const opts = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
   const toggle = (o: string) => onChange(value.includes(o) ? value.filter((v) => v !== o) : [...value, o]);
-  const summary = !value.length ? anyLabel : value.length === 1 ? value[0] : `${value.length} ${label.toLowerCase()}s`;
+  const labelOf = (v: string) => opts.find((o) => o.value === v)?.label ?? v;
+  const summary = !value.length ? anyLabel : value.length === 1 ? labelOf(value[0]) : `${value.length} ${label.toLowerCase()}s`;
 
   return (
     <div ref={ref} className="relative">
@@ -53,7 +56,7 @@ export function MultiSelect({
       </button>
       {open && (
         <div role="listbox" aria-multiselectable="true" aria-label={label} className="absolute left-0 top-full z-40 mt-2 max-h-80 w-max min-w-full overflow-y-auto rounded-2xl border border-line bg-white p-1.5 shadow-card">
-          {options.map((o) => {
+          {opts.map(({ value: o, label: text }) => {
             const on = value.includes(o);
             return (
               <button
@@ -67,7 +70,7 @@ export function MultiSelect({
                 <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? 'border-brand bg-brand text-white' : 'border-line-strong'}`}>
                   {on && <Check size={12} strokeWidth={3} />}
                 </span>
-                {o}
+                {text}
               </button>
             );
           })}
