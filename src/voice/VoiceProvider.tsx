@@ -46,6 +46,14 @@ const VoiceContext = createContext<VoiceContextValue | null>(null);
 
 const fetchToken = () => api<{ token: string }>('voice-token').then((r) => r.token);
 
+/** Twilio refuses an expired or invalid access token with these (e.g. 20151 AuthenticationFailed). */
+const TOKEN_ERRORS = new Set([20101, 20103, 20104, 20105, 20151, 31202, 31204, 31205]);
+/** The phone's connection to Twilio dropped (e.g. 31005 after a laptop sleeps or the network changes). */
+const CONNECTION_ERRORS = new Set([31005, 31009, 53000, 53001]);
+/** Tokens last an hour (voice-token.ts); one older than this is replaced before dialling, to be safe. */
+const TOKEN_MAX_AGE_MS = 40 * 60_000;
+const errorCode = (err: unknown) => (typeof err === 'object' && err && 'code' in err ? Number((err as { code: unknown }).code) : NaN);
+
 /** Sends call audio to the chosen speaker (Chrome/Edge; elsewhere the system default is used). */
 function applySpeaker(device: Device) {
   if (!device.audio?.isOutputSelectionSupported) return;
@@ -65,6 +73,23 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const deviceRef = useRef<Device | null>(null);
   const callRef = useRef<Call | null>(null);
   const startingRef = useRef<Promise<void> | null>(null);
+  const tokenAtRef = useRef(0);
+  const startFnRef = useRef<(() => Promise<void>) | null>(null);
+
+  /** Throws away a phone whose connection to Twilio dropped, and starts a fresh one a moment later. */
+  const resetDevice = useCallback((device: Device) => {
+    if (deviceRef.current !== device) return;
+    device.destroy();
+    deviceRef.current = null;
+    setDeviceState('starting');
+    setTimeout(() => startFnRef.current?.().catch(() => undefined), 2000);
+  }, []);
+
+  /** A fresh access token for the phone (the browser timer that normally does this can be missed by a sleeping laptop). */
+  const renewToken = useCallback(async (device: Device) => {
+    device.updateToken(await fetchToken());
+    tokenAtRef.current = Date.now();
+  }, []);
 
   const patch = useCallback((callId: string, p: Partial<ActiveCall>) => {
     setActive((a) => (a && a.callId === callId ? { ...a, ...p } : a));
@@ -86,16 +111,33 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach((t) => t.stop());
 
-        const device = new Device(await fetchToken(), {
+        const token = await fetchToken();
+        tokenAtRef.current = Date.now();
+        const device = new Device(token, {
           edge: ['sydney', 'roaming'],
+          // Renew 5 minutes before expiry rather than 10 seconds, so a briefly throttled background tab still makes it.
+          tokenRefreshMs: 5 * 60_000,
           codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
           closeProtection: 'You are on a call. Leaving will hang up.',
           logLevel: 'error',
         });
         // The chime plays when the rep presses Call instead of when the prospect answers (see dial).
         device.audio?.outgoing(false);
-        device.on('tokenWillExpire', async () => device.updateToken(await fetchToken()));
-        device.on('error', (err: { message?: string }) => setDeviceError(err.message ?? 'Phone connection error'));
+        device.on('tokenWillExpire', () => renewToken(device).catch((err) => console.warn('Phone token renewal failed', err)));
+        device.on('error', (err: { message?: string; code?: number }) => {
+          const code = errorCode(err);
+          if (TOKEN_ERRORS.has(code)) {
+            // Expired or refused token: get a new one quietly; the next dial works without reloading the page.
+            renewToken(device).catch(() => setDeviceError('The phone lost its connection. Reload the page if calls keep failing.'));
+            return;
+          }
+          if (CONNECTION_ERRORS.has(code) && !callRef.current) {
+            // Connection to Twilio dropped between calls: start the phone afresh on the next dial.
+            resetDevice(device);
+            return;
+          }
+          setDeviceError(err.message ?? 'Phone connection error');
+        });
         deviceRef.current = device;
         applySpeaker(device);
         setDeviceState('ready');
@@ -114,7 +156,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       }
     })();
     return startingRef.current;
-  }, []);
+  }, [renewToken, resetDevice]);
+  startFnRef.current = start;
 
   const dial = useCallback(
     async (contact: Contact, campaign: Campaign, mode: ActiveCall['mode']) => {
@@ -135,7 +178,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           mode === 'oneoff'
             ? { callId, to: contact.phone_e164, name: contact.full_name ?? '', company: contact.company ?? '', client: campaign.client_name ?? '' }
             : { callId, contactId: contact.id };
-        const call = await device.connect({ params });
+        // An old token (laptop slept through its renewal) is replaced before dialling.
+        if (Date.now() - tokenAtRef.current > TOKEN_MAX_AGE_MS) await renewToken(device).catch(() => undefined);
+        let call: Call;
+        try {
+          call = await device.connect({ params });
+        } catch (err) {
+          // Refused token: renew it and try once more, so the rep doesn't see an error for something we can fix.
+          if (!TOKEN_ERRORS.has(errorCode(err))) throw err;
+          await renewToken(device);
+          call = await device.connect({ params });
+        }
         callRef.current = call;
         call.on('ringing', () => patch(callId, { phase: 'ringing' }));
         call.on('accept', () => patch(callId, { phase: 'live', answeredAt: Date.now() }));
@@ -148,16 +201,23 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         call.on('disconnect', end);
         call.on('cancel', end);
         call.on('reject', end);
-        call.on('error', (err: { message?: string }) => {
-          patch(callId, { error: err.message ?? 'Call error' });
+        call.on('error', (err: { message?: string; code?: number }) => {
+          const code = errorCode(err);
+          patch(callId, {
+            error: CONNECTION_ERRORS.has(code)
+              ? 'The call dropped: the connection to the phone service was lost. Check your internet connection and dial again.'
+              : (err.message ?? 'Call error'),
+          });
           end();
+          // A dropped connection can leave the phone stuck: start it afresh for the next dial.
+          if (CONNECTION_ERRORS.has(code)) resetDevice(device);
         });
       } catch (err) {
         callRef.current = null;
         patch(callId, { phase: 'ended', error: err instanceof Error ? err.message : 'The call could not be started.' });
       }
     },
-    [patch, start],
+    [patch, start, renewToken, resetDevice],
   );
 
   // Keep the active call's Supabase row live: Twilio status, AMD and pickup status arrive via webhooks.
@@ -214,6 +274,22 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   // A different speaker picked in the audio settings applies straight away, even mid-call.
   useEffect(() => onAudioDevicesChanged(() => deviceRef.current && applySpeaker(deviceRef.current)), []);
+
+  // Coming back to the tab (or waking the laptop): renew an old token straight away.
+  useEffect(() => {
+    const onVisible = () => {
+      const device = deviceRef.current;
+      if (document.visibilityState === 'visible' && device && Date.now() - tokenAtRef.current > TOKEN_MAX_AGE_MS) {
+        renewToken(device).catch((err) => console.warn('Phone token renewal failed', err));
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onVisible);
+    };
+  }, [renewToken]);
 
   useEffect(() => () => deviceRef.current?.destroy(), []);
 
