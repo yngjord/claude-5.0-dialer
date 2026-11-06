@@ -26,6 +26,8 @@ export interface ActiveCall {
   /** The call's row in Supabase, kept live (Twilio status, AMD, pickup status). */
   row: CallRow | null;
   error: string | null;
+  /** The connection dropped mid-call and Twilio is reconnecting it (up to 30 seconds). */
+  reconnecting?: boolean;
 }
 
 interface VoiceContextValue {
@@ -117,6 +119,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           edge: ['sydney', 'roaming'],
           // Renew 5 minutes before expiry rather than 10 seconds, so a briefly throttled background tab still makes it.
           tokenRefreshMs: 5 * 60_000,
+          // If the connection to Twilio drops mid-call (wifi blip, network change), keep the call and reconnect for up
+          // to 30 seconds instead of failing it straight away with 31005.
+          maxCallSignalingTimeoutMs: 30_000,
           codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
           closeProtection: 'You are on a call. Leaving will hang up.',
           logLevel: 'error',
@@ -193,10 +198,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         call.on('ringing', () => patch(callId, { phase: 'ringing' }));
         call.on('accept', () => patch(callId, { phase: 'live', answeredAt: Date.now() }));
         call.on('mute', (muted: boolean) => patch(callId, { muted }));
+        call.on('reconnecting', () => patch(callId, { reconnecting: true }));
+        call.on('reconnected', () => patch(callId, { reconnecting: false }));
         const end = () => {
           callRef.current = null;
           if (mic) device.audio?.unsetInputDevice().catch(() => undefined);
-          patch(callId, { phase: 'ended' });
+          patch(callId, { phase: 'ended', reconnecting: false });
         };
         call.on('disconnect', end);
         call.on('cancel', end);
