@@ -39,3 +39,21 @@ The Airtable `JustCall Storage` and `Cold Call Transcripts` tables (and the Lead
 `JustCall Dialer Link` and Clients → `JustCall Storage` link fields) and the JustCall account are no longer needed by
 the dialer, portal recording links or this import. Remove the `JUSTCALL_API_KEY` / `JUSTCALL_API_SECRET` variables from
 Netlify.
+
+## Second pass: every other dial (done 7 Nov 2026, data only)
+
+JustCall's full "All dials" export (3,013 calls) matched all 877 calls above by Twilio call SID, with no duplicates. The
+other **2,114 dials** (all 30 seconds or shorter) were added so dial counts and pickup rates cover all of JustCall,
+**without recordings** (checked: none were meetings or real conversations worth keeping). Skipped: 18 test calls
+(`TESTING JORDAN`, `FAKE CAMPAIGN`, `WEBHOOK TEST`) and 4 setup calls from 26–27 April.
+
+Pickup status was set conservatively, so historical human pickup rates err low rather than high:
+
+- JustCall's Failed / Busy / Unanswered and Machine Pickup are kept as is.
+- **Human Pickup only** when the disposition means a conversation (Interested, Not Interested, Unqualified, Do Not
+  Call, Language Barrier, …), the call lasted 5+ seconds, and the notes don't mention voicemail: **78 calls**.
+- Machine Pickup when the disposition is Left Voicemail or the notes say voicemail ("vmail", "Reached voicemail").
+- Everything else is **Unclassified Pickup**, including JustCall's own "Human Pickup" flag on its own (it marked 0–1
+  second calls as human) and Wrong Number.
+
+All JustCall calls together: 2,991 dials, 630 Human Pickup. Dispositions use the same mapping as above.
