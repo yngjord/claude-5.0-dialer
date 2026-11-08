@@ -23,7 +23,8 @@ export function DateRangeFilter({ value, onChange, presets }: { value: DateRange
   const withYear = value.from.slice(0, 4) !== thisYear || value.to.slice(0, 4) !== thisYear;
 
   return (
-    <div className="relative flex flex-wrap items-center gap-2">
+    // Raised while the calendar is open, so it sits above the cards below (their entrance animation layers them).
+    <div className={`relative flex flex-wrap items-center gap-2 ${open ? 'z-40' : ''}`}>
       <select
         aria-label="Date range"
         className={field}

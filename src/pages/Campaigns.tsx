@@ -32,17 +32,32 @@ const TAB_STATUSES: Record<Tab, Campaign['status'][]> = {
   draft: ['draft'],
 };
 
+/** The half-month in which most of a campaign's dials were made (dialer_campaign_periods). */
+interface CampaignPeriod {
+  campaign_id: string;
+  period_month: string;
+  half: number;
+}
+
+/** "2026-11-01", half 1 → "November 1/2". */
+function periodLabel(p: CampaignPeriod): string {
+  const month = new Date(`${p.period_month}T12:00:00Z`).toLocaleDateString('en-AU', { month: 'long', timeZone: 'UTC' });
+  return `${month} ${p.half}/2`;
+}
+
 export default function Campaigns() {
   const { isAdmin } = useAuth();
   const logos = useClientLogos();
   const [tab, setTab] = useState<Tab>('all');
   const { data, error, loading, reload } = useLoad(async () => {
-    const [campaigns, stats] = await Promise.all([
+    const [campaigns, stats, periods] = await Promise.all([
       supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false }),
       supabase.from('dialer_campaign_stats').select('*'),
+      supabase.rpc('dialer_campaign_periods'),
     ]);
     const byId = new Map((must(stats) as CampaignStats[]).map((s) => [s.campaign_id, s]));
-    return (must(campaigns) as CampaignRow[]).map((c) => ({ campaign: c, stats: byId.get(c.id) }));
+    const periodById = new Map((must(periods) as CampaignPeriod[]).map((p) => [p.campaign_id, periodLabel(p)]));
+    return (must(campaigns) as CampaignRow[]).map((c) => ({ campaign: c, stats: byId.get(c.id), period: periodById.get(c.id) ?? null }));
   }, []);
 
   // Admin tools: create/edit, team member, re-run.
@@ -126,7 +141,7 @@ export default function Campaigns() {
                           : "You aren't assigned any campaigns yet."}
                   </EmptyRow>
                 ) : (
-                  shown.map(({ campaign: c, stats: s }) => {
+                  shown.map(({ campaign: c, stats: s, period }) => {
                     const total = s?.contacts_total ?? 0;
                     const completed = total - (s?.contacts_remaining ?? 0);
                     const done = c.status === 'completed' || (total > 0 && completed === total);
@@ -146,6 +161,7 @@ export default function Campaigns() {
                             ) : (
                               <span className="font-medium text-ink-muted">{c.name}</span>
                             )}
+                            {period && <span className="whitespace-nowrap text-sm text-ink-faint">({period})</span>}
                             {c.status !== 'active' && c.status !== 'completed' && <Badge tone={CAMPAIGN_STATUS[c.status].tone}>{CAMPAIGN_STATUS[c.status].label}</Badge>}
                           </span>
                         </td>

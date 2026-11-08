@@ -1087,3 +1087,25 @@ create table if not exists public.dialer_calendar_tokens (
   updated_at timestamptz not null default now()
 );
 alter table public.dialer_calendar_tokens enable row level security;
+
+-- ── Campaign period labels ──────────────────────────────────────────────────────────────────────────────────────
+-- The half-month (1st–14th = 1, 15th–end = 2, Sydney time) in which most of each campaign's dials were made, for the
+-- "(November 1/2)" label on the Campaigns tab. Counts every rep's dials; callers only get campaigns they can open.
+create or replace function public.dialer_campaign_periods()
+returns table (campaign_id uuid, period_month date, half int, dials int)
+language sql stable security definer set search_path = public as $$
+  select distinct on (s.campaign_id) s.campaign_id, s.m, s.h, s.n
+  from (
+    select x.campaign_id,
+           date_trunc('month', x.started_at at time zone 'Australia/Sydney')::date as m,
+           case when extract(day from x.started_at at time zone 'Australia/Sydney') < 15 then 1 else 2 end as h,
+           count(*)::int as n
+    from dialer_calls x
+    where x.direction = 'outbound' and x.source = 'dialer' and x.campaign_id is not null
+      and dialer_can_access_campaign(x.campaign_id)
+    group by 1, 2, 3
+  ) s
+  order by s.campaign_id, s.n desc, s.m desc, s.h desc
+$$;
+revoke execute on function public.dialer_campaign_periods() from public, anon;
+grant execute on function public.dialer_campaign_periods() to authenticated, service_role;
