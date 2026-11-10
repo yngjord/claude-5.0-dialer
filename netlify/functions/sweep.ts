@@ -2,7 +2,7 @@ import type { Config } from '@netlify/functions';
 import { db, must } from './_lib/db';
 import { addToBlocklist } from './_lib/blocklist';
 import { syncLeadTranscript } from './_lib/leadTranscript';
-import { loadMediaCall, processRecording, storeTranscript } from './_lib/media';
+import { loadMediaCall, processRecording, storeTranscript, transcribeSkippedHumanPickup } from './_lib/media';
 
 /**
  * Every 10 minutes: finishes recordings and transcripts the webhooks didn't (timeouts, Twilio retries), adds human
@@ -33,6 +33,24 @@ export default async () => {
   for (const { id } of transcripts) {
     const call = await loadMediaCall(id);
     if (call) await storeTranscript(call).catch((err) => console.error('Sweep: transcript failed', id, err));
+  }
+
+  // Human pickups whose transcript was skipped (Twilio guessed a machine; the rep corrected it), wrapped up 5+ minutes
+  // ago so the wrap-up's own attempt has run. Also catches up older calls, a few per run.
+  const skipped = must(
+    await db()
+      .from('dialer_calls')
+      .select('id')
+      .eq('source', 'dialer')
+      .eq('pickup_status', 'Human Pickup')
+      .eq('transcript_status', 'skipped')
+      .not('recording_path', 'is', null)
+      .lt('wrapped_up_at', new Date(Date.now() - 5 * 60_000).toISOString())
+      .order('started_at', { ascending: false })
+      .limit(10),
+  ) as { id: string }[];
+  for (const { id } of skipped) {
+    await transcribeSkippedHumanPickup(id).catch((err) => console.error('Sweep: transcript for corrected pickup failed', id, err));
   }
 
   // Finished transcripts whose call created a lead, not yet written to it.

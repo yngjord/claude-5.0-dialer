@@ -12,6 +12,7 @@ import { db, must } from './_lib/db';
 import { calendarAccessToken, createInvite, inviteEventId } from './_lib/google';
 import { syncLeadTranscript } from './_lib/leadTranscript';
 import { handler, HttpError, json, readJson } from './_lib/http';
+import { transcribeSkippedHumanPickup } from './_lib/media';
 
 const REFUSALS: Record<string, [number, string]> = {
   user: [403, 'The dialer is only available to the Maronly team.'],
@@ -97,6 +98,8 @@ export default handler(async (req, context) => {
   // retries if Airtable fails).
   if (body.pickupStatus === CONNECTED_PICKUP_STATUS) {
     context.waitUntil(addToBlocklist(body.callId).catch((err) => console.error('Blocklist failed for call', body.callId, err)));
+    // Twilio may have guessed an answering machine and skipped the transcript: the rep says it was a person.
+    context.waitUntil(transcribeSkippedHumanPickup(body.callId).catch((err) => console.error('Transcript for corrected pickup failed', body.callId, err)));
   }
 
   let leadId = saved.airtable_lead_id;

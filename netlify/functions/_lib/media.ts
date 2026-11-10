@@ -9,11 +9,11 @@ export const RECORDINGS_BUCKET = 'dialer-recordings';
 
 type MediaCall = Pick<
   CallRow,
-  'id' | 'kind' | 'direction' | 'answered_by' | 'duration_s' | 'recording_sid' | 'recording_path' | 'recording_duration_s' | 'transcript_status' | 'agent_name' | 'full_name'
+  'id' | 'kind' | 'direction' | 'answered_by' | 'duration_s' | 'recording_sid' | 'recording_path' | 'recording_duration_s' | 'transcript_status' | 'agent_name' | 'full_name' | 'pickup_status'
 > & { transcript_sid: string | null };
 
 const MEDIA_COLUMNS =
-  'id, kind, direction, answered_by, duration_s, recording_sid, recording_path, recording_duration_s, transcript_status, transcript_sid, agent_name, full_name';
+  'id, kind, direction, answered_by, duration_s, recording_sid, recording_path, recording_duration_s, transcript_status, transcript_sid, agent_name, full_name, pickup_status';
 
 export async function loadMediaCall(callId: string): Promise<MediaCall | null> {
   return must(await db().from('dialer_calls').select(MEDIA_COLUMNS).eq('id', callId).maybeSingle()) as MediaCall | null;
@@ -43,7 +43,7 @@ export async function processRecording(call: MediaCall): Promise<void> {
 
   const serviceSid = process.env.TWILIO_INTELLIGENCE_SERVICE_SID;
   const duration = call.recording_duration_s ?? call.duration_s;
-  if (!serviceSid || !shouldTranscribe({ kind: call.kind, answeredBy: call.answered_by, durationS: duration })) {
+  if (!serviceSid || !shouldTranscribe({ kind: call.kind, answeredBy: call.answered_by, durationS: duration, pickupStatus: call.pickup_status })) {
     must(await db().from('dialer_calls').update({ transcript_status: 'skipped' }).eq('id', call.id));
     await deleteTwilioRecording(call.recording_sid);
     return;
@@ -55,6 +55,28 @@ export async function processRecording(call: MediaCall): Promise<void> {
     customerKey: call.id,
   });
   must(await db().from('dialer_calls').update({ transcript_sid: transcript.sid, transcript_status: 'pending' }).eq('id', call.id));
+}
+
+/**
+ * Transcribes a call that was skipped when its recording arrived (Twilio guessed an answering machine) but that the
+ * rep has since saved as a Human Pickup. Twilio's copy of the recording is gone by then, so Twilio transcribes our
+ * stored copy from a short-lived link. Returns true if a transcript was started.
+ */
+export async function transcribeSkippedHumanPickup(callId: string): Promise<boolean> {
+  const call = await loadMediaCall(callId);
+  const serviceSid = process.env.TWILIO_INTELLIGENCE_SERVICE_SID;
+  if (!call || !serviceSid || call.transcript_status !== 'skipped' || !call.recording_path) return false;
+  const duration = call.recording_duration_s ?? call.duration_s;
+  if (!shouldTranscribe({ kind: call.kind, answeredBy: call.answered_by, durationS: duration, pickupStatus: call.pickup_status })) return false;
+  const mediaUrl = await signedRecordingUrl(call.recording_path, 24 * 3600);
+  if (!mediaUrl) return false;
+  const transcript = await twilioClient().intelligence.v2.transcripts.create({
+    serviceSid,
+    channel: { media_properties: { media_url: mediaUrl } },
+    customerKey: call.id,
+  });
+  must(await db().from('dialer_calls').update({ transcript_sid: transcript.sid, transcript_status: 'pending' }).eq('id', call.id));
+  return true;
 }
 
 /**

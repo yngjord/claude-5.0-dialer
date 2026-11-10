@@ -204,6 +204,9 @@ describe('shouldTranscribe', () => {
     expect(shouldTranscribe({ kind: 'call', answeredBy: 'machine_end_beep', durationS: 40 })).toBe(false);
     expect(shouldTranscribe({ kind: 'call', answeredBy: null, durationS: 3 })).toBe(false);
     expect(shouldTranscribe({ kind: 'voicemail', answeredBy: null, durationS: 10 })).toBe(true);
+    // The rep's Human Pickup overrides Twilio's answering-machine guess.
+    expect(shouldTranscribe({ kind: 'call', answeredBy: 'machine_start', durationS: 139, pickupStatus: 'Human Pickup' })).toBe(true);
+    expect(shouldTranscribe({ kind: 'call', answeredBy: 'machine_start', durationS: 139, pickupStatus: 'Machine Pickup' })).toBe(false);
   });
 });
 
