@@ -1,24 +1,47 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
+import { supabase } from './supabase';
 
-// Shared by every campaign list. Airtable's file links expire after a couple of hours, so refetch after one.
-let cached: Promise<Record<string, string>> | null = null;
-let fetchedAt = 0;
+const STORAGE_KEY = 'dialer.clientLogos';
 
-/** Client logos from Airtable (Clients → Client Logo Image), by Airtable client id. Empty until loaded or if it fails. */
+function readSaved(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+// Shared by every page that shows logos: one database read per page load.
+let loading: Promise<Record<string, string>> | null = null;
+
+async function load(): Promise<Record<string, string>> {
+  const { data, error } = await supabase.from('dialer_client_logos').select('airtable_client_id, url');
+  if (error) throw error;
+  let logos = Object.fromEntries((data as { airtable_client_id: string; url: string }[]).map((r) => [r.airtable_client_id, r.url]));
+  // None copied yet (e.g. straight after setup): copy them from Airtable now.
+  if (!Object.keys(logos).length) logos = await api<Record<string, string>>('client-logos', { method: 'POST' });
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(logos));
+  } catch {
+    // per-browser convenience only
+  }
+  return logos;
+}
+
+/**
+ * Client logos by Airtable client id: our stored copies of Clients → Client Logo Image. Shows the last-known logos
+ * straight away (this browser remembers them), then refreshes from the database.
+ */
 export function useClientLogos(): Record<string, string> {
-  const [logos, setLogos] = useState<Record<string, string>>({});
+  const [logos, setLogos] = useState<Record<string, string>>(readSaved);
   useEffect(() => {
     let cancelled = false;
-    if (Date.now() - fetchedAt > 60 * 60_000) {
-      cached = null;
-      fetchedAt = Date.now();
-    }
-    cached ??= api<Record<string, string>>('client-logos').catch(() => {
-      cached = null;
-      return {};
+    loading ??= load().catch(() => {
+      loading = null;
+      return readSaved();
     });
-    cached.then((l) => !cancelled && setLogos(l));
+    loading.then((l) => !cancelled && setLogos(l));
     return () => {
       cancelled = true;
     };

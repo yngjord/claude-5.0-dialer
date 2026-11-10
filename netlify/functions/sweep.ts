@@ -2,6 +2,7 @@ import type { Config } from '@netlify/functions';
 import { db, must } from './_lib/db';
 import { addToBlocklist } from './_lib/blocklist';
 import { syncLeadTranscript } from './_lib/leadTranscript';
+import { syncClientLogos } from './_lib/clientLogos';
 import { loadMediaCall, processRecording, storeTranscript, transcribeSkippedHumanPickup } from './_lib/media';
 
 /**
@@ -52,6 +53,9 @@ export default async () => {
   for (const { id } of skipped) {
     await transcribeSkippedHumanPickup(id).catch((err) => console.error('Sweep: transcript for corrected pickup failed', id, err));
   }
+
+  // Client logos changed in Airtable: copy the new ones (only changed logos are downloaded).
+  await syncClientLogos().catch((err) => console.error('Sweep: client logos failed', err));
 
   // Finished transcripts whose call created a lead, not yet written to it.
   const leadTranscripts = must(

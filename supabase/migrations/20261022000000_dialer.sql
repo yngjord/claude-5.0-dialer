@@ -1117,3 +1117,17 @@ grant execute on function public.dialer_campaign_periods() to authenticated, ser
 alter table public.dialer_campaigns add column if not exists source text not null default 'dialer';
 alter table public.dialer_campaigns drop constraint if exists dialer_campaigns_source_check;
 alter table public.dialer_campaigns add constraint dialer_campaigns_source_check check (source in ('dialer', 'justcall'));
+
+-- ── Client logos ────────────────────────────────────────────────────────────────────────────────────────────────
+-- Copies of each client's Airtable logo (Clients → Client Logo Image) in a public bucket, so the app loads them from a
+-- fixed, long-cached address instead of Airtable's expiring links. Kept in sync by the sweep; logos aren't sensitive.
+create table if not exists public.dialer_client_logos (
+  airtable_client_id text primary key,
+  attachment_id text not null,
+  url text not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.dialer_client_logos enable row level security;
+drop policy if exists "Dialer users read client logos" on public.dialer_client_logos;
+create policy "Dialer users read client logos" on public.dialer_client_logos for select to authenticated using (is_dialer_user());
+insert into storage.buckets (id, name, public) values ('client-logos', 'client-logos', true) on conflict (id) do nothing;

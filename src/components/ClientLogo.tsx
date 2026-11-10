@@ -7,5 +7,5 @@ import { useState } from 'react';
 export function ClientLogo({ name, url }: { name: string; url: string | undefined }) {
   const [broken, setBroken] = useState(false);
   if (!url || broken) return <span className="text-ink-muted">{name}</span>;
-  return <img src={url} alt={name} title={name} onError={() => setBroken(true)} className="aspect-square h-10 w-10 min-w-10 max-w-none shrink-0 rounded-full border border-line object-cover" />;
+  return <img src={url} alt={name} title={name} width={40} height={40} decoding="async" onError={() => setBroken(true)} className="aspect-square h-10 w-10 min-w-10 max-w-none shrink-0 rounded-full border border-line object-cover" />;
 }
