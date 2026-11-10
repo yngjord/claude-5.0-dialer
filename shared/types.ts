@@ -47,6 +47,8 @@ export interface Campaign {
   /** The call script reps see by default (one of the client's dialer_scripts). */
   script_id: string | null;
   status: CampaignStatus;
+  /** 'justcall': an old JustCall Sales Dialer campaign, rebuilt from its imported calls (no contact list; read-only). */
+  source: 'dialer' | 'justcall';
   created_at: string;
 }
 

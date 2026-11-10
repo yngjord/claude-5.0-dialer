@@ -57,3 +57,12 @@ Pickup status was set conservatively, so historical human pickup rates err low r
   second calls as human) and Wrong Number.
 
 All JustCall calls together: 2,991 dials, 630 Human Pickup. Dispositions use the same mapping as above.
+
+## Campaigns (done 10 Nov 2026)
+
+The **42 JustCall Sales Dialer campaigns** (one per campaign name; "Re:" redial passes kept separate) were added to
+`dialer_campaigns` with `source = 'justcall'`, status Completed, the client from the name, created at their first
+dial, and the reps who dialled them as members. All 2,991 JustCall calls are linked to them (`campaign_id`). The
+Campaigns tab labels them "JustCall" and opens their calls in Call logs. Their dial, connect and appointment counts
+come from the calls, so they inherit the conservative pickup statuses above; appointments are only calls the rep
+marked Appointment Set (no Airtable cross-check). Performance still counts new-dialer calls only.

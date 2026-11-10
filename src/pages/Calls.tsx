@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { DISPOSITIONS, PICKUP_STATUSES, type PickupStatus } from '../../shared/constants';
 import { DateRangeFilter } from '../components/DateRangeFilter';
@@ -37,10 +38,13 @@ const JUSTCALL = 'justcall';
 
 export default function Calls() {
   const { isAdmin } = useAuth();
-  const [range, setRange] = useState<DateRange>(() => defaultRange('month'));
+  // Opened from a campaign (e.g. a JustCall one): that campaign's calls, all time.
+  const [params] = useSearchParams();
+  const linkedCampaign = params.get('campaign');
+  const [range, setRange] = useState<DateRange>(() => defaultRange(linkedCampaign ? 'all' : 'month'));
   const bounds = rangeBounds(range);
   // Campaign ids, plus JUSTCALL for every call imported from JustCall (their old campaigns aren't dialer campaigns).
-  const [campaignIds, setCampaignIds] = useState<string[]>([]);
+  const [campaignIds, setCampaignIds] = useState<string[]>(() => (linkedCampaign ? [linkedCampaign] : []));
   const [pickup, setPickup] = useState('');
   const [dispositions, setDispositions] = useState<string[]>([]);
   const [clientName, setClientName] = useState('');

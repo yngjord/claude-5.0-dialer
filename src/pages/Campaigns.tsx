@@ -147,6 +147,9 @@ export default function Campaigns() {
                     const done = c.status === 'completed' || (total > 0 && completed === total);
                     // Team members can't open paused campaigns; admins can open anything.
                     const openable = isAdmin || c.status !== 'paused';
+                    // Old JustCall campaigns have no contact list: they open their calls in Call logs instead.
+                    const justcall = c.source === 'justcall';
+                    const href = justcall ? `/calls?campaign=${c.id}` : `/campaigns/${c.id}`;
                     return (
                       <tr key={c.id} className="transition-colors hover:bg-neutral-50">
                         <td className="td">
@@ -155,16 +158,24 @@ export default function Campaigns() {
                         <td className="td">
                           <span className="inline-flex items-center gap-2">
                             {openable ? (
-                              <Link to={`/campaigns/${c.id}`} className="font-medium hover:text-brand">
+                              <Link to={href} className="font-medium hover:text-brand">
                                 {c.name}
                               </Link>
                             ) : (
                               <span className="font-medium text-ink-muted">{c.name}</span>
                             )}
                             {period && <span className="whitespace-nowrap text-sm text-ink-faint">({period})</span>}
+                            {justcall && (
+                              <span title="An older campaign from JustCall, before the dialer">
+                                <Badge tone="grey">JustCall</Badge>
+                              </span>
+                            )}
                             {c.status !== 'active' && c.status !== 'completed' && <Badge tone={CAMPAIGN_STATUS[c.status].tone}>{CAMPAIGN_STATUS[c.status].label}</Badge>}
                           </span>
                         </td>
+                        {justcall ? (
+                          <td className="td w-[240px] text-sm tabular-nums text-ink-muted">{(s?.dials_total ?? 0).toLocaleString()} dials</td>
+                        ) : (
                         <td className="td w-[240px]">
                           <p className="text-sm tabular-nums text-ink-muted">
                             {completed.toLocaleString()} / {total.toLocaleString()}
@@ -180,6 +191,7 @@ export default function Campaigns() {
                             )}
                           </div>
                         </td>
+                        )}
                         {isAdmin && (
                           <td className="td">
                             <button
@@ -205,7 +217,7 @@ export default function Campaigns() {
                         <td className="td text-right tabular-nums">{percent(s?.connects_total ?? 0, s?.dials_total ?? 0)}</td>
                         <td className="td">
                           <div className="flex items-center justify-end gap-1">
-                            {isAdmin && (
+                            {isAdmin && !justcall && (
                               <>
                                 <button onClick={() => setEditing(c)} className="flex h-9 w-9 items-center justify-center rounded-full text-ink-muted hover:bg-black/[0.04] hover:text-ink" title="Edit campaign" aria-label={`Edit ${c.name}`}>
                                   <Pencil size={15} />
@@ -216,8 +228,8 @@ export default function Campaigns() {
                               </>
                             )}
                             {openable ? (
-                              <Link to={`/campaigns/${c.id}`} className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium text-ink-muted hover:bg-black/[0.04] hover:text-ink">
-                                Contacts <ArrowRight size={14} />
+                              <Link to={href} className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium text-ink-muted hover:bg-black/[0.04] hover:text-ink">
+                                {justcall ? 'Calls' : 'Contacts'} <ArrowRight size={14} />
                               </Link>
                             ) : (
                               <span className="px-3 text-sm text-ink-faint">Paused</span>

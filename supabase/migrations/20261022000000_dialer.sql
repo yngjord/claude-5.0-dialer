@@ -1101,7 +1101,7 @@ language sql stable security definer set search_path = public as $$
            case when extract(day from x.started_at at time zone 'Australia/Sydney') < 15 then 1 else 2 end as h,
            count(*)::int as n
     from dialer_calls x
-    where x.direction = 'outbound' and x.source = 'dialer' and x.campaign_id is not null
+    where x.direction = 'outbound' and x.campaign_id is not null
       and dialer_can_access_campaign(x.campaign_id)
     group by 1, 2, 3
   ) s
@@ -1109,3 +1109,11 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke execute on function public.dialer_campaign_periods() from public, anon;
 grant execute on function public.dialer_campaign_periods() to authenticated, service_role;
+
+-- ── Old JustCall campaigns ──────────────────────────────────────────────────────────────────────────────────────
+-- 'justcall' campaigns were rebuilt from the imported JustCall calls (one per Sales Dialer campaign name, status
+-- completed, the reps who dialled them as members). They have no contacts; the app shows a JustCall label and opens
+-- their calls in Call logs. Performance and other stats count source = 'dialer' calls only.
+alter table public.dialer_campaigns add column if not exists source text not null default 'dialer';
+alter table public.dialer_campaigns drop constraint if exists dialer_campaigns_source_check;
+alter table public.dialer_campaigns add constraint dialer_campaigns_source_check check (source in ('dialer', 'justcall'));

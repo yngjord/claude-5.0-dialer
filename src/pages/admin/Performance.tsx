@@ -98,7 +98,7 @@ export default function Performance() {
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'dials', desc: true });
 
   const campaigns = useLoad(
-    async () => must(await supabase.from('dialer_campaigns').select('id, name, client_name, airtable_client_id').order('name')) as Pick<Campaign, 'id' | 'name' | 'client_name' | 'airtable_client_id'>[],
+    async () => must(await supabase.from('dialer_campaigns').select('id, name, client_name, airtable_client_id').eq('source', 'dialer').order('name')) as Pick<Campaign, 'id' | 'name' | 'client_name' | 'airtable_client_id'>[],
     [],
   );
   const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
