@@ -116,25 +116,24 @@ export default function Campaigns() {
           <LoadingRows label="Loading campaigns…" />
         ) : (
           <div className="relative -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-            <table className="w-full min-w-[760px]">
+            <table className="w-full min-w-[640px]">
               <thead className="border-b border-line">
                 <tr>
                   <th className="th">Client</th>
                   <th className="th">Campaign</th>
                   <th className="th">
                     <span className="inline-flex items-center gap-1.5" title="Contacts that have been called and wrapped up, out of everyone in the campaign">
-                      Completed / Total contacts <Info size={14} className="text-ink-faint" />
+                      Completion <Info size={14} className="text-ink-faint" />
                     </span>
                   </th>
                   {isAdmin && <th className="th">Team</th>}
-                  <th className="th text-right">Dials today</th>
                   <th className="th text-right">Connect rate</th>
                   <th className="th" aria-label="Actions" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {!shown.length ? (
-                  <EmptyRow colSpan={isAdmin ? 7 : 6}>
+                  <EmptyRow colSpan={isAdmin ? 6 : 5}>
                     {tab === 'completed'
                       ? 'No completed campaigns yet.'
                       : tab === 'draft'
@@ -177,9 +176,9 @@ export default function Campaigns() {
                           </span>
                         </td>
                         {justcall ? (
-                          <td className="td w-[240px] text-sm tabular-nums text-ink-muted">{(s?.dials_total ?? 0).toLocaleString()} dials</td>
+                          <td className="td w-[150px] text-sm tabular-nums text-ink-muted">{(s?.dials_total ?? 0).toLocaleString()} dials</td>
                         ) : (
-                        <td className="td w-[240px]">
+                        <td className="td w-[150px]">
                           <p className="text-sm tabular-nums text-ink-muted">
                             {completed.toLocaleString()} / {total.toLocaleString()}
                           </p>
@@ -216,7 +215,6 @@ export default function Campaigns() {
                             </button>
                           </td>
                         )}
-                        <td className="td text-right tabular-nums">{(s?.dials_today ?? 0).toLocaleString()}</td>
                         <td className="td text-right tabular-nums">{percent(s?.connects_total ?? 0, s?.dials_total ?? 0)}</td>
                         <td className="td">
                           <div className="flex items-center justify-end gap-1">
@@ -230,12 +228,15 @@ export default function Campaigns() {
                                 </button>
                               </>
                             )}
-                            {openable ? (
-                              <Link to={href} className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium text-ink-muted hover:bg-black/[0.04] hover:text-ink">
-                                {justcall ? 'Calls' : 'Contacts'} <ArrowRight size={14} />
-                              </Link>
-                            ) : (
+                            {/* Admins open a campaign from its name; team members keep the button. */}
+                            {!openable ? (
                               <span className="px-3 text-sm text-ink-faint">Paused</span>
+                            ) : (
+                              !isAdmin && (
+                                <Link to={href} className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium text-ink-muted hover:bg-black/[0.04] hover:text-ink">
+                                  {justcall ? 'Calls' : 'Contacts'} <ArrowRight size={14} />
+                                </Link>
+                              )
                             )}
                             {c.status !== 'completed' && (
                               <Link
