@@ -1,5 +1,6 @@
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { RANGE_LABELS, type DateRange, type RangePreset } from '../lib/dateRange';
 import { sydneyToday } from '../lib/format';
 
@@ -21,10 +22,10 @@ export function DateRangeFilter({ value, onChange, presets }: { value: DateRange
   const [open, setOpen] = useState(false);
   const thisYear = sydneyToday().slice(0, 4);
   const withYear = value.from.slice(0, 4) !== thisYear || value.to.slice(0, 4) !== thisYear;
+  const anchor = useRef<HTMLDivElement>(null);
 
   return (
-    // Raised while the calendar is open, so it sits above the cards below (their entrance animation layers them).
-    <div className={`relative flex flex-wrap items-center gap-2 ${open ? 'z-40' : ''}`}>
+    <div ref={anchor} className="relative flex flex-wrap items-center gap-2">
       <select
         aria-label="Date range"
         className={field}
@@ -49,6 +50,7 @@ export function DateRangeFilter({ value, onChange, presets }: { value: DateRange
       )}
       {open && value.preset === 'custom' && (
         <RangeCalendar
+          anchor={anchor}
           from={value.from}
           to={value.to}
           onDone={(from, to) => {
@@ -62,9 +64,39 @@ export function DateRangeFilter({ value, onChange, presets }: { value: DateRange
   );
 }
 
-function RangeCalendar({ from, to, onDone, onClose }: { from: string; to: string; onDone: (from: string, to: string) => void; onClose: () => void }) {
+const CALENDAR_WIDTH = 300;
+
+function RangeCalendar({
+  anchor,
+  from,
+  to,
+  onDone,
+  onClose,
+}: {
+  anchor: RefObject<HTMLDivElement | null>;
+  from: string;
+  to: string;
+  onDone: (from: string, to: string) => void;
+  onClose: () => void;
+}) {
   const today = sydneyToday();
   const ref = useRef<HTMLDivElement>(null);
+  // Drawn on top of the whole page (not inside the filter row), just below the filters, so no card or animated
+  // section can cover it. Follows the filters on scroll and resize, and stays inside the window.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    const place = () => {
+      const r = anchor.current?.getBoundingClientRect();
+      if (r) setPos({ top: r.bottom + 8, left: Math.max(8, Math.min(r.left, window.innerWidth - CALENDAR_WIDTH - 8)) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [anchor]);
   // The month on show, starting on the current range's end.
   const [view, setView] = useState(() => ({ y: Number(to.slice(0, 4)), m: Number(to.slice(5, 7)) }));
   // First click picks the start; the second picks the end and closes. Until then the hovered day previews the range.
@@ -100,8 +132,15 @@ function RangeCalendar({ from, to, onDone, onClose }: { from: string; to: string
     onDone(a, b);
   };
 
-  return (
-    <div ref={ref} role="dialog" aria-label="Choose dates" className="absolute left-0 top-full z-40 mt-2 w-[300px] rounded-2xl border border-line bg-white p-4 shadow-card">
+  if (!pos) return null;
+  return createPortal(
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Choose dates"
+      style={{ top: pos.top, left: pos.left, width: CALENDAR_WIDTH }}
+      className="fixed z-[100] rounded-2xl border border-line bg-white p-4 shadow-card"
+    >
       <div className="mb-3 flex items-center justify-between">
         <button type="button" onClick={() => shift(-1)} className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-neutral-100" aria-label="Previous month">
           <ChevronLeft size={16} />
@@ -143,6 +182,7 @@ function RangeCalendar({ from, to, onDone, onClose }: { from: string; to: string
         })}
       </div>
       <p className="mt-3 text-center text-xs text-ink-muted">{start ? 'Now pick the last day' : 'Pick the first day'}</p>
-    </div>
+    </div>,
+    document.body,
   );
 }
