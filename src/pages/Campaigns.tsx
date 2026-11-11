@@ -77,8 +77,11 @@ export default function Campaigns() {
     reload({ quiet: true });
   };
 
-  const count = (t: Tab) => data?.filter((d) => TAB_STATUSES[t].includes(d.campaign.status)).length ?? 0;
-  const shown = data?.filter((d) => TAB_STATUSES[tab].includes(d.campaign.status)) ?? [];
+  // The client picked above the metrics also narrows the campaign list (and its tab counts).
+  const [clientName, setClientName] = useState('');
+  const forClient = data?.filter((d) => !clientName || d.campaign.client_name === clientName);
+  const count = (t: Tab) => forClient?.filter((d) => TAB_STATUSES[t].includes(d.campaign.status)).length ?? 0;
+  const shown = forClient?.filter((d) => TAB_STATUSES[tab].includes(d.campaign.status)) ?? [];
   const tabs: { value: Tab; label: string; count?: number }[] = [
     { value: 'all', label: 'All', count: data ? count('all') : undefined },
     { value: 'active', label: 'Active', count: data ? count('active') : undefined },
@@ -100,7 +103,7 @@ export default function Campaigns() {
         }
       />
 
-      <CallMetrics campaigns={data?.map((d) => d.campaign) ?? []} />
+      <CallMetrics campaigns={data?.map((d) => d.campaign) ?? []} clientName={clientName} onClientChange={setClientName} />
 
       <div className="mb-3 mt-8 flex animate-appear flex-wrap items-center justify-between gap-3">
         <h2 className="font-display text-lg font-medium">{isAdmin ? 'Campaigns' : 'Your campaigns'}</h2>
@@ -268,9 +271,17 @@ export default function Campaigns() {
  * Dials, connects, connect rate, appointments, leads and talk time for a date range, client and campaign: always the
  * logged-in user's own calls, admins included (dialer_call_stats). The team-wide view is the admin Performance page.
  */
-function CallMetrics({ campaigns }: { campaigns: Pick<Campaign, 'id' | 'name' | 'client_name'>[] }) {
+function CallMetrics({
+  campaigns,
+  clientName,
+  onClientChange: setClientName,
+}: {
+  campaigns: Pick<Campaign, 'id' | 'name' | 'client_name'>[];
+  /** Shared with the campaign list below, which it also filters. */
+  clientName: string;
+  onClientChange: (name: string) => void;
+}) {
   const [range, setRange] = useState<DateRange>(() => defaultRange('month'));
-  const [clientName, setClientName] = useState('');
   const [campaignId, setCampaignId] = useState('');
   // Split by client only when the user has campaigns for more than one.
   const clients = [...new Set(campaigns.map((c) => c.client_name))].sort((a, b) => a.localeCompare(b));
