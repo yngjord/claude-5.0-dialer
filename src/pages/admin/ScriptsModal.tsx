@@ -10,6 +10,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import { must, useLoad } from '../../lib/api';
 import { formatDate } from '../../lib/format';
 import { supabase } from '../../lib/supabase';
+import { insertAtCursor } from '../../lib/textareaInsert';
 
 // A made-up contact, so the editor can show the script as a rep will read it.
 const SAMPLE: ScriptContext['contact'] = {
@@ -50,17 +51,12 @@ export function ScriptsModal({ clientId, clientName, onClose }: { clientId: stri
   };
 
   // Inserts {{key}} where the cursor is in the script. The answer pause goes on a line of its own.
+  // Keeps the script where it was on screen (it used to jump to the bottom).
   const insert = (key: string) => {
-    const el = bodyRef.current;
-    const at = el ? el.selectionStart : body.length;
-    const end = el ? el.selectionEnd : body.length;
     const ownLine = key === ANSWER_KEY;
-    const token = `${ownLine && at > 0 && body[at - 1] !== '\n' ? '\n' : ''}{{${key}}}${ownLine && body[end] !== '\n' ? '\n' : ''}`;
-    setBody(body.slice(0, at) + token + body.slice(end));
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(at + token.length, at + token.length);
-    });
+    insertAtCursor(bodyRef.current, body, setBody, (before, after) =>
+      `${ownLine && before && !before.endsWith('\n') ? '\n' : ''}{{${key}}}${ownLine && !after.startsWith('\n') ? '\n' : ''}`,
+    );
   };
 
   const save = async () => {
