@@ -1,5 +1,5 @@
-import { ArrowLeft, PhoneOutgoing, Upload } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ArrowLeft, PhoneOutgoing, Trash2, Upload } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { formatPhone } from '../../shared/phone';
 import type { Campaign, CampaignStats, Contact } from '../../shared/types';
@@ -8,6 +8,7 @@ import { ImportModal } from '../components/ImportModal';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Metric } from '../components/ui/Metric';
+import { Spinner } from '../components/ui/Spinner';
 import { SearchInput } from '../components/ui/SearchInput';
 import { ServerPagination } from '../components/ui/ServerPagination';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/States';
@@ -21,6 +22,40 @@ const PER_PAGE = 50;
 type Filter = 'all' | 'queue' | 'done' | 'removed';
 // Removed contacts (do not call, bad number) are admin-only; team members' "All" leaves them out.
 const FILTERS: Record<Filter, string[] | null> = { all: null, queue: ['new', 'callback'], done: ['done'], removed: ['do_not_call', 'bad_number'] };
+/** A contact a rep claimed this recently may be on their screen or on a live call, so bulk delete leaves it alone. */
+const LOCK_MINUTES = 30;
+
+/** The campaign's contacts matching the tab and search (the same set the table pages through). */
+function contactsQuery(campaignId: string, columns: string, filter: Filter, search: string, isAdmin: boolean, count = false) {
+  let q = supabase.from('dialer_contacts').select(columns, count ? { count: 'exact' } : undefined).eq('campaign_id', campaignId);
+  const statuses = FILTERS[filter];
+  if (statuses) q = q.in('status', statuses);
+  else if (!isAdmin) q = q.not('status', 'in', `(${FILTERS.removed!.join(',')})`);
+  if (search) {
+    const term = search.replace(/[%,()]/g, ' ');
+    const digits = term.replace(/\D/g, '');
+    q = q.or(
+      [`full_name.ilike.%${term}%`, `company.ilike.%${term}%`, `email.ilike.%${term}%`, ...(digits.length >= 3 ? [`phone_e164.like.%${digits.replace(/^0/, '')}%`] : [])].join(','),
+    );
+  }
+  return q;
+}
+
+/** Deletes these contacts (admins only, by RLS), skipping any a rep has open. Their calls stay in the call log. */
+async function deleteContacts(ids: string[]): Promise<number> {
+  const since = new Date(Date.now() - LOCK_MINUTES * 60_000).toISOString();
+  let deleted = 0;
+  for (let i = 0; i < ids.length; i += 100) {
+    const res = await supabase
+      .from('dialer_contacts')
+      .delete()
+      .in('id', ids.slice(i, i + 100))
+      .or(`locked_by.is.null,locked_at.lt."${since}"`)
+      .select('id');
+    deleted += (must(res) as { id: string }[]).length;
+  }
+  return deleted;
+}
 
 export default function CampaignPage() {
   const { isAdmin } = useAuth();
@@ -30,12 +65,21 @@ export default function CampaignPage() {
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [page, setPage] = useState(0);
+  // Admin bulk delete: ticked rows (kept across pages), or every contact matching the tab and search.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [allMatching, setAllMatching] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), 300);
     return () => clearTimeout(t);
   }, [query]);
   useEffect(() => setPage(0), [debounced, filter]);
+  useEffect(() => {
+    setSelected(new Set());
+    setAllMatching(false);
+  }, [debounced, filter, id]);
 
   const head = useLoad(async () => {
     const [c, s] = await Promise.all([
@@ -46,20 +90,81 @@ export default function CampaignPage() {
   }, [id]);
 
   const list = useLoad(async () => {
-    let q = supabase.from('dialer_contacts').select('*', { count: 'exact' }).eq('campaign_id', id);
-    const statuses = FILTERS[filter];
-    if (statuses) q = q.in('status', statuses);
-    else if (!isAdmin) q = q.not('status', 'in', `(${FILTERS.removed!.join(',')})`);
-    if (debounced) {
-      const term = debounced.replace(/[%,()]/g, ' ');
-      const digits = term.replace(/\D/g, '');
-      q = q.or(
-        [`full_name.ilike.%${term}%`, `company.ilike.%${term}%`, `email.ilike.%${term}%`, ...(digits.length >= 3 ? [`phone_e164.like.%${digits.replace(/^0/, '')}%`] : [])].join(','),
-      );
-    }
-    const res = await q.order('created_at').range(page * PER_PAGE, page * PER_PAGE + PER_PAGE - 1);
-    return { contacts: must(res) as Contact[], total: res.count ?? 0 };
+    const res = await contactsQuery(id, '*', filter, debounced, isAdmin, true)
+      .order('created_at')
+      .range(page * PER_PAGE, page * PER_PAGE + PER_PAGE - 1);
+    return { contacts: must(res) as unknown as Contact[], total: res.count ?? 0 };
   }, [id, filter, debounced, page, isAdmin]);
+
+  const pageIds = (list.data?.contacts ?? []).map((c) => c.id);
+  const pageAllSelected = allMatching || (pageIds.length > 0 && pageIds.every((cid) => selected.has(cid)));
+  const pageSomeSelected = !pageAllSelected && pageIds.some((cid) => selected.has(cid));
+  const headerBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerBox.current) headerBox.current.indeterminate = pageSomeSelected;
+  }, [pageSomeSelected]);
+
+  const togglePage = () => {
+    setNotice(null);
+    if (pageAllSelected) {
+      setAllMatching(false);
+      setSelected((s) => new Set([...s].filter((cid) => !pageIds.includes(cid))));
+    } else setSelected((s) => new Set([...s, ...pageIds]));
+  };
+  const toggleOne = (cid: string) => {
+    setNotice(null);
+    if (allMatching) {
+      // Un-ticking one row out of "all matching" keeps the rest of this page ticked.
+      setAllMatching(false);
+      setSelected(new Set(pageIds.filter((x) => x !== cid)));
+      return;
+    }
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(cid)) next.delete(cid);
+      else next.add(cid);
+      return next;
+    });
+  };
+  const clearSelection = () => {
+    setSelected(new Set());
+    setAllMatching(false);
+  };
+
+  const removeSelected = async () => {
+    setDeleting(true);
+    setNotice(null);
+    try {
+      let ids = [...selected];
+      if (allMatching) {
+        ids = [];
+        for (let from = 0; ; from += 1000) {
+          const rows = must(await contactsQuery(id, 'id', filter, debounced, isAdmin).order('created_at').range(from, from + 999)) as unknown as { id: string }[];
+          ids.push(...rows.map((r) => r.id));
+          if (rows.length < 1000) break;
+        }
+      }
+      if (!ids.length) return;
+      const n = ids.length.toLocaleString();
+      if (!window.confirm(`Delete ${n} contact${ids.length === 1 ? '' : 's'} from this campaign?\n\nTheir past calls stay in Call logs. This can't be undone.`)) return;
+      const deleted = await deleteContacts(ids);
+      const skipped = ids.length - deleted;
+      setNotice({
+        ok: true,
+        text: `Deleted ${deleted.toLocaleString()} contact${deleted === 1 ? '' : 's'}.${
+          skipped ? ` ${skipped.toLocaleString()} skipped because a rep has ${skipped === 1 ? 'it' : 'them'} open in the dialer right now; try again shortly.` : ''
+        }`,
+      });
+      clearSelection();
+      if (page > 0 && deleted >= pageIds.length) setPage(0);
+      head.reload({ quiet: true });
+      list.reload({ quiet: true });
+    } catch (err) {
+      setNotice({ ok: false, text: err instanceof Error ? err.message : 'Could not delete the contacts.' });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const campaign = head.data?.campaign;
   const stats = head.data?.stats;
@@ -68,6 +173,8 @@ export default function CampaignPage() {
   if (campaign?.status === 'paused' && !isAdmin) return <ErrorState message="This campaign is paused. It'll open again once an admin resumes it." />;
 
   const total = list.data?.total ?? 0;
+  const selectedCount = allMatching ? total : selected.size;
+  const cols = isAdmin ? 8 : 7;
 
   return (
     <>
@@ -128,6 +235,34 @@ export default function CampaignPage() {
           <SearchInput value={query} onChange={setQuery} placeholder="Search name, company, phone" />
         </div>
 
+        {isAdmin && (selectedCount > 0 || notice) && (
+          <div className="mb-4 space-y-2">
+            {selectedCount > 0 && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl bg-brand/5 px-4 py-2.5 text-sm">
+                <span className="font-medium">
+                  {selectedCount.toLocaleString()} selected{allMatching && (debounced || filter !== 'all') ? ' (all matching)' : allMatching ? ' (all in campaign)' : ''}
+                </span>
+                {!allMatching && pageAllSelected && total > pageIds.length && (
+                  <button type="button" className="text-brand hover:underline" onClick={() => setAllMatching(true)}>
+                    Select all {total.toLocaleString()} {debounced || filter !== 'all' ? 'matching contacts' : 'contacts in this campaign'}
+                  </button>
+                )}
+                <button type="button" className="text-ink-muted hover:text-ink" onClick={clearSelection} disabled={deleting}>
+                  Clear
+                </button>
+                <Button variant="outline" className="ml-auto !h-9 !border-red-200 !text-red-700 hover:!border-red-400" onClick={removeSelected} disabled={deleting}>
+                  {deleting ? <Spinner /> : <Trash2 size={15} />} Delete
+                </Button>
+              </div>
+            )}
+            {notice && (
+              <p role={notice.ok ? 'status' : 'alert'} className={`rounded-2xl px-4 py-2.5 text-sm ${notice.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'}`}>
+                {notice.text}
+              </p>
+            )}
+          </div>
+        )}
+
         {list.error ? (
           <ErrorState message={list.error} onRetry={list.reload} />
         ) : list.loading && !list.data ? (
@@ -138,6 +273,19 @@ export default function CampaignPage() {
               <table className="w-full min-w-[900px]">
                 <thead className="border-b border-line">
                   <tr>
+                    {isAdmin && (
+                      <th className="th w-10">
+                        <input
+                          ref={headerBox}
+                          type="checkbox"
+                          className="h-4 w-4 accent-brand"
+                          checked={pageAllSelected}
+                          onChange={togglePage}
+                          disabled={!pageIds.length || deleting}
+                          aria-label="Select all contacts on this page"
+                        />
+                      </th>
+                    )}
                     <th className="th">Contact</th>
                     <th className="th">Company</th>
                     <th className="th">Phone</th>
@@ -149,10 +297,22 @@ export default function CampaignPage() {
                 </thead>
                 <tbody className="divide-y divide-line">
                   {!list.data?.contacts.length ? (
-                    <EmptyRow colSpan={7}>{debounced || filter !== 'all' ? 'No contacts match.' : isAdmin ? 'No contacts yet. Import a CSV to get started.' : 'No contacts yet.'}</EmptyRow>
+                    <EmptyRow colSpan={cols}>{debounced || filter !== 'all' ? 'No contacts match.' : isAdmin ? 'No contacts yet. Import a CSV to get started.' : 'No contacts yet.'}</EmptyRow>
                   ) : (
                     list.data.contacts.map((c) => (
-                      <tr key={c.id} className="transition-colors hover:bg-neutral-50">
+                      <tr key={c.id} className={`transition-colors ${allMatching || selected.has(c.id) ? 'bg-brand/5' : 'hover:bg-neutral-50'}`}>
+                        {isAdmin && (
+                          <td className="td w-10">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 accent-brand"
+                              checked={allMatching || selected.has(c.id)}
+                              onChange={() => toggleOne(c.id)}
+                              disabled={deleting}
+                              aria-label={`Select ${c.full_name || formatPhone(c.phone_e164)}`}
+                            />
+                          </td>
+                        )}
                         <td className="td">
                           <p className="font-medium">{c.full_name || '—'}</p>
                           {c.title && <p className="max-w-[220px] truncate text-xs text-ink-muted">{c.title}</p>}
