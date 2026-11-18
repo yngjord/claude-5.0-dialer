@@ -1,4 +1,4 @@
-import { Activity, ChevronDown, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Activity, ChevronDown, Plus, RefreshCw } from 'lucide-react';
 import { Fragment, useState } from 'react';
 import { formatPhone } from '../../../shared/phone';
 import type { AirtableClient, PhoneNumber } from '../../../shared/types';
@@ -15,7 +15,7 @@ import { alertText, useNumberAlerts } from '../../lib/numberAlerts';
 import { TwilioSetupCard } from './TwilioSetupCard';
 
 /**
- * Twilio numbers: which client each number belongs to, the click-to-call number, and custom voicemail greetings.
+ * Twilio numbers: which client each number belongs to, the click-to-call number, and each number's pickup health.
  * "Sync from Twilio" imports bought numbers and points their voicemail/SMS webhooks at this site.
  */
 export default function Numbers() {
@@ -55,26 +55,6 @@ export default function Numbers() {
     }
   };
 
-  const uploadGreeting = async (n: PhoneNumber, file: File) => {
-    setError(null);
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'mp3';
-    const path = `${n.id}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('dialer-greetings').upload(path, file, { contentType: file.type || 'audio/mpeg' });
-    if (error) return setError(error.message);
-    if (n.voicemail_greeting_path) await supabase.storage.from('dialer-greetings').remove([n.voicemail_greeting_path]);
-    await update(n.id, { voicemail_greeting_path: path });
-  };
-
-  const removeGreeting = async (n: PhoneNumber) => {
-    if (n.voicemail_greeting_path) await supabase.storage.from('dialer-greetings').remove([n.voicemail_greeting_path]);
-    await update(n.id, { voicemail_greeting_path: null });
-  };
-
-  const playGreeting = async (n: PhoneNumber) => {
-    if (!n.voicemail_greeting_path) return;
-    const { data } = await supabase.storage.from('dialer-greetings').createSignedUrl(n.voicemail_greeting_path, 300);
-    if (data?.signedUrl) new Audio(data.signedUrl).play();
-  };
 
   return (
     <>
@@ -116,13 +96,12 @@ export default function Numbers() {
                   <th className="th">Label</th>
                   <th className="th">Client</th>
                   <th className="th" title="Admins' one-off calls (Click-to-call) go out from this number">Click-to-call</th>
-                  <th className="th">Voicemail greeting</th>
                   <th className="th text-right">Health</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {!list.data?.length ? (
-                  <EmptyRow colSpan={6}>No numbers yet. Use Buy number, or Sync from Twilio if you bought them in Twilio directly.</EmptyRow>
+                  <EmptyRow colSpan={5}>No numbers yet. Use Buy number, or Sync from Twilio if you bought them in Twilio directly.</EmptyRow>
                 ) : (
                   list.data.map((n) => (
                     <Fragment key={n.id}>
@@ -168,26 +147,6 @@ export default function Numbers() {
                             Use for click-to-call
                           </button>
                         )}
-                      </td>
-                      <td className="td">
-                        <div className="flex items-center gap-3 text-sm">
-                          {n.voicemail_greeting_path ? (
-                            <>
-                              <button onClick={() => playGreeting(n)} className="text-brand hover:underline">
-                                Play custom
-                              </button>
-                              <button onClick={() => removeGreeting(n)} className="text-ink-muted hover:text-red-600" aria-label="Remove greeting">
-                                <Trash2 size={15} />
-                              </button>
-                            </>
-                          ) : (
-                            <span className="text-ink-faint">Standard</span>
-                          )}
-                          <label className="inline-flex cursor-pointer items-center gap-1 text-brand hover:underline">
-                            <Upload size={14} /> Upload
-                            <input type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" className="sr-only" onChange={(e) => e.target.files?.[0] && uploadGreeting(n, e.target.files[0])} />
-                          </label>
-                        </div>
                       </td>
                       <td className="td text-right">
                         <button

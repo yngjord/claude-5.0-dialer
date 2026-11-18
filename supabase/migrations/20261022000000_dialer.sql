@@ -1162,3 +1162,5 @@ grant execute on function public.dialer_number_reputation() to authenticated, se
 -- Calls go out from the campaign's chosen number or its client's number (one-off calls: the click-to-call number);
 -- there's no account-wide fallback. Campaigns can't be saved without one (Campaigns → create/edit).
 -- After the app stops using it, the column is dropped by hand: alter table public.dialer_phone_numbers drop column is_default;
+-- Custom voicemail greetings were removed (callers always hear the standard message). Once the app no longer reads
+-- it, the column can be dropped by hand: alter table public.dialer_phone_numbers drop column voicemail_greeting_path;

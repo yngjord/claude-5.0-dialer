@@ -9,7 +9,7 @@ import { formatDateTime, formatDuration } from '../lib/format';
 import { supabase } from '../lib/supabase';
 
 /**
- * Admins (for now): calls back from prospects. There are no live inbound calls, so callers hear the number's greeting
+ * Admins (for now): calls back from prospects. There are no live inbound calls, so callers hear the standard greeting
  * and can leave a message (recorded and transcribed). Each is linked to the rep who last called that number.
  * Bold = not yet opened; opening one marks it heard.
  */

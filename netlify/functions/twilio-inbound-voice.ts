@@ -10,7 +10,7 @@ const DEFAULT_GREETING = "Hi, sorry we can't take your call right now. Please le
 
 /**
  * POST /api/twilio/inbound-voice: the Voice URL on each of our numbers. No live inbound calls: callers hear the
- * number's greeting (a custom recording if one is uploaded) and can leave a voicemail, which is transcribed and
+ * standard greeting and can leave a voicemail, which is transcribed and
  * shows up on the Voicemails page of the rep who last called them. Their Airtable lead is set to follow up today.
  */
 export default handler(async (req, context) => {
@@ -19,10 +19,6 @@ export default handler(async (req, context) => {
   const phone = normalizeCallable(p.From);
   const caller = phone.ok ? phone.e164 : null;
   const route = caller ? await routeInbound(caller) : { contact: null, campaign: null, userId: null };
-
-  const number = must(await db().from('dialer_phone_numbers').select('voicemail_greeting_path').eq('e164', p.To).maybeSingle()) as {
-    voicemail_greeting_path: string | null;
-  } | null;
 
   const call = must(
     await db()
@@ -58,11 +54,7 @@ export default handler(async (req, context) => {
     );
   }
 
-  let greeting = `<Say voice="Polly.Olivia-Neural" language="en-AU">${xml(DEFAULT_GREETING)}</Say>`;
-  if (number?.voicemail_greeting_path) {
-    const { data } = await db().storage.from('dialer-greetings').createSignedUrl(number.voicemail_greeting_path, 600);
-    if (data?.signedUrl) greeting = `<Play>${xml(data.signedUrl)}</Play>`;
-  }
+  const greeting = `<Say voice="Polly.Olivia-Neural" language="en-AU">${xml(DEFAULT_GREETING)}</Say>`;
 
   return twiml(
     `${greeting}<Record maxLength="120" playBeep="true" trim="trim-silence" timeout="5"` +
