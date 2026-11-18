@@ -48,6 +48,7 @@ export function CampaignForm({
   const [name, setName] = useState(campaign?.name ?? '');
   const [clientId, setClientId] = useState(campaign?.airtable_client_id ?? '');
   const [numberId, setNumberId] = useState(campaign?.caller_number_id ?? '');
+  const [evergreen, setEvergreen] = useState(campaign?.is_evergreen ?? false);
   const [status, setStatus] = useState<Campaign['status']>(campaign?.status ?? 'active');
   const team = users.filter((u) => u.role === 'team');
   const teamBefore = (campaign?.campaign_members ?? []).map((m) => m.user_id).filter((id) => team.some((u) => u.id === id));
@@ -81,6 +82,7 @@ export function CampaignForm({
       client_name: client.name,
       airtable_client_id: client.id,
       caller_number_id: numberId || null,
+      is_evergreen: evergreen,
       script_id: pickedScript || null,
       status: newStatus ?? status,
     };
@@ -91,7 +93,12 @@ export function CampaignForm({
       await setTeamMember(id, assignee || null, teamBefore);
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save.');
+      const message = err instanceof Error ? err.message : 'Could not save.';
+      setError(
+        /one_evergreen_per_client/.test(message)
+          ? `${client.name} already has an evergreen campaign. Untick Evergreen, or remove the tag from the other campaign first.`
+          : message,
+      );
       setSaving(false);
     }
   };
@@ -194,6 +201,15 @@ export function CampaignForm({
             <p className="mt-1.5 text-xs text-ink-faint">Leave as the client's number unless this campaign needs a different one. Set client numbers in Phone numbers.</p>
           )}
         </div>
+        <label className="flex items-start gap-3 rounded-2xl border border-line px-4 py-3 text-sm">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand" checked={evergreen} onChange={(e) => setEvergreen(e.target.checked)} />
+          <span>
+            <span className="font-medium">Evergreen campaign</span>
+            <span className="mt-0.5 block text-xs text-ink-muted">
+              Warm leads this client submits in the portal are added here, with their context. One per client; assign one team member.
+            </span>
+          </span>
+        </label>
         <div>
           <label htmlFor="c-script" className="mb-2 block text-sm font-medium text-ink-soft">
             Call script

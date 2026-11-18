@@ -4,7 +4,8 @@ export function Tabs<T extends string>({
   onChange,
   label,
 }: {
-  tabs: { value: T; label: string; count?: number }[];
+  /** `dot`: a small red dot after the label, e.g. something is waiting there. */
+  tabs: { value: T; label: string; count?: number; dot?: boolean; dotTitle?: string }[];
   value: T;
   onChange: (value: T) => void;
   label: string;
@@ -27,6 +28,7 @@ export function Tabs<T extends string>({
             {tab.count !== undefined && (
               <span className={`text-[12px] tabular-nums ${active ? 'text-white/75' : 'text-ink-faint'}`}>{tab.count}</span>
             )}
+            {tab.dot && <span className="h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" title={tab.dotTitle} aria-label={tab.dotTitle} />}
           </button>
         );
       })}

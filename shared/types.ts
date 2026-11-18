@@ -47,6 +47,8 @@ export interface Campaign {
   status: CampaignStatus;
   /** 'justcall': an old JustCall Sales Dialer campaign, rebuilt from its imported calls (no contact list; read-only). */
   source: 'dialer' | 'justcall';
+  /** The client's evergreen campaign (at most one per client): warm leads they submit in the portal land here. */
+  is_evergreen: boolean;
   created_at: string;
 }
 
@@ -71,6 +73,8 @@ export interface CampaignStats {
   connects_total: number;
   /** Calls saved as Interested - Appointment Set, for the booking rate. */
   appointments_total: number;
+  /** Contacts not called yet. */
+  contacts_new: number;
 }
 
 export interface Contact {
@@ -98,6 +102,8 @@ export interface Contact {
   last_disposition: string | null;
   locked_by: string | null;
   locked_at: string | null;
+  /** Evergreen leads: the client's note on why they're warm (from the portal), shown while dialling. */
+  context: string | null;
   airtable_lead_id: string | null;
   created_at: string;
 }

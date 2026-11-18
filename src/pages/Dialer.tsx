@@ -8,6 +8,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { CallbackContext } from '../components/CallbackContext';
 import { CallControls } from '../components/CallControls';
 import { CompanyContext } from '../components/CompanyContext';
+import { LeadContext } from '../components/LeadContext';
 import { ContactCard } from '../components/ContactCard';
 import { EditLastCallModal } from '../components/EditLastCall';
 import LoadingBar from '../components/LoadingBar';
@@ -420,6 +421,7 @@ export default function Dialer() {
               <section className="card p-5 sm:p-8">
                 <ContactCard key={shown.id} contact={shown} centered history={false} sms={false}>
                   {shown.status === 'callback' && <CallbackContext contact={shown} />}
+                  <LeadContext contact={shown} clientName={campaign?.client_name} />
                   <CompanyContext contact={shown} />
                   {myCall ? (
                     <div className="border-t border-line pt-6">

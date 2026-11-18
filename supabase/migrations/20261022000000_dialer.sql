@@ -758,7 +758,9 @@ select
   (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound')::int as dials_total,
   (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound' and x.pickup_status = 'Human Pickup')::int as connects_total,
   -- For the booking rate (appointments ÷ dials). Added last so the view can be replaced in place.
-  (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound' and x.disposition = 'Interested - Appointment Set')::int as appointments_total
+  (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound' and x.disposition = 'Interested - Appointment Set')::int as appointments_total,
+  -- Contacts not called yet (evergreen campaigns: the rep's "waiting" dot). Added last, as above.
+  (select count(*) from dialer_contacts k where k.campaign_id = c.id and k.status = 'new')::int as contacts_new
 from dialer_campaigns c;
 
 -- Retry rules were removed: every call takes a contact out of the queue, and admins re-run by disposition.
@@ -1164,3 +1166,11 @@ grant execute on function public.dialer_number_reputation() to authenticated, se
 -- After the app stops using it, the column is dropped by hand: alter table public.dialer_phone_numbers drop column is_default;
 -- Custom voicemail greetings were removed (callers always hear the standard message). Once the app no longer reads
 -- it, the column can be dropped by hand: alter table public.dialer_phone_numbers drop column voicemail_greeting_path;
+
+-- ── Evergreen campaigns (warm leads clients submit in the portal) ───────────────────────────────────────────────
+-- One evergreen campaign per client, made by an admin. The portal only offers "submit a lead" when the client has one.
+-- Leads arrive from Clay (after phone enrichment) via POST /api/inbound/lead and are added to it with the client's
+-- context, which the rep sees while dialling. The portal submission id is kept in custom.portal_submission_id.
+alter table public.dialer_campaigns add column if not exists is_evergreen boolean not null default false;
+create unique index if not exists dialer_campaigns_one_evergreen_per_client on public.dialer_campaigns (airtable_client_id) where is_evergreen;
+alter table public.dialer_contacts add column if not exists context text;

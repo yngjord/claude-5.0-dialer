@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { mergeContext, validateInboundLead } from './inboundLead';
 import { checkReputation } from './numberHealth';
 import { parseGuests, renderTemplate, sendsInvites, validateInvite } from './calendar';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
@@ -356,5 +357,24 @@ describe('number reputation alert', () => {
     // Too new to judge.
     const fresh = checkReputation({ recent_dials: 49, recent_human: 5, baseline_dials: 0, baseline_human: 0 });
     expect(fresh).toMatchObject({ alert: false, tooEarly: true });
+  });
+});
+
+describe('inbound evergreen leads', () => {
+  const ok = { airtable_client_id: 'recIDYfcyBt6yjmi3', submission_id: 'sub_123', full_name: ' Jane Doe ', phone: '0412 345 678', context: 'Met at SaaS Connect, keen on case studies' };
+  it('accepts a full lead and tidies it', () => {
+    const v = validateInboundLead({ ...ok, email: ' Jane@Acme.COM ', submitted_by: 'Lee' });
+    expect(v.ok && v.lead).toMatchObject({ phone: '+61412345678', fullName: 'Jane Doe', firstName: 'Jane', email: 'jane@acme.com', submittedBy: 'Lee', title: null });
+  });
+  it('requires client, submission id, name, context and a mobile', () => {
+    const v = validateInboundLead({ ...ok, airtable_client_id: 'Kintell', submission_id: '', context: '  ', phone: '02 9876 5432' });
+    expect(v.ok).toBe(false);
+    expect(!v.ok && v.errors.length).toBe(4);
+    expect(validateInboundLead(null).ok).toBe(false);
+  });
+  it('adds a later submission’s context under the earlier one', () => {
+    expect(mergeContext(null, 'B', '2026-11-19')).toBe('B');
+    expect(mergeContext('A', 'A', '2026-11-19')).toBe('A');
+    expect(mergeContext('A', 'B', '2026-11-19')).toBe('A\n\n— New submission (2026-11-19): B');
   });
 });

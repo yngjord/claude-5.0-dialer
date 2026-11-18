@@ -21,11 +21,13 @@ import { supabase } from '../lib/supabase';
 import { CAMPAIGN_STATUS } from '../lib/tones';
 import { CampaignForm, MembersModal, RerunModal } from './admin/CampaignModals';
 
-type Tab = 'all' | 'active' | 'completed' | 'draft';
+type Tab = 'evergreen' | 'all' | 'active' | 'completed' | 'draft';
 
 // Paused campaigns sit with the active ones (team members can see them but not open them). Drafts are admin-only
 // (the database only returns them to admins, so All includes them for admins only). Newest first in every tab.
 const TAB_STATUSES: Record<Tab, Campaign['status'][]> = {
+  // Evergreen: each client's warm-leads campaign, whatever its status (filtered on is_evergreen below).
+  evergreen: ['active', 'paused', 'completed', 'draft'],
   all: ['active', 'paused', 'completed', 'draft'],
   active: ['active', 'paused'],
   completed: ['completed'],
@@ -46,7 +48,7 @@ function periodLabel(p: CampaignPeriod): string {
 }
 
 export default function Campaigns() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, me } = useAuth();
   const logos = useClientLogos();
   const [tab, setTab] = useState<Tab>('all');
   const { data, error, loading, reload } = useLoad(async () => {
@@ -80,9 +82,28 @@ export default function Campaigns() {
   // The client picked above the metrics also narrows the campaign list (and its tab counts).
   const [clientName, setClientName] = useState('');
   const forClient = data?.filter((d) => !clientName || d.campaign.client_name === clientName);
-  const count = (t: Tab) => forClient?.filter((d) => TAB_STATUSES[t].includes(d.campaign.status)).length ?? 0;
-  const shown = forClient?.filter((d) => TAB_STATUSES[tab].includes(d.campaign.status)) ?? [];
-  const tabs: { value: Tab; label: string; count?: number }[] = [
+  const inTab = (t: Tab, d: { campaign: CampaignRow }) => TAB_STATUSES[t].includes(d.campaign.status) && (t !== 'evergreen' || d.campaign.is_evergreen);
+  const count = (t: Tab) => forClient?.filter((d) => inTab(t, d)).length ?? 0;
+  const shown = forClient?.filter((d) => inTab(tab, d)) ?? [];
+  // Evergreen campaigns this user is assigned to that have warm leads nobody has called yet: a dot on the tab.
+  const waiting = (data ?? []).filter(
+    (d) => d.campaign.is_evergreen && d.campaign.status === 'active' && (d.stats?.contacts_new ?? 0) > 0 && d.campaign.campaign_members.some((m) => m.user_id === me?.userId),
+  );
+  const waitingLeads = waiting.reduce((n, d) => n + (d.stats?.contacts_new ?? 0), 0);
+  // The Evergreen tab only shows for people who have one (admins: when any exist; reps: when they're assigned one).
+  const hasEvergreen = (data ?? []).some((d) => d.campaign.is_evergreen);
+  const tabs: { value: Tab; label: string; count?: number; dot?: boolean; dotTitle?: string }[] = [
+    ...(hasEvergreen
+      ? [
+          {
+            value: 'evergreen' as const,
+            label: 'Evergreen',
+            count: data ? count('evergreen') : undefined,
+            dot: waitingLeads > 0,
+            dotTitle: `${waitingLeads} warm lead${waitingLeads === 1 ? '' : 's'} waiting to be called`,
+          },
+        ]
+      : []),
     { value: 'all', label: 'All', count: data ? count('all') : undefined },
     { value: 'active', label: 'Active', count: data ? count('active') : undefined },
     { value: 'completed', label: 'Completed', count: data ? count('completed') : undefined },
@@ -170,6 +191,11 @@ export default function Campaigns() {
                             {justcall && (
                               <span title="An older campaign from JustCall, before the dialer">
                                 <Badge tone="grey">JustCall</Badge>
+                              </span>
+                            )}
+                            {c.is_evergreen && (
+                              <span title="Warm leads this client submits in the portal land here">
+                                <Badge tone="green">Evergreen</Badge>
                               </span>
                             )}
                             {c.status !== 'active' && c.status !== 'completed' && <Badge tone={CAMPAIGN_STATUS[c.status].tone}>{CAMPAIGN_STATUS[c.status].label}</Badge>}

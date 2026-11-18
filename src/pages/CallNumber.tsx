@@ -52,9 +52,10 @@ export default function CallNumber() {
       locked_by: null,
       locked_at: null,
       airtable_lead_id: null,
+      context: null,
       created_at: new Date().toISOString(),
     } satisfies Contact;
-    const campaign = { id: '', name: 'Click-to-call', client_name: client, airtable_client_id: '', caller_number_id: null, script_id: null, status: 'active', source: 'dialer', created_at: contact.created_at } satisfies Campaign;
+    const campaign = { id: '', name: 'Click-to-call', client_name: client, airtable_client_id: '', caller_number_id: null, script_id: null, status: 'active', source: 'dialer', is_evergreen: false, created_at: contact.created_at } satisfies Campaign;
     try {
       await dial(contact, campaign, 'oneoff');
     } catch (err) {
