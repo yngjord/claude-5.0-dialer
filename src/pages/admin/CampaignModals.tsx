@@ -70,6 +70,9 @@ export function CampaignForm({
     const client = clients.data?.find((c) => c.id === clientId);
     if (!name.trim()) return setError('Give the campaign a name.');
     if (!client) return setError('Choose the client.');
+    // Every campaign needs a number to call from: one picked here, or the client's own (no account-wide fallback).
+    if (!numberId && !numbers.some((n) => n.client_name === client.name))
+      return setError(`${client.name} has no phone number yet. Pick a caller number, or assign one to ${client.name} in Phone numbers.`);
 
     setSaving(true);
     setError(null);
@@ -95,6 +98,8 @@ export function CampaignForm({
 
   if (campaign && deleting) return <DeleteCampaignModal campaign={campaign} onCancel={() => setDeleting(false)} onDeleted={onSaved} />;
   const client = clients.data?.find((c) => c.id === clientId);
+  // The number "The client's number" resolves to (the oldest, as when calling).
+  const clientNumber = client ? numbers.filter((n) => n.client_name === client.name).sort((a, b) => a.created_at.localeCompare(b.created_at))[0] : undefined;
   if (managingScripts && client) {
     return (
       <ScriptsModal
@@ -168,14 +173,26 @@ export function CampaignForm({
             Caller number
           </label>
           <select id="c-number" className="field" value={numberId} onChange={(e) => setNumberId(e.target.value)}>
-            <option value="">The client's number</option>
+            <option value="">
+              {!client
+                ? "The client's number"
+                : clientNumber
+                  ? `The client's number (${formatPhone(clientNumber.e164)}${clientNumber.label ? ` · ${clientNumber.label}` : ''})`
+                  : `The client's number (${client.name} has none yet)`}
+            </option>
             {numbers.map((n) => (
               <option key={n.id} value={n.id}>
                 {formatPhone(n.e164)} {n.label ? `· ${n.label}` : ''}
               </option>
             ))}
           </select>
-          <p className="mt-1.5 text-xs text-ink-faint">Leave as the client's number unless this campaign needs a different one. Set client numbers in Phone numbers.</p>
+          {client && !numberId && !clientNumber ? (
+            <p className="mt-1.5 text-xs text-red-600">
+              {client.name} has no phone number. Pick one above, or assign one to {client.name} in Phone numbers, before saving.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-xs text-ink-faint">Leave as the client's number unless this campaign needs a different one. Set client numbers in Phone numbers.</p>
+          )}
         </div>
         <div>
           <label htmlFor="c-script" className="mb-2 block text-sm font-medium text-ink-soft">

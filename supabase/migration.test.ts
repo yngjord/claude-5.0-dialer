@@ -206,7 +206,6 @@ describe('server call steps', () => {
 
   it('starts a call: checks the rep, picks the caller number and logs the call', async () => {
     await pg.exec(`insert into dialer_phone_numbers (e164, client_name) values ('+61400000099', 'Kintell'), ('+61400000098', null)`);
-    await pg.exec(`update dialer_phone_numbers set is_default = true where e164 = '+61400000098'`);
     const a = await contactId('A');
     expect(await start(CALL, a, TEAM1)).toEqual({ from: '+61400000099', to: '+61411111111' });
     const [call] = await rows<Record<string, unknown>>('select user_id, agent_name, client_name, campaign_name, full_name, from_number, twilio_status, twilio_call_sid from dialer_calls where id = $1', [CALL]);
@@ -215,8 +214,9 @@ describe('server call steps', () => {
     expect(await start('20000000-0000-0000-0000-000000000002', await contactId('Elsewhere'), TEAM1)).toEqual({ error: 'member' });
     expect(await start('20000000-0000-0000-0000-000000000003', a, CLIENT)).toEqual({ error: 'user' });
     expect(await start('20000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-0000000000ff', TEAM1)).toEqual({ error: 'contact' });
-    // Admins can call any campaign; Morfless has no number of its own, so the default is used.
-    expect(await start('20000000-0000-0000-0000-000000000005', await contactId('Elsewhere'), ADMIN)).toEqual({ from: '+61400000098', to: '+64211234567' });
+    // Admins can call any campaign. Morfless has no number of its own and there's no account-wide fallback, so the
+    // call is logged as failed rather than going out from another client's number.
+    expect(await start('20000000-0000-0000-0000-000000000005', await contactId('Elsewhere'), ADMIN)).toEqual({ from: null, to: '+64211234567' });
   });
 
   it('saves a wrap-up once, moves the contact on, and only lets the rep (or an admin) do it', async () => {

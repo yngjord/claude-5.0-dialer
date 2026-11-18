@@ -532,8 +532,7 @@ begin
 
   caller := coalesce(
     (select e164 from dialer_phone_numbers where id = camp.caller_number_id),
-    (select e164 from dialer_phone_numbers where client_name = camp.client_name order by created_at limit 1),
-    (select e164 from dialer_phone_numbers where is_default order by created_at limit 1)
+    (select e164 from dialer_phone_numbers where client_name = camp.client_name order by created_at limit 1)
   );
 
   insert into dialer_calls (id, direction, campaign_id, contact_id, user_id, agent_name, client_name, campaign_name, full_name, email,
@@ -1028,8 +1027,7 @@ begin
     return jsonb_build_object('error', 'user');
   end if;
   caller := coalesce(
-    (select e164 from dialer_phone_numbers where is_click_to_call limit 1),
-    (select e164 from dialer_phone_numbers where is_default order by created_at limit 1)
+    (select e164 from dialer_phone_numbers where is_click_to_call limit 1)
   );
   insert into dialer_calls (id, direction, user_id, agent_name, client_name, campaign_name, full_name, company, phone_e164, from_number,
                             to_number, twilio_call_sid, twilio_status)
@@ -1159,3 +1157,8 @@ language sql stable security invoker set search_path = public as $$
 $$;
 revoke execute on function public.dialer_number_reputation() from public, anon;
 grant execute on function public.dialer_number_reputation() to authenticated, service_role;
+
+-- ── No default number ───────────────────────────────────────────────────────────────────────────────────────────
+-- Calls go out from the campaign's chosen number or its client's number (one-off calls: the click-to-call number);
+-- there's no account-wide fallback. Campaigns can't be saved without one (Campaigns → create/edit).
+-- After the app stops using it, the column is dropped by hand: alter table public.dialer_phone_numbers drop column is_default;

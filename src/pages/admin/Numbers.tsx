@@ -15,7 +15,7 @@ import { alertText, useNumberAlerts } from '../../lib/numberAlerts';
 import { TwilioSetupCard } from './TwilioSetupCard';
 
 /**
- * Twilio numbers: which client each number belongs to, the default, and custom voicemail greetings.
+ * Twilio numbers: which client each number belongs to, the click-to-call number, and custom voicemail greetings.
  * "Sync from Twilio" imports bought numbers and points their voicemail/SMS webhooks at this site.
  */
 export default function Numbers() {
@@ -30,10 +30,6 @@ export default function Numbers() {
 
   const update = async (id: string, fields: Partial<PhoneNumber>) => {
     setError(null);
-    if (fields.is_default) {
-      const { error } = await supabase.from('dialer_phone_numbers').update({ is_default: false }).neq('id', id);
-      if (error) return setError(error.message);
-    }
     // Only one click-to-call number: unset the old one first (the database allows just one).
     if (fields.is_click_to_call) {
       const { error } = await supabase.from('dialer_phone_numbers').update({ is_click_to_call: false }).neq('id', id).eq('is_click_to_call', true);
@@ -119,7 +115,6 @@ export default function Numbers() {
                   <th className="th">Number</th>
                   <th className="th">Label</th>
                   <th className="th">Client</th>
-                  <th className="th">Default</th>
                   <th className="th" title="Admins' one-off calls (Click-to-call) go out from this number">Click-to-call</th>
                   <th className="th">Voicemail greeting</th>
                   <th className="th text-right">Health</th>
@@ -127,7 +122,7 @@ export default function Numbers() {
               </thead>
               <tbody className="divide-y divide-line">
                 {!list.data?.length ? (
-                  <EmptyRow colSpan={7}>No numbers yet. Use Buy number, or Sync from Twilio if you bought them in Twilio directly.</EmptyRow>
+                  <EmptyRow colSpan={6}>No numbers yet. Use Buy number, or Sync from Twilio if you bought them in Twilio directly.</EmptyRow>
                 ) : (
                   list.data.map((n) => (
                     <Fragment key={n.id}>
@@ -162,15 +157,6 @@ export default function Numbers() {
                             </option>
                           ))}
                         </select>
-                      </td>
-                      <td className="td">
-                        {n.is_default ? (
-                          <Badge tone="blue">Default</Badge>
-                        ) : (
-                          <button onClick={() => update(n.id, { is_default: true })} className="text-sm text-brand hover:underline">
-                            Make default
-                          </button>
-                        )}
                       </td>
                       <td className="td">
                         {n.is_click_to_call ? (

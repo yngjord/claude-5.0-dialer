@@ -23,19 +23,19 @@ export function twilioAuthHeader(): string {
 export { callbackUrl, verifyTwilioWebhook } from './webhook';
 
 /**
- * The number a campaign calls and texts from: the one picked on the campaign, else its client's number, else the
- * default. Numbers belong to clients, and every rep on that client's campaigns shares it.
+ * The number a campaign calls and texts from: the one picked on the campaign, else its client's number (the oldest,
+ * if it has several). Numbers belong to clients, and every rep on that client's campaigns shares it. No fallback:
+ * campaigns can't be saved without a number.
  */
 export async function pickCallerNumber(
   dbClient: import('@supabase/supabase-js').SupabaseClient,
   campaign: { caller_number_id: string | null; client_name: string } | null,
 ): Promise<string | null> {
-  const { data } = await dbClient.from('dialer_phone_numbers').select('id, e164, client_name, is_default').order('created_at');
-  const numbers = (data ?? []) as { id: string; e164: string; client_name: string | null; is_default: boolean }[];
+  const { data } = await dbClient.from('dialer_phone_numbers').select('id, e164, client_name').order('created_at');
+  const numbers = (data ?? []) as { id: string; e164: string; client_name: string | null }[];
   return (
     (campaign && numbers.find((n) => n.id === campaign.caller_number_id)?.e164) ??
     (campaign && numbers.find((n) => n.client_name === campaign.client_name)?.e164) ??
-    numbers.find((n) => n.is_default)?.e164 ??
     null
   );
 }
