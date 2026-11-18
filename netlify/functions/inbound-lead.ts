@@ -7,6 +7,7 @@ import { env, handler, HttpError, json } from './_lib/http';
 
 /** Constant-time check of the x-api-key header against INBOUND_LEADS_API_KEY. */
 function authorised(req: Request): boolean {
+  if (!process.env.INBOUND_LEADS_API_KEY?.trim()) throw new HttpError(503, 'Not set up yet: INBOUND_LEADS_API_KEY is missing in Netlify.');
   const given = createHash('sha256').update(req.headers.get('x-api-key') ?? '').digest();
   const expected = createHash('sha256').update(env('INBOUND_LEADS_API_KEY')).digest();
   return timingSafeEqual(given, expected) && !!req.headers.get('x-api-key');
