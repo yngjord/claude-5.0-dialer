@@ -2,7 +2,7 @@ import { ArrowLeft, PhoneOutgoing, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { formatPhone } from '../../shared/phone';
-import type { Campaign, CampaignStats, Contact } from '../../shared/types';
+import type { Campaign, CampaignStats, Contact, DialerUser } from '../../shared/types';
 import { useAuth } from '../auth/AuthProvider';
 import { ImportModal } from '../components/ImportModal';
 import { Badge } from '../components/ui/Badge';
@@ -41,20 +41,33 @@ function contactsQuery(campaignId: string, columns: string, filter: Filter, sear
   return q;
 }
 
-/** Deletes these contacts (admins only, by RLS), skipping any a rep has open. Their calls stay in the call log. */
-async function deleteContacts(ids: string[]): Promise<number> {
+type Held = { ids: string[]; who: string };
+
+/**
+ * Deletes these contacts (admins only, by RLS). Their calls stay in the call log. Unless `force`, a contact another
+ * person has had open in the dialer in the last half hour is left alone and reported back, so it can't vanish from
+ * under a live call; your own open ones are fine to delete.
+ */
+async function deleteContacts(ids: string[], force = false): Promise<{ deleted: number; held: Held | null }> {
   const since = new Date(Date.now() - LOCK_MINUTES * 60_000).toISOString();
+  const myId = (await supabase.auth.getSession()).data.session?.user.id ?? '';
   let deleted = 0;
   for (let i = 0; i < ids.length; i += 100) {
-    const res = await supabase
-      .from('dialer_contacts')
-      .delete()
-      .in('id', ids.slice(i, i + 100))
-      .or(`locked_by.is.null,locked_at.lt."${since}"`)
-      .select('id');
-    deleted += (must(res) as { id: string }[]).length;
+    let q = supabase.from('dialer_contacts').delete().in('id', ids.slice(i, i + 100));
+    if (!force) q = q.or(`locked_by.is.null,locked_at.lt."${since}"${myId ? `,locked_by.eq.${myId}` : ''}`);
+    deleted += (must(await q.select('id')) as { id: string }[]).length;
   }
-  return deleted;
+  if (force || deleted === ids.length) return { deleted, held: null };
+
+  // What's left, and who has it open.
+  const left: { id: string; locked_by: string | null }[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    left.push(...(must(await supabase.from('dialer_contacts').select('id, locked_by').in('id', ids.slice(i, i + 100))) as typeof left));
+  }
+  if (!left.length) return { deleted, held: null };
+  const users = must(await supabase.rpc('dialer_users')) as DialerUser[];
+  const names = [...new Set(left.map((c) => users.find((u) => u.id === c.locked_by)).map((u) => u?.display_name || u?.email || 'a rep'))];
+  return { deleted, held: { ids: left.map((c) => c.id), who: names.join(', ') } };
 }
 
 export default function CampaignPage() {
@@ -69,7 +82,7 @@ export default function CampaignPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [allMatching, setAllMatching] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string; held?: Held } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), 300);
@@ -131,6 +144,32 @@ export default function CampaignPage() {
     setAllMatching(false);
   };
 
+  const finishDelete = async ({ deleted, held }: { deleted: number; held: Held | null }) => {
+    const k = held?.ids.length ?? 0;
+    setNotice({
+      ok: true,
+      text: `Deleted ${deleted.toLocaleString()} contact${deleted === 1 ? '' : 's'}.${
+        held ? ` ${k.toLocaleString()} skipped: ${held.who} ${k === 1 ? 'has it' : 'has them'} open in the dialer.` : ''
+      }`,
+      held: held ?? undefined,
+    });
+    if (page > 0 && deleted >= pageIds.length) setPage(0);
+    head.reload({ quiet: true });
+    list.reload({ quiet: true });
+  };
+
+  const deleteHeldAnyway = async (held: Held) => {
+    if (!window.confirm(`${held.who} may be on a call with ${held.ids.length === 1 ? 'this contact' : 'these contacts'} right now. Delete anyway?`)) return;
+    setDeleting(true);
+    try {
+      await finishDelete(await deleteContacts(held.ids, true));
+    } catch (err) {
+      setNotice({ ok: false, text: err instanceof Error ? err.message : 'Could not delete the contacts.' });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const removeSelected = async () => {
     setDeleting(true);
     setNotice(null);
@@ -147,18 +186,8 @@ export default function CampaignPage() {
       if (!ids.length) return;
       const n = ids.length.toLocaleString();
       if (!window.confirm(`Delete ${n} contact${ids.length === 1 ? '' : 's'} from this campaign?\n\nTheir past calls stay in Call logs. This can't be undone.`)) return;
-      const deleted = await deleteContacts(ids);
-      const skipped = ids.length - deleted;
-      setNotice({
-        ok: true,
-        text: `Deleted ${deleted.toLocaleString()} contact${deleted === 1 ? '' : 's'}.${
-          skipped ? ` ${skipped.toLocaleString()} skipped because a rep has ${skipped === 1 ? 'it' : 'them'} open in the dialer right now; try again shortly.` : ''
-        }`,
-      });
+      await finishDelete(await deleteContacts(ids));
       clearSelection();
-      if (page > 0 && deleted >= pageIds.length) setPage(0);
-      head.reload({ quiet: true });
-      list.reload({ quiet: true });
     } catch (err) {
       setNotice({ ok: false, text: err instanceof Error ? err.message : 'Could not delete the contacts.' });
     } finally {
@@ -258,6 +287,11 @@ export default function CampaignPage() {
             {notice && (
               <p role={notice.ok ? 'status' : 'alert'} className={`rounded-2xl px-4 py-2.5 text-sm ${notice.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'}`}>
                 {notice.text}
+                {notice.held && (
+                  <button type="button" className="ml-2 font-medium text-red-700 underline-offset-2 hover:underline" onClick={() => deleteHeldAnyway(notice.held!)} disabled={deleting}>
+                    Delete anyway
+                  </button>
+                )}
               </p>
             )}
           </div>

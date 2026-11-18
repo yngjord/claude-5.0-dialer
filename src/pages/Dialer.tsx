@@ -18,7 +18,7 @@ import { Spinner } from '../components/ui/Spinner';
 import { ErrorState } from '../components/ui/States';
 import { WrapUpForm, type WrapUpResult } from '../components/WrapUpForm';
 import { must, useLoad } from '../lib/api';
-import { supabase } from '../lib/supabase';
+import { supabase, rpcOnUnload } from '../lib/supabase';
 import { CAMPAIGN_STATUS } from '../lib/tones';
 import { useVoice } from '../voice/VoiceProvider';
 import { invitesBroken } from '../../shared/calendar';
@@ -89,14 +89,25 @@ export default function Dialer() {
   heldRef.current = stage === 'ready' && contact ? contact.id : null;
   // The next contact, fetched while the current call is being wrapped up (see below).
   const nextRef = useRef<{ callId: string; next: Promise<Contact | null>; contactId: string | null } | null>(null);
-  useEffect(
-    () => () => {
-      for (const held of [heldRef.current, nextRef.current?.contactId]) {
-        if (held) supabase.rpc('dialer_release_contact', { p_contact_id: held, p_skip: false });
-      }
-    },
-    [],
-  );
+  useEffect(() => {
+    // Leaving the dialer (another page, closing the tab, reloading) gives held contacts back to the queue, so they're
+    // not stuck as "open in the dialer" until the lock times out.
+    let token: string | null = null;
+    const keepToken = (t: string | null | undefined) => (token = t ?? null);
+    supabase.auth.getSession().then(({ data }) => keepToken(data.session?.access_token));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => keepToken(session?.access_token));
+    const held = () => [heldRef.current, nextRef.current?.contactId].filter((x): x is string => !!x);
+    const onPageHide = () => {
+      for (const id of held()) void rpcOnUnload('dialer_release_contact', { p_contact_id: id, p_skip: false }, token);
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      sub.subscription.unsubscribe();
+      // .then() is what sends the request: a Supabase query that's never awaited never runs.
+      for (const id of held()) supabase.rpc('dialer_release_contact', { p_contact_id: id, p_skip: false }).then(() => undefined);
+    };
+  }, []);
 
   const myCall = active && active.mode === 'power' && active.campaign.id === id ? active : null;
 
