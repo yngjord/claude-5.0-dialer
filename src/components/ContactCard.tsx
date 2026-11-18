@@ -1,5 +1,6 @@
 import { Building2, ExternalLink, Mail, MessageSquare, Phone } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { INTERNAL_CUSTOM_KEYS } from '../../shared/inboundLead';
 import { formatPhone } from '../../shared/phone';
 import type { CallRow, Contact } from '../../shared/types';
 import { must, useLoad } from '../lib/api';
@@ -33,7 +34,9 @@ export function ContactCard({
     async () => new Map((must(await supabase.from('dialer_custom_fields').select('key, label')) as { key: string; label: string }[]).map((f) => [f.key, f.label])),
     [],
   );
-  const custom = Object.entries(contact.custom ?? {}).map(([key, value]) => [fieldNames.data?.get(key) ?? key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), value] as const);
+  const custom = Object.entries(contact.custom ?? {})
+    .filter(([key]) => !INTERNAL_CUSTOM_KEYS.includes(key))
+    .map(([key, value]) => [fieldNames.data?.get(key) ?? key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), value] as const);
 
   return (
     <div className={centered ? 'text-center' : undefined}>

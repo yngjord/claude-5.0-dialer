@@ -8,12 +8,10 @@ import type { Contact } from '../../shared/types';
 export function LeadContext({ contact, clientName }: { contact: Contact; clientName: string | null | undefined }) {
   const context = contact.context?.trim();
   if (!context) return null;
-  const by = typeof contact.custom?.submitted_by === 'string' ? contact.custom.submitted_by : null;
   return (
     <div className="mx-auto mb-6 max-w-xl rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-left text-sm">
       <p className="flex items-center gap-2 font-medium text-amber-900">
         <Sparkles size={16} /> Warm lead from {clientName || 'the client'}
-        {by ? <span className="font-normal text-amber-900/70">· submitted by {by}</span> : null}
       </p>
       <p className="mt-2 whitespace-pre-wrap text-ink-soft">{context}</p>
     </div>

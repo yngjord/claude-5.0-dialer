@@ -1,5 +1,8 @@
 import { normalizePhone } from './phone';
 
+/** Kept on the contact for matching re-sent submissions, but not shown to reps. */
+export const INTERNAL_CUSTOM_KEYS: readonly string[] = ['portal_submission_id', 'submitted_by'];
+
 /** What Clay posts to /api/inbound/lead for a warm lead a client submitted in the portal (after phone enrichment). */
 export interface InboundLeadRequest {
   airtable_client_id: string;
