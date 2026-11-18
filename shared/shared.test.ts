@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { checkReputation } from './numberHealth';
 import { parseGuests, renderTemplate, sendsInvites, validateInvite } from './calendar';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
 import { buildBookingFields, buildLeadFields, LEAD_FIELDS as F, leadTranscriptText, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
@@ -337,5 +338,23 @@ describe('calendar invites', () => {
       'Meeting length must be 5 to 240 minutes.',
     ]);
     expect(validateInvite({ ...ok, guests: ['steve@spotto.io', 'nope'] }, now)).toEqual(['Check these email addresses: nope.']);
+  });
+});
+
+describe('number reputation alert', () => {
+  it('flags a real drop against the number’s own history', () => {
+    // Morfless #1 on 18 Nov: 7/80 recently vs 55/327 before.
+    const c = checkReputation({ recent_dials: 80, recent_human: 7, baseline_dials: 327, baseline_human: 55 });
+    expect(c.alert).toBe(true);
+    expect(Math.round(c.drop! * 100)).toBe(48);
+  });
+  it('ignores normal swings and small samples', () => {
+    // Kintell #1: 30% down but within noise.
+    expect(checkReputation({ recent_dials: 80, recent_human: 18, baseline_dials: 164, baseline_human: 53 }).alert).toBe(false);
+    // Better than usual.
+    expect(checkReputation({ recent_dials: 80, recent_human: 34, baseline_dials: 200, baseline_human: 60 }).alert).toBe(false);
+    // Too new to judge.
+    const fresh = checkReputation({ recent_dials: 49, recent_human: 5, baseline_dials: 0, baseline_human: 0 });
+    expect(fresh).toMatchObject({ alert: false, tooEarly: true });
   });
 });

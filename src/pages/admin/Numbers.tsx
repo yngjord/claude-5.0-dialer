@@ -10,6 +10,8 @@ import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/
 import { api, must, useLoad } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { BuyNumberModal } from './BuyNumberModal';
+import { RedOrb } from '../../components/ui/RedOrb';
+import { alertText, useNumberAlerts } from '../../lib/numberAlerts';
 import { TwilioSetupCard } from './TwilioSetupCard';
 
 /**
@@ -19,6 +21,7 @@ import { TwilioSetupCard } from './TwilioSetupCard';
 export default function Numbers() {
   const list = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
   const clients = useLoad(() => api<AirtableClient[]>('clients'), []);
+  const alerts = useNumberAlerts(true);
   const [syncing, setSyncing] = useState(false);
   const [buying, setBuying] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -129,7 +132,12 @@ export default function Numbers() {
                   list.data.map((n) => (
                     <Fragment key={n.id}>
                     <tr>
-                      <td className="td font-medium tabular-nums">{formatPhone(n.e164)}</td>
+                      <td className="td font-medium tabular-nums">
+                        <span className="inline-flex items-center gap-2">
+                          {formatPhone(n.e164)}
+                          {alerts.get(n.id)?.alert && <RedOrb title={alertText(alerts.get(n.id)!)} />}
+                        </span>
+                      </td>
                       <td className="td">
                         <input
                           aria-label={`Label for ${n.e164}`}

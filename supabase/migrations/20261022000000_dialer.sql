@@ -1131,3 +1131,31 @@ alter table public.dialer_client_logos enable row level security;
 drop policy if exists "Dialer users read client logos" on public.dialer_client_logos;
 create policy "Dialer users read client logos" on public.dialer_client_logos for select to authenticated using (is_dialer_user());
 insert into storage.buckets (id, name, public) values ('client-logos', 'client-logos', true) on conflict (id) do nothing;
+
+-- ── Number reputation alert ─────────────────────────────────────────────────────────────────────────────────────
+-- Per number: human pickups over its last 80 dials (failed calls left out) and over the 400 before that, its own
+-- baseline. The app (shared/numberHealth.ts) flags a number whose recent rate has dropped well below its baseline,
+-- a sign it's being labelled as spam. Each client has its own number and audiences differ, so a number is only ever
+-- compared with itself. Admins only.
+create or replace function public.dialer_number_reputation()
+returns table (number_id uuid, recent_dials int, recent_human int, baseline_dials int, baseline_human int, last_dial_at timestamptz)
+language sql stable security invoker set search_path = public as $$
+  with c as (
+    select n.id, x.started_at, x.pickup_status = 'Human Pickup' as human,
+           row_number() over (partition by n.id order by x.started_at desc) as rn
+    from dialer_phone_numbers n
+    join dialer_calls x on x.from_number = n.e164
+    where is_dialer_admin()
+      and x.source = 'dialer' and x.direction = 'outbound' and x.kind = 'call'
+      and x.pickup_status is distinct from 'Failed'
+  )
+  select id,
+         count(*) filter (where rn <= 80)::int,
+         count(*) filter (where rn <= 80 and human)::int,
+         count(*) filter (where rn > 80 and rn <= 480)::int,
+         count(*) filter (where rn > 80 and rn <= 480 and human)::int,
+         max(started_at)
+  from c group by id
+$$;
+revoke execute on function public.dialer_number_reputation() from public, anon;
+grant execute on function public.dialer_number_reputation() to authenticated, service_role;
