@@ -6,7 +6,7 @@ import { contactOutcome } from '../../shared/outcomes';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { createRecord } from './_lib/airtable';
 import { requireSignedIn } from './_lib/auth';
-import { addToBlocklist } from './_lib/blocklist';
+import { addToBlocklist, removeFromBlocklist } from './_lib/blocklist';
 import { createLeadBooking } from './_lib/booking';
 import { db, must } from './_lib/db';
 import { calendarAccessToken, createInvite, inviteEventId } from './_lib/google';
@@ -100,6 +100,9 @@ export default handler(async (req, context) => {
     context.waitUntil(addToBlocklist(body.callId).catch((err) => console.error('Blocklist failed for call', body.callId, err)));
     // Twilio may have guessed an answering machine and skipped the transcript: the rep says it was a person.
     context.waitUntil(transcribeSkippedHumanPickup(body.callId).catch((err) => console.error('Transcript for corrected pickup failed', body.callId, err)));
+  } else {
+    // Corrected away from Human Pickup (e.g. "Edit last call"): take back the blocklist entry the first save made.
+    context.waitUntil(removeFromBlocklist(body.callId).catch((err) => console.error('Blocklist removal failed for call', body.callId, err)));
   }
 
   let leadId = saved.airtable_lead_id;

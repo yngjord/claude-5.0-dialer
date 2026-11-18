@@ -1,6 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { db, must } from './_lib/db';
-import { addToBlocklist } from './_lib/blocklist';
+import { addToBlocklist, removeFromBlocklist } from './_lib/blocklist';
 import { syncLeadTranscript } from './_lib/leadTranscript';
 import { syncClientLogos } from './_lib/clientLogos';
 import { loadMediaCall, processRecording, storeTranscript, transcribeSkippedHumanPickup } from './_lib/media';
@@ -69,6 +69,14 @@ export default async () => {
   ) as { id: string }[];
   for (const { id } of leadTranscripts) {
     await syncLeadTranscript(id).catch((err) => console.error('Sweep: lead transcript failed', id, err));
+  }
+
+  // Calls that made a blocklist entry but are no longer Human Pickups (corrected later): take the entry back.
+  const unblock = must(
+    await db().from('dialer_calls').select('id').not('blocklist_record_id', 'is', null).neq('pickup_status', 'Human Pickup').limit(20),
+  ) as { id: string }[];
+  for (const { id } of unblock) {
+    await removeFromBlocklist(id).catch((err) => console.error('Sweep: blocklist removal failed', id, err));
   }
 
   // Human pickups wrapped up 5+ minutes ago (the wrap-up's own attempt has finished) and still not on the blocklist.

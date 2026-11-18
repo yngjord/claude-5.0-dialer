@@ -77,3 +77,13 @@ export async function createRecord<F>(table: string, fields: Partial<F>): Promis
 export async function updateRecord(table: string, id: string, fields: Record<string, unknown>): Promise<void> {
   await request(`${encodeURIComponent(table)}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ fields, typecast: false }) });
 }
+
+/** Deletes one record. A record that's already gone counts as deleted. */
+export async function deleteRecord(table: string, id: string): Promise<void> {
+  try {
+    await request(`${encodeURIComponent(table)}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch (err) {
+    if (err instanceof HttpError && /NOT_FOUND|not found|does not exist/i.test(err.message)) return;
+    throw err;
+  }
+}

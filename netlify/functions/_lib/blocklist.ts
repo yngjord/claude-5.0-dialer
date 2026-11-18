@@ -1,6 +1,6 @@
 import { CONNECTED_PICKUP_STATUS } from '../../../shared/constants';
 import { BLOCKLIST_TABLE, buildBlocklistFields } from '../../../shared/blocklist';
-import { createRecord } from './airtable';
+import { createRecord, deleteRecord } from './airtable';
 import { db, must } from './db';
 
 /**
@@ -41,4 +41,19 @@ export async function addToBlocklist(callId: string): Promise<void> {
     }),
   );
   must(await db().from('dialer_calls').update({ blocklist_record_id: id }).eq('id', call.id));
+}
+
+/**
+ * Undoes addToBlocklist when a call is no longer a Human Pickup (e.g. the rep corrected it to Machine Pickup with
+ * "Edit last call"): deletes the block this call created and forgets it. Blocks from other calls are left alone.
+ */
+export async function removeFromBlocklist(callId: string): Promise<void> {
+  const call = must(await db().from('dialer_calls').select('id, pickup_status, blocklist_record_id').eq('id', callId).maybeSingle()) as {
+    id: string;
+    pickup_status: string | null;
+    blocklist_record_id: string | null;
+  } | null;
+  if (!call?.blocklist_record_id || call.pickup_status === CONNECTED_PICKUP_STATUS) return;
+  await deleteRecord(BLOCKLIST_TABLE, call.blocklist_record_id);
+  must(await db().from('dialer_calls').update({ blocklist_record_id: null }).eq('id', call.id).eq('blocklist_record_id', call.blocklist_record_id));
 }
