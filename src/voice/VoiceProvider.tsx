@@ -29,6 +29,8 @@ export interface ActiveCall {
   error: string | null;
   /** The connection dropped mid-call and Twilio is reconnecting it (up to 30 seconds). */
   reconnecting?: boolean;
+  /** Twilio is warning about the rep's internet connection (delay, lost audio or jitter) right now. */
+  weakConnection?: boolean;
 }
 
 interface VoiceContextValue {
@@ -53,6 +55,8 @@ const fetchToken = () => api<{ token: string }>('voice-token').then((r) => r.tok
 const TOKEN_ERRORS = new Set([20101, 20103, 20104, 20105, 20151, 31202, 31204, 31205]);
 /** The phone's connection to Twilio dropped (e.g. 31005 after a laptop sleeps or the network changes). */
 const CONNECTION_ERRORS = new Set([31005, 31009, 53000, 53001]);
+/** Twilio call-quality warnings that point at the rep's internet connection (not their mic or the prospect). */
+const NETWORK_WARNINGS = new Set(['high-rtt', 'high-packet-loss', 'high-jitter', 'low-mos']);
 /** Tokens last an hour (voice-token.ts); one older than this is replaced before dialling, to be safe. */
 const TOKEN_MAX_AGE_MS = 40 * 60_000;
 const errorCode = (err: unknown) => (typeof err === 'object' && err && 'code' in err ? Number((err as { code: unknown }).code) : NaN);
@@ -127,9 +131,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const token = await fetchToken();
         tokenAtRef.current = Date.now();
         const device = new Device(token, {
-          // Always Twilio's Sydney servers (no fallback to whichever is nearest): every rep and every prospect is in
-          // Australia or New Zealand, and a consistent route makes call start-up timings comparable.
-          edge: 'sydney',
+          // Twilio's nearest servers to each rep (Sydney for reps in Australia, Singapore for a rep in Bali), so the
+          // rep's audio spends as little time as possible on the public internet before it reaches Twilio's network.
+          edge: 'roaming',
           // Chrome and Edge: settle on an audio route faster, so the first seconds after the answer aren't silent.
           forceAggressiveIceNomination: true,
           // Renew 5 minutes before expiry rather than 10 seconds, so a briefly throttled background tab still makes it.
@@ -216,9 +220,20 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         call.on('mute', (muted: boolean) => patch(callId, { muted }));
         call.on('reconnecting', () => patch(callId, { reconnecting: true }));
         call.on('reconnected', () => patch(callId, { reconnecting: false }));
+        // Network-quality warnings come and go during the call; show "weak connection" while any is active.
+        const networkWarnings = new Set<string>();
+        call.on('warning', (name: string) => {
+          if (!NETWORK_WARNINGS.has(name)) return;
+          networkWarnings.add(name);
+          patch(callId, { weakConnection: true });
+        });
+        call.on('warning-cleared', (name: string) => {
+          if (!networkWarnings.delete(name)) return;
+          patch(callId, { weakConnection: networkWarnings.size > 0 });
+        });
         const end = () => {
           callRef.current = null;
-          patch(callId, { phase: 'ended', reconnecting: false });
+          patch(callId, { phase: 'ended', reconnecting: false, weakConnection: false });
         };
         call.on('disconnect', end);
         call.on('cancel', end);
