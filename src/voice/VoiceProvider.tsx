@@ -4,6 +4,7 @@ import type { CallRow, Campaign, Contact } from '../../shared/types';
 import { api } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { chosenMicId, chosenSpeakerId, onAudioDevicesChanged } from './audioDevices';
+import { watchCallAudio } from './callAudio';
 import { playDialChime, startRingback } from './ringback';
 import { callStatusLabel } from './status';
 
@@ -57,6 +58,16 @@ const TOKEN_MAX_AGE_MS = 40 * 60_000;
 const errorCode = (err: unknown) => (typeof err === 'object' && err && 'code' in err ? Number((err as { code: unknown }).code) : NaN);
 
 /** Sends call audio to the chosen speaker (Chrome/Edge; elsewhere the system default is used). */
+/**
+ * Opens the rep's microphone (their pick, else the system default) once and keeps it open between calls. Opening it
+ * per call made Bluetooth headsets switch into call mode as each call connected, so the first 2–3 seconds were silent.
+ */
+function applyMic(device: Device) {
+  const id = chosenMicId() || 'default';
+  if (device.audio?.inputDevice?.deviceId === id) return;
+  device.audio?.setInputDevice(id).catch(() => device.audio?.setInputDevice('default').catch(() => undefined));
+}
+
 function applySpeaker(device: Device) {
   if (!device.audio?.isOutputSelectionSupported) return;
   const id = chosenSpeakerId();
@@ -144,6 +155,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           setDeviceError(err.message ?? 'Phone connection error');
         });
         deviceRef.current = device;
+        applyMic(device);
         applySpeaker(device);
         setDeviceState('ready');
       } catch (err) {
@@ -173,9 +185,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       playDialChime();
       setActive({ callId, contact, campaign, mode, phase: 'connecting', muted: false, answeredAt: null, row: null, error: null });
 
-      // The rep's chosen microphone, for this call only (an unplugged one falls back to the default).
-      const mic = chosenMicId();
-      if (mic) await device.audio?.setInputDevice(mic).catch(() => undefined);
+      // Normally already open from when the phone started; this catches a mic that was unplugged since.
+      applyMic(device);
       applySpeaker(device);
 
       try {
@@ -195,6 +206,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           call = await device.connect({ params });
         }
         callRef.current = call;
+        watchCallAudio(call, device, callId);
         call.on('ringing', () => patch(callId, { phase: 'ringing' }));
         call.on('accept', () => patch(callId, { phase: 'live', answeredAt: Date.now() }));
         call.on('mute', (muted: boolean) => patch(callId, { muted }));
@@ -202,7 +214,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         call.on('reconnected', () => patch(callId, { reconnecting: false }));
         const end = () => {
           callRef.current = null;
-          if (mic) device.audio?.unsetInputDevice().catch(() => undefined);
           patch(callId, { phase: 'ended', reconnecting: false });
         };
         call.on('disconnect', end);
@@ -279,8 +290,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const sendDigits = useCallback((digits: string) => callRef.current?.sendDigits(digits), []);
   const clear = useCallback(() => setActive((a) => (a?.phase === 'ended' ? null : a)), []);
 
-  // A different speaker picked in the audio settings applies straight away, even mid-call.
-  useEffect(() => onAudioDevicesChanged(() => deviceRef.current && applySpeaker(deviceRef.current)), []);
+  // A different microphone or speaker picked in the audio settings applies straight away, even mid-call.
+  useEffect(
+    () =>
+      onAudioDevicesChanged(() => {
+        if (!deviceRef.current) return;
+        applyMic(deviceRef.current);
+        applySpeaker(deviceRef.current);
+      }),
+    [],
+  );
 
   // Coming back to the tab (or waking the laptop): renew an old token straight away.
   useEffect(() => {

@@ -1351,3 +1351,9 @@ drop function if exists public.dialer_performance_trend(timestamptz, timestamptz
 drop function if exists public.dialer_pickup_by_time(timestamptz, timestamptz, text, uuid);
 drop function if exists public.dialer_pickup_by_session_part(timestamptz, timestamptz, text, uuid, int);
 drop function if exists public.dialer_dialing_sessions(timestamptz, timestamptz, text, uuid, int);
+
+-- ── Call audio from the rep's browser ───────────────────────────────────────────────────────────────────────────
+-- For diagnosing "connected but I can't hear them": ms from the answer until the rep first heard the prospect
+-- (heard_ms) and first spoke (spoke_ms), Twilio's quality warnings, the mic and speaker in use, browser and edge.
+-- Written by POST /api/call-audio when an answered call ends.
+alter table public.dialer_calls add column if not exists client_audio jsonb;
