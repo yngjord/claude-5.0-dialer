@@ -28,6 +28,9 @@ export default handler(async (req) => {
   if (status === 'failed' || status === 'busy') {
     // Twilio's reason for the failure, e.g. 13227 (geo permissions) or SIP 403/404. Shows in the Netlify function logs.
     console.warn(`Call ${callId} ${status}: ErrorCode=${p.ErrorCode ?? '-'} SipResponseCode=${p.SipResponseCode ?? '-'} ${p.ErrorMessage ?? ''}`.trim());
+    // Kept on the call so the dialer can tell the rep why (e.g. a disconnected number) instead of a generic error.
+    patch.twilio_error_code = Number.parseInt(p.ErrorCode ?? '', 10) || null;
+    patch.sip_response_code = Number.parseInt(p.SipResponseCode ?? '', 10) || null;
   }
   if (FINAL.includes(status)) {
     patch.ended_at = new Date().toISOString();

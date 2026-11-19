@@ -129,6 +129,9 @@ export interface CallRow {
   to_number: string | null;
   twilio_call_sid: string | null;
   twilio_status: string | null;
+  /** Why the network refused the call (failed/busy only): Twilio error code and SIP response code. */
+  twilio_error_code?: number | null;
+  sip_response_code?: number | null;
   answered_by: string | null;
   started_at: string;
   answered_at: string | null;

@@ -1,6 +1,7 @@
 import { AlertTriangle, CalendarClock, CalendarPlus, CheckCircle2, Phone } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { APPOINTMENT_SET, CALLBACK, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, type Disposition, type PickupStatus } from '../../shared/constants';
+import { carrierFailure } from '../../shared/callFailure';
 import { invitesBroken, parseGuests, renderTemplate, sendsInvites, validateInvite, type InviteInput } from '../../shared/calendar';
 import { validateLead } from '../../shared/leads';
 import { zonedTimeToUtc } from '../../shared/time';
@@ -13,7 +14,10 @@ import { Button } from './ui/Button';
 import { Spinner } from './ui/Spinner';
 
 /** Disposition that fits the pickup when the rep hasn't picked one: saves a click on the many unanswered dials. */
-function suggestedDisposition(pickup: PickupStatus | null): Disposition | null {
+function suggestedDisposition(pickup: PickupStatus | null, row?: ActiveCall['row']): Disposition | null {
+  // A number the network says doesn't exist is suggested as Disconnected Number, so it leaves the queue for good.
+  const failure = carrierFailure(row);
+  if (failure) return failure.disposition;
   // Voicemail picked up (Machine Pickup) counts as No Answer too; the rep can switch it to Left Voicemail.
   if (pickup === 'Unanswered' || pickup === 'Busy' || pickup === 'Failed' || pickup === 'Machine Pickup') return 'No Answer';
   return null;
@@ -64,7 +68,7 @@ export function WrapUpForm({
   const livePickup = call.row?.pickup_status ?? null;
   const [pickup, setPickup] = useState<PickupStatus | ''>(livePickup ?? '');
   const [pickupTouched, setPickupTouched] = useState(!!saved);
-  const [disposition, setDisposition] = useState<Disposition | ''>(saved ? (saved.disposition ?? '') : (suggestedDisposition(livePickup) ?? ''));
+  const [disposition, setDisposition] = useState<Disposition | ''>(saved ? (saved.disposition ?? '') : (suggestedDisposition(livePickup, call.row) ?? ''));
   const [dispositionTouched, setDispositionTouched] = useState(!!saved);
   const [notes, setNotes] = useState(saved?.notes ?? '');
   const [fullName, setFullName] = useState(call.contact.full_name ?? '');
@@ -99,8 +103,12 @@ export function WrapUpForm({
   // Twilio's result can land a second or two after hang-up: keep following it until the rep changes it.
   useEffect(() => {
     if (!pickupTouched && livePickup) setPickup(livePickup);
-    if (!dispositionTouched && livePickup) setDisposition((d) => d || suggestedDisposition(livePickup) || '');
-  }, [livePickup, pickupTouched, dispositionTouched]);
+    if (!dispositionTouched && livePickup) {
+      // A carrier refusal outranks the No Answer suggested before its reason arrived.
+      const suggested = suggestedDisposition(livePickup, call.row);
+      setDisposition((d) => (carrierFailure(call.row) ? suggested || d : d || suggested || ''));
+    }
+  }, [livePickup, pickupTouched, dispositionTouched, call.row]);
 
   // A lead already made from this call isn't made again (or changed), so its details aren't asked for again.
   const leadExists = !!saved?.leadCreated;

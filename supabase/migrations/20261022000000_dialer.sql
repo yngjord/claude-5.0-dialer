@@ -1174,3 +1174,9 @@ grant execute on function public.dialer_number_reputation() to authenticated, se
 alter table public.dialer_campaigns add column if not exists is_evergreen boolean not null default false;
 create unique index if not exists dialer_campaigns_one_evergreen_per_client on public.dialer_campaigns (airtable_client_id) where is_evergreen;
 alter table public.dialer_contacts add column if not exists context text;
+
+-- ── Why a call failed ───────────────────────────────────────────────────────────────────────────────────────────
+-- From Twilio's status webhook for failed/busy calls, so the dialer can say "this number isn't connected" (error
+-- 13224 / SIP 404) instead of the browser's generic connection error, and suggest Disconnected Number.
+alter table public.dialer_calls add column if not exists twilio_error_code int;
+alter table public.dialer_calls add column if not exists sip_response_code int;
