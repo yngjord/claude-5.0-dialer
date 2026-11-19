@@ -13,6 +13,12 @@ export interface CallAudioReport {
   speaker: string | null;
   browser: string;
   edge: string | null;
+  /**
+   * Second by second for the first 12 seconds after the answer: audio packets received from and sent to Twilio,
+   * the rep's mic and speaker levels (0–32767) and round-trip time. Shows whether audio wasn't flowing at all
+   * (network) or was flowing but silent (headset, mic or speaker).
+   */
+  timeline: { t: number; rx: number; tx: number; lost: number; in: number; out: number; rtt: number }[];
 }
 
 // Volume levels (0–1) that count as sound rather than line noise.
@@ -36,6 +42,7 @@ export function watchCallAudio(call: Call, device: Device, callId: string): void
   let heard: number | null = null;
   let spoke: number | null = null;
   const warnings = new Set<string>();
+  const timeline: CallAudioReport['timeline'] = [];
   call.on('accept', () => (answeredAt = performance.now()));
   call.on('volume', (input: number, output: number) => {
     if (answeredAt == null) return;
@@ -44,6 +51,18 @@ export function watchCallAudio(call: Call, device: Device, callId: string): void
     if (spoke == null && input > SPOKE) spoke = t;
   });
   call.on('warning', (name: string) => warnings.size < 12 && warnings.add(name));
+  call.on('sample', (s: { packetsReceived: number; packetsSent: number; packetsLost: number; audioInputLevel: number; audioOutputLevel: number; rtt: number }) => {
+    if (answeredAt == null || timeline.length >= 12) return;
+    timeline.push({
+      t: Math.round((performance.now() - answeredAt) / 100) / 10,
+      rx: s.packetsReceived,
+      tx: s.packetsSent,
+      lost: s.packetsLost,
+      in: Math.round(s.audioInputLevel),
+      out: Math.round(s.audioOutputLevel),
+      rtt: Math.round(s.rtt),
+    });
+  });
   const send = () => {
     if (answeredAt == null) return;
     const speakers = [...(device.audio?.speakerDevices.get() ?? [])];
@@ -55,6 +74,7 @@ export function watchCallAudio(call: Call, device: Device, callId: string): void
       speaker: speakers[0]?.label || null,
       browser: browserName(),
       edge: device.edge ?? null,
+      timeline,
     };
     void supabase.auth.getSession().then(({ data }) =>
       fetch('/api/call-audio', {

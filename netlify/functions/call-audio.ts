@@ -25,6 +25,17 @@ export default handler(async (req) => {
     speaker: text(r.speaker),
     browser: text(r.browser, 60),
     edge: text(r.edge, 30),
+    timeline: Array.isArray(r.timeline)
+      ? r.timeline.slice(0, 12).map((x: Record<string, unknown>) => ({
+          t: typeof x?.t === 'number' && Number.isFinite(x.t) ? Math.round(x.t * 10) / 10 : null,
+          rx: num(x?.rx),
+          tx: num(x?.tx),
+          lost: num(x?.lost),
+          in: num(x?.in),
+          out: num(x?.out),
+          rtt: num(x?.rtt),
+        }))
+      : [],
   };
   must(await db().from('dialer_calls').update({ client_audio: clean }).eq('id', call.id));
   return json({ ok: true });
