@@ -127,7 +127,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         const token = await fetchToken();
         tokenAtRef.current = Date.now();
         const device = new Device(token, {
-          edge: ['sydney', 'roaming'],
+          // Always Twilio's Sydney servers (no fallback to whichever is nearest): every rep and every prospect is in
+          // Australia or New Zealand, and a consistent route makes call start-up timings comparable.
+          edge: 'sydney',
+          // Chrome and Edge: settle on an audio route faster, so the first seconds after the answer aren't silent.
+          forceAggressiveIceNomination: true,
           // Renew 5 minutes before expiry rather than 10 seconds, so a briefly throttled background tab still makes it.
           tokenRefreshMs: 5 * 60_000,
           // If the connection to Twilio drops mid-call (wifi blip, network change), keep the call and reconnect for up
