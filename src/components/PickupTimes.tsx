@@ -9,7 +9,24 @@ export interface Cell {
   dials: number;
   human: number;
 }
-type View = 'hour' | 'day';
+export interface SessionPart {
+  part: number;
+  dials: number;
+  human: number;
+  sessions: number;
+}
+type View = 'hour' | 'day' | 'session';
+type Loaded<T> = { data: T[] | null | undefined; loading: boolean; error: string | null };
+type Bar = { key: number; label: string; dials: number; human: number; sessions?: number };
+
+// Session view: only sessions this long (a 15+ minute gap starts a new one) are split into thirds.
+export const SESSION_MIN_DIALS = 30;
+const PARTS = ['First third', 'Middle third', 'Last third'];
+const VIEW_TEXT: Record<View, string> = {
+  hour: 'by hour of day, Sydney time',
+  day: 'by weekday, Sydney time',
+  session: `through each dialing session of ${SESSION_MIN_DIALS}+ calls, split into thirds`,
+};
 
 // Bars with fewer dials than this are drawn faded: too few calls to trust the rate.
 const MIN_DIALS = 10;
@@ -25,23 +42,39 @@ const plotW = W - PAD.left - PAD.right;
 const plotH = H - PAD.top - PAD.bottom;
 
 /**
- * Admin Performance: human pickup rate by hour of day or weekday (Sydney time), for the filters above (date range,
- * client, campaign), to find the best times to call. One series, so no legend; hover carries the counts.
+ * Admin Performance: human pickup rate by hour of day, weekday (Sydney time) or position in a dialing session, for
+ * the filters above (date range, client, campaign), to find the best times to call and whether pickups fade or dip
+ * as a session goes on. One series, so no legend; hover carries the counts.
  */
 export function PickupTimes({ from, to, clientName, campaignId }: { from: string; to: string; clientName: string | null; campaignId: string | null }) {
   const data = useLoad(
     async () => must(await supabase.rpc('dialer_pickup_by_time', { p_from: from, p_to: to, p_client_name: clientName, p_campaign_id: campaignId })) as Cell[],
     [from, to, clientName, campaignId],
   );
-  return <PickupTimesChart data={data} />;
+  const session = useLoad(
+    async () =>
+      must(
+        await supabase.rpc('dialer_pickup_by_session_part', { p_from: from, p_to: to, p_client_name: clientName, p_campaign_id: campaignId, p_min_dials: SESSION_MIN_DIALS }),
+      ) as SessionPart[],
+    [from, to, clientName, campaignId],
+  );
+  return <PickupTimesChart data={data} session={session} />;
 }
 
-export function PickupTimesChart({ data }: { data: { data: Cell[] | null | undefined; loading: boolean; error: string | null } }) {
+export function PickupTimesChart({ data: times, session }: { data: Loaded<Cell>; session?: Loaded<SessionPart> }) {
   const [view, setView] = useState<View>('hour');
   const [hover, setHover] = useState<number | null>(null);
+  const data = view === 'session' && session ? session : times;
 
-  const bars = useMemo(() => {
-    const cells = data.data ?? [];
+  const bars = useMemo((): Bar[] => {
+    if (view === 'session') {
+      const parts = session?.data ?? [];
+      return PARTS.map((label, i) => {
+        const p = parts.find((x) => x.part === i + 1);
+        return { key: i + 1, label, dials: p?.dials ?? 0, human: p?.human ?? 0, sessions: p?.sessions ?? 0 };
+      });
+    }
+    const cells = times.data ?? [];
     if (view === 'day') {
       const days = DAYS.map((label, i) => ({ key: i + 1, label, dials: 0, human: 0 }));
       for (const c of cells) {
@@ -51,7 +84,7 @@ export function PickupTimesChart({ data }: { data: { data: Cell[] | null | undef
       // Weekends only when someone dialled then.
       return days.filter((d) => d.key <= 5 || d.dials > 0);
     }
-    const hours = new Map<number, { key: number; label: string; dials: number; human: number }>();
+    const hours = new Map<number, Bar>();
     for (const c of cells) {
       const h = hours.get(c.hour) ?? { key: c.hour, label: hourLabel(c.hour), dials: 0, human: 0 };
       h.dials += c.dials;
@@ -61,7 +94,7 @@ export function PickupTimesChart({ data }: { data: { data: Cell[] | null | undef
     // Business hours always shown, plus any other hour that had dials.
     const keys = [...new Set([...Array.from({ length: 11 }, (_, i) => i + 8), ...hours.keys()])].sort((a, b) => a - b);
     return keys.map((k) => hours.get(k) ?? { key: k, label: hourLabel(k), dials: 0, human: 0 });
-  }, [data.data, view]);
+  }, [times.data, session?.data, view]);
 
   const max = Math.max(0.25, ...bars.map((b) => (b.dials ? b.human / b.dials : 0)));
   const top = Math.ceil(max * 4) / 4; // y axis to the next 25%
@@ -78,8 +111,12 @@ export function PickupTimesChart({ data }: { data: { data: Cell[] | null | undef
         <div>
           <p className="font-display text-[15px] font-medium">Best times to call</p>
           <p className="text-sm text-ink-muted">
-            Human pickup rate by {view === 'hour' ? 'hour of day' : 'weekday'}, Sydney time.{' '}
-            {best ? `Best: ${best.label} (${pct(best.human, best.dials)} of ${best.dials} dials).` : `Not enough calls yet: a ${view === 'hour' ? 'time' : 'day'} needs ${MIN_DIALS}+ dials to rank.`}
+            Human pickup rate {VIEW_TEXT[view]}.{' '}
+            {view === 'session' && !bars[0].sessions
+              ? `No dialing sessions of ${SESSION_MIN_DIALS}+ calls in this period.`
+              : best
+                ? `Best: ${view === 'session' ? best.label.toLowerCase() : best.label} (${pct(best.human, best.dials)} of ${best.dials} dials${view === 'session' ? `, ${best.sessions} session${best.sessions === 1 ? '' : 's'}` : ''}).`
+                : `Not enough calls yet: a ${view === 'hour' ? 'time' : view === 'day' ? 'day' : 'third'} needs ${MIN_DIALS}+ dials to rank.`}
           </p>
         </div>
         <Tabs
@@ -92,6 +129,7 @@ export function PickupTimesChart({ data }: { data: { data: Cell[] | null | undef
           tabs={[
             { value: 'hour', label: 'Hour' },
             { value: 'day', label: 'Weekday' },
+            ...(session ? [{ value: 'session' as const, label: 'Session' }] : []),
           ]}
         />
       </div>
@@ -100,7 +138,7 @@ export function PickupTimesChart({ data }: { data: { data: Cell[] | null | undef
         <p className="text-sm text-red-600">{data.error}</p>
       ) : (
         <div className={`relative transition-opacity ${data.loading ? 'opacity-50' : ''}`}>
-          <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full select-none" role="img" aria-label={`Human pickup rate by ${view === 'hour' ? 'hour of day' : 'weekday'}`} onPointerLeave={() => setHover(null)}>
+          <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full select-none" role="img" aria-label={`Human pickup rate ${VIEW_TEXT[view]}`} onPointerLeave={() => setHover(null)}>
             {ticks.map((t) => (
               <g key={t}>
                 <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="#e3e3e3" strokeWidth={1} />
@@ -145,13 +183,16 @@ export function PickupTimesChart({ data }: { data: { data: Cell[] | null | undef
               <p className="text-xs text-ink-muted">
                 {view === 'hour' ? `${hovered.label}–${hourLabel((hovered.key + 1) % 24)}` : hovered.label}
                 {hovered.dials ? ` · ${hovered.human} of ${hovered.dials} dials` : ''}
+                {view === 'session' && hovered.sessions ? ` · ${hovered.sessions} session${hovered.sessions === 1 ? '' : 's'}` : ''}
                 {hovered.dials > 0 && hovered.dials < MIN_DIALS ? ' · too few to trust' : ''}
               </p>
             </div>
           )}
         </div>
       )}
-      <p className="text-xs text-ink-muted">Faded bars have fewer than {MIN_DIALS} dials. Failed calls (never reached the network) aren't counted.</p>
+      <p className="text-xs text-ink-muted">Faded bars have fewer than {MIN_DIALS} dials. Failed calls (never reached the network) aren't counted.
+        {view === 'session' && ' A session is one rep dialing without a break of more than 15 minutes; failed calls still count towards its length.'}
+      </p>
     </div>
   );
 }

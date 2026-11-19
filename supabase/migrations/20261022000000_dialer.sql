@@ -1210,3 +1210,45 @@ language sql stable security invoker set search_path = public as $$
 $$;
 revoke execute on function public.dialer_performance_trend(timestamptz, timestamptz, text, text, uuid) from public, anon;
 grant execute on function public.dialer_performance_trend(timestamptz, timestamptz, text, text, uuid) to authenticated, service_role;
+
+-- ── Pickups through a session ───────────────────────────────────────────────────────────────────────────────────
+-- Admin Performance, "Best times to call" → Session: human pickup rate in the first, middle and last third of each
+-- rep's longer dialing sessions (p_min_dials+ calls), to see whether pickups fade or dip as a session goes on.
+-- Sessions are grouped like dialer_rep_activity: a gap of more than 15 minutes starts a new one. Built from the calls
+-- in the filters; failed calls count towards a session's length and position but not the rate. Admins only.
+create or replace function public.dialer_pickup_by_session_part(p_from timestamptz, p_to timestamptz, p_client_name text default null,
+                                                                p_campaign_id uuid default null, p_min_dials int default 30)
+returns table (part int, dials int, human int, sessions int)
+language sql stable security invoker set search_path = public as $$
+  with calls as (
+    select x.user_id, x.started_at, x.pickup_status,
+           coalesce(x.ended_at, x.started_at + make_interval(secs => coalesce(x.duration_s, 0))) as ended_at
+    from dialer_calls x
+    where is_dialer_admin()
+      and x.direction = 'outbound' and x.source = 'dialer' and x.kind = 'call' and x.user_id is not null
+      and x.started_at >= p_from and x.started_at < p_to
+      and (p_client_name is null or x.client_name = p_client_name)
+      and (p_campaign_id is null or x.campaign_id = p_campaign_id)
+  ), marked as (
+    select c.*,
+           case when c.started_at - lag(c.ended_at) over (partition by c.user_id order by c.started_at) <= interval '15 minutes'
+                then 0 else 1 end as new_session
+    from calls c
+  ), numbered as (
+    select m.*, sum(m.new_session) over (partition by m.user_id order by m.started_at) as session_no from marked m
+  ), placed as (
+    select n.*, row_number() over (partition by n.user_id, n.session_no order by n.started_at) as pos,
+           count(*) over (partition by n.user_id, n.session_no) as len
+    from numbered n
+  )
+  select least(3, 1 + floor(3.0 * (pos - 1) / len))::int as part,
+         count(*) filter (where pickup_status is distinct from 'Failed')::int as dials,
+         count(*) filter (where pickup_status = 'Human Pickup')::int as human,
+         count(distinct (user_id, session_no))::int as sessions
+  from placed
+  where len >= p_min_dials
+  group by 1
+  order by 1
+$$;
+revoke execute on function public.dialer_pickup_by_session_part(timestamptz, timestamptz, text, uuid, int) from public, anon;
+grant execute on function public.dialer_pickup_by_session_part(timestamptz, timestamptz, text, uuid, int) to authenticated, service_role;
