@@ -573,14 +573,14 @@ describe('stats', () => {
     const [a] = await as(ADMIN, () => rows<{ user_id: string; dials: number; sessions: number; active_seconds: number }>(`select * from dialer_rep_activity(${range})`));
     // (6 min + 1 min wrap-up) + (30s + 1 min) = 510s.
     expect(a).toEqual({ user_id: TEAM2, dials: 4, sessions: 2, active_seconds: 510 });
-    const byTime = await as(ADMIN, () => rows<{ dow: number; hour: number; dials: number; human: number }>(`select * from dialer_pickup_by_time(${range}) order by hour`));
+    const byTime = await as(ADMIN, () => rows<{ dow: number; hour: number; dials: number; human: number }>(`select * from dialer_pickup_times(${range}) order by hour`));
     // Tuesday (isodow 2); the failed call is left out.
     expect(byTime).toEqual([
       { dow: 2, hour: 9, dials: 2, human: 1 },
       { dow: 2, hour: 10, dials: 1, human: 1 },
     ]);
     expect(await as(TEAM2, () => rows(`select * from dialer_rep_activity(${range})`))).toEqual([]);
-    expect(await as(TEAM2, () => rows(`select * from dialer_pickup_by_time(${range})`))).toEqual([]);
+    expect(await as(TEAM2, () => rows(`select * from dialer_pickup_times(${range})`))).toEqual([]);
     // The Performance page's team member filter.
     expect(await as(ADMIN, () => rows(`select * from dialer_pickup_times(${range}, null, '${TEAM2}') order by hour`))).toEqual(byTime);
     expect(await as(ADMIN, () => rows(`select * from dialer_pickup_times(${range}, null, '${ADMIN}')`))).toEqual([]);

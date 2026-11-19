@@ -4,7 +4,7 @@ import { addDays, sydneyToday } from './format';
 export type BucketSize = 'hour' | 'day' | 'week' | 'month';
 
 export interface TrendBucket {
-  /** Matches the bucket text from dialer_performance_trend: 'YYYY-MM-DD', or 'YYYY-MM-DD HH' for hours. */
+  /** Matches the bucket text from dialer_activity_trend: 'YYYY-MM-DD', or 'YYYY-MM-DD HH' for hours. */
   key: string;
   /** Short x-axis label and the longer tooltip label. */
   axis: string;

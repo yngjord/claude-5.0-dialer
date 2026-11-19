@@ -1302,13 +1302,8 @@ grant execute on function public.dialer_dialing_sessions(timestamptz, timestampt
 
 -- ── Performance by team member ──────────────────────────────────────────────────────────────────────────────────
 -- The Performance page filters by date, client and team member (no campaign filter: a campaign's page has its own
--- metrics). These replace dialer_performance_trend and dialer_pickup_by_time for it; the session-view functions
--- (dialer_pickup_by_session_part, dialer_dialing_sessions) were dropped from the page. Once the app no longer calls
--- them, drop by hand:
---   drop function public.dialer_performance_trend(timestamptz, timestamptz, text, text, uuid);
---   drop function public.dialer_pickup_by_time(timestamptz, timestamptz, text, uuid);
---   drop function public.dialer_pickup_by_session_part(timestamptz, timestamptz, text, uuid, int);
---   drop function public.dialer_dialing_sessions(timestamptz, timestamptz, text, uuid, int);
+-- metrics). These replace dialer_performance_trend and dialer_pickup_by_time, which are dropped below along with the
+-- session-view functions the page no longer has.
 create or replace function public.dialer_activity_trend(p_from timestamptz, p_to timestamptz, p_bucket text,
                                                         p_client_name text default null, p_user_id uuid default null)
 returns table (bucket text, dials int, connects int, leads int, appointments int)
@@ -1351,3 +1346,8 @@ language sql stable security invoker set search_path = public as $$
 $$;
 revoke execute on function public.dialer_pickup_times(timestamptz, timestamptz, text, uuid) from public, anon;
 grant execute on function public.dialer_pickup_times(timestamptz, timestamptz, text, uuid) to authenticated, service_role;
+
+drop function if exists public.dialer_performance_trend(timestamptz, timestamptz, text, text, uuid);
+drop function if exists public.dialer_pickup_by_time(timestamptz, timestamptz, text, uuid);
+drop function if exists public.dialer_pickup_by_session_part(timestamptz, timestamptz, text, uuid, int);
+drop function if exists public.dialer_dialing_sessions(timestamptz, timestamptz, text, uuid, int);
