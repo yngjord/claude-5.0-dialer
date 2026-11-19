@@ -239,7 +239,7 @@ export default function CampaignPage() {
         />
         <Metric label="Dials today" value={(stats?.dials_today ?? 0).toLocaleString()} note={`${stats?.connects_today ?? 0} connected`} loading={head.loading} />
         <Metric label="Total dials" value={(stats?.dials_total ?? 0).toLocaleString()} loading={head.loading} />
-        <Metric label="Connect rate" value={percent(stats?.connects_total ?? 0, stats?.dials_total ?? 0)} note="Human pickups ÷ dials" loading={head.loading} />
+        <Metric label="Connect rate" value={percent(stats?.connects_total ?? 0, stats?.dials_total ?? 0)} note={`${(stats?.connects_total ?? 0).toLocaleString()} human pickup${stats?.connects_total === 1 ? '' : 's'}`} loading={head.loading} />
         <Metric
           label="Booking rate"
           value={percent(stats?.appointments_total ?? 0, stats?.dials_total ?? 0)}
