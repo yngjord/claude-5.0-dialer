@@ -11,8 +11,6 @@ import Brand from './Brand';
 import { ClickToCallBar } from './ClickToCall';
 import LoadingBar from './LoadingBar';
 import { useDueCallbacks } from '../lib/useDueCallbacks';
-import { useNumberAlerts } from '../lib/numberAlerts';
-import { RedOrb } from './ui/RedOrb';
 
 // Everyone gets Campaigns (with their numbers) and Call logs; admins also get ADMIN_NAV.
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
@@ -145,7 +143,6 @@ function TwilioBalanceLine() {
 
 export default function AppShell() {
   const { me, error, signOut, isAdmin } = useAuth();
-  const flaggedNumbers = [...useNumberAlerts(isAdmin).values()].filter((a) => a.alert).length;
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const dueCallbacks = useDueCallbacks(me?.userId);
@@ -201,11 +198,6 @@ export default function AppShell() {
                 <NavLink key={to} to={to} className={navClass}>
                   <Icon size={20} strokeWidth={1.75} />
                   {label}
-                  {to === '/admin/numbers' && flaggedNumbers > 0 && (
-                    <span className="ml-auto">
-                      <RedOrb title={`${flaggedNumbers} number${flaggedNumbers === 1 ? '' : 's'} may be flagged as spam`} />
-                    </span>
-                  )}
                 </NavLink>
               ))}
             </>
