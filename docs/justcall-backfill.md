@@ -80,5 +80,5 @@ Jordan as the rep, the JustCall Call SID in `twilio_call_sid`, and Sydney-time s
   Appointment Set, 1 Needs Follow-Up, 1 Callback, 1 Not Interested), 7 Machine Pickup (voicemail or call screener),
   8 Unanswered. Each call's notes say what happened and start with `[JustCall click-to-call]`.
 - **Who:** name, company and client filled in where the number matched a contact, an Airtable lead or the recording
-  (Morfless 6, Kintell 13, unknown 3). Not linked to contacts or leads.
+  (Morfless 5, Kintell 15, unknown 2). Not linked to contacts or leads.
 - The upload ran through a temporary Supabase Edge Function (`tmp-recording-upload`), now disabled; it can be deleted.
