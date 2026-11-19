@@ -138,7 +138,12 @@ export default function Performance() {
             <Metric label="Appointments" value={total.appointments.toLocaleString()} loading={loading} />
             <Metric label="Booking rate" value={percent(total.appointments, total.dials)} loading={loading} />
             <Metric label="Leads" value={total.follow_ups.toLocaleString()} loading={loading} />
-            <Metric label="Talk time" value={formatTalkTime(total.talk_seconds)} loading={loading} />
+            <Metric
+              label="Talk time"
+              value={formatTalkTime(total.talk_seconds)}
+              note={activity.loading ? undefined : `${totalActive ? formatTalkTime(totalActive) : 'No'} dialing time`}
+              loading={loading}
+            />
             <Metric
               label="Calls/hr"
               value={callsPerHour(total.dials, totalActive)?.toFixed(1) ?? '—'}
