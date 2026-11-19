@@ -1180,3 +1180,33 @@ alter table public.dialer_contacts add column if not exists context text;
 -- 13224 / SIP 404) instead of the browser's generic connection error, and suggest Disconnected Number.
 alter table public.dialer_calls add column if not exists twilio_error_code int;
 alter table public.dialer_calls add column if not exists sip_response_code int;
+
+-- ── Performance trend ───────────────────────────────────────────────────────────────────────────────────────────
+-- Admin Performance chart: dials, human answers, leads (both Interested dispositions) and meetings booked per hour,
+-- day, week (Mon) or month, Sydney time, for the page's date range, client and campaign filters. Bucket keys are
+-- 'YYYY-MM-DD' (week and month: their first day) or 'YYYY-MM-DD HH24' for hours. RLS limits rows to what the caller
+-- can see, like dialer_performance_stats.
+create or replace function public.dialer_performance_trend(p_from timestamptz, p_to timestamptz, p_bucket text,
+                                                           p_client_name text default null, p_campaign_id uuid default null)
+returns table (bucket text, dials int, connects int, leads int, appointments int)
+language sql stable security invoker set search_path = public as $$
+  select case p_bucket
+           when 'hour' then to_char(x.started_at at time zone 'Australia/Sydney', 'YYYY-MM-DD HH24')
+           when 'week' then to_char(date_trunc('week', x.started_at at time zone 'Australia/Sydney'), 'YYYY-MM-DD')
+           when 'month' then to_char(date_trunc('month', x.started_at at time zone 'Australia/Sydney'), 'YYYY-MM-DD')
+           else to_char(x.started_at at time zone 'Australia/Sydney', 'YYYY-MM-DD')
+         end as bucket,
+         count(*)::int as dials,
+         count(*) filter (where x.pickup_status = 'Human Pickup')::int as connects,
+         count(*) filter (where x.disposition in ('Interested - Needs Follow-Up', 'Interested - Appointment Set'))::int as leads,
+         count(*) filter (where x.disposition = 'Interested - Appointment Set')::int as appointments
+  from dialer_calls x
+  where x.direction = 'outbound' and x.source = 'dialer'
+    and x.started_at >= p_from and x.started_at < p_to
+    and (p_client_name is null or x.client_name = p_client_name)
+    and (p_campaign_id is null or x.campaign_id = p_campaign_id)
+  group by 1
+  order by 1
+$$;
+revoke execute on function public.dialer_performance_trend(timestamptz, timestamptz, text, text, uuid) from public, anon;
+grant execute on function public.dialer_performance_trend(timestamptz, timestamptz, text, text, uuid) to authenticated, service_role;

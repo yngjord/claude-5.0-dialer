@@ -26,7 +26,7 @@ const plotH = H - PAD.top - PAD.bottom;
 
 /**
  * Admin Performance: human pickup rate by hour of day or weekday (Sydney time), for the filters above (date range,
- * client, campaign), to find the best times to call. One series, so no legend; hover and the table carry the counts.
+ * client, campaign), to find the best times to call. One series, so no legend; hover carries the counts.
  */
 export function PickupTimes({ from, to, clientName, campaignId }: { from: string; to: string; clientName: string | null; campaignId: string | null }) {
   const data = useLoad(
@@ -152,30 +152,6 @@ export function PickupTimesChart({ data }: { data: { data: Cell[] | null | undef
         </div>
       )}
       <p className="text-xs text-ink-muted">Faded bars have fewer than {MIN_DIALS} dials. Failed calls (never reached the network) aren't counted.</p>
-
-      <details className="text-sm">
-        <summary className="cursor-pointer text-ink-muted hover:text-ink">Show as a table</summary>
-        <table className="mt-2 w-full">
-          <thead className="border-b border-line">
-            <tr>
-              <th className="th">{view === 'hour' ? 'Hour' : 'Weekday'}</th>
-              <th className="th text-right">Dials</th>
-              <th className="th text-right">Human pickups</th>
-              <th className="th text-right">Human pickup rate</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {bars.map((b) => (
-              <tr key={b.key}>
-                <td className="td">{view === 'hour' ? `${b.label}–${hourLabel((b.key + 1) % 24)}` : b.label}</td>
-                <td className="td text-right tabular-nums">{b.dials}</td>
-                <td className="td text-right tabular-nums">{b.human}</td>
-                <td className="td text-right tabular-nums">{pct(b.human, b.dials)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
     </div>
   );
 }

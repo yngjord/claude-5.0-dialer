@@ -4,6 +4,7 @@ import type { Campaign, DialerUser } from '../../../shared/types';
 import { Avatar } from '../../components/Avatar';
 import { ClientLogo } from '../../components/ClientLogo';
 import { DateRangeFilter } from '../../components/DateRangeFilter';
+import { PerformanceTrend } from '../../components/PerformanceTrend';
 import { PickupTimes } from '../../components/PickupTimes';
 import { Metric } from '../../components/ui/Metric';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/ui/States';
@@ -277,6 +278,14 @@ export default function Performance() {
               </div>
             )}
           </section>
+
+          <PerformanceTrend
+            range={range}
+            from={bounds.from ?? '2000-01-01T00:00:00Z'}
+            to={bounds.to ?? new Date(Date.now() + 60_000).toISOString()}
+            clientName={clientName || null}
+            campaignId={campaignId || null}
+          />
 
           <section className="card mt-8 animate-appear p-4 sm:p-6">
             <PickupTimes
