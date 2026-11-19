@@ -147,7 +147,6 @@ export default function Performance() {
             <Metric
               label="Calls/hr"
               value={callsPerHour(total.dials, totalActive)?.toFixed(1) ?? '—'}
-              note={totalActive ? `over ${formatTalkTime(totalActive)} dialing` : undefined}
               loading={loading || activity.loading}
             />
           </div>
