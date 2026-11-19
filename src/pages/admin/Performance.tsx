@@ -1,16 +1,13 @@
-import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { Campaign, DialerUser } from '../../../shared/types';
-import { Avatar } from '../../components/Avatar';
 import { DateRangeFilter } from '../../components/DateRangeFilter';
 import { PerformanceTrend } from '../../components/PerformanceTrend';
 import { PickupTimes } from '../../components/PickupTimes';
 import { Metric } from '../../components/ui/Metric';
-import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/ui/States';
+import { ErrorState, PageHeader } from '../../components/ui/States';
 import { must, useLoad } from '../../lib/api';
-import { useAvatarUrls } from '../../lib/avatars';
 import { defaultRange, rangeBounds, type DateRange } from '../../lib/dateRange';
-import { formatDateTime, formatTalkTime, percent } from '../../lib/format';
+import { formatTalkTime, percent } from '../../lib/format';
 import { supabase } from '../../lib/supabase';
 
 interface PerfRow {
@@ -35,9 +32,6 @@ interface ActivityRow {
 }
 
 type Totals = Omit<PerfRow, 'user_id' | 'agent_name' | 'client_name'>;
-// active_seconds: the rep's dialing time, for calls per hour.
-type Line = Totals & { key: string; name: string; userId: string | null; active_seconds: number | null };
-type SortKey = 'name' | 'dials' | 'connects' | 'rate' | 'appointments' | 'booking_rate' | 'follow_ups' | 'talk_seconds' | 'active_seconds' | 'calls_per_hour' | 'last_call_at';
 
 const EMPTY: Totals = { dials: 0, connects: 0, machine: 0, unanswered: 0, appointments: 0, follow_ups: 0, talk_seconds: 0, last_call_at: null };
 
@@ -54,120 +48,80 @@ function add(a: Totals, b: Totals): Totals {
   };
 }
 
-const COLUMNS: { key: SortKey; label: string; numeric?: boolean }[] = [
-  { key: 'dials', label: 'Dials', numeric: true },
-  { key: 'connects', label: 'Connects', numeric: true },
-  { key: 'rate', label: 'Connect rate', numeric: true },
-  { key: 'appointments', label: 'Appointments', numeric: true },
-  { key: 'booking_rate', label: 'Booking rate', numeric: true },
-  { key: 'follow_ups', label: 'Leads', numeric: true },
-  { key: 'talk_seconds', label: 'Talk time', numeric: true },
-  { key: 'active_seconds', label: 'Dialing time', numeric: true },
-  { key: 'calls_per_hour', label: 'Calls/hr', numeric: true },
-  { key: 'last_call_at', label: 'Last call' },
-];
-
 /** Dials per hour of dialing time, or null when there's no dialing time to divide by. */
 const callsPerHour = (dials: number, seconds: number | null) => (seconds ? dials / (seconds / 3600) : null);
 
-const ratio = (part: number, whole: number) => (whole ? part / whole : -1);
-
-function sortValue(l: Line, key: SortKey): string | number {
-  if (key === 'name') return l.name.toLowerCase();
-  if (key === 'rate') return ratio(l.connects, l.dials);
-  if (key === 'booking_rate') return ratio(l.appointments, l.dials);
-  if (key === 'calls_per_hour') return callsPerHour(l.dials, l.active_seconds) ?? -1;
-  return l[key] ?? '';
-}
-
 /**
- * Admin-only: how each team member and each client is performing over a date range, optionally narrowed to one
- * client (a campaign's own page has its metrics): dials, outcomes, calls per hour, and the best times of day to call. Counts calls made in the
- * dialer, like the Campaigns metrics.
+ * Admin-only: how the team is performing over a date range, optionally narrowed to one client and/or one team member
+ * (a campaign's own page has its metrics): dials, outcomes, calls per hour, activity over time and the best times of
+ * day to call. Counts calls made in the dialer, like the Campaigns metrics.
  */
 export default function Performance() {
   const [range, setRange] = useState<DateRange>(() => defaultRange('month'));
   const bounds = rangeBounds(range);
+  const from = bounds.from ?? '2000-01-01T00:00:00Z';
+  const to = bounds.to ?? new Date(Date.now() + 60_000).toISOString();
   const [clientName, setClientName] = useState('');
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'dials', desc: true });
+  const [userId, setUserId] = useState('');
 
   const campaigns = useLoad(
-    async () => must(await supabase.from('dialer_campaigns').select('id, name, client_name, airtable_client_id').eq('source', 'dialer').order('name')) as Pick<Campaign, 'id' | 'name' | 'client_name' | 'airtable_client_id'>[],
+    async () => must(await supabase.from('dialer_campaigns').select('client_name').eq('source', 'dialer')) as Pick<Campaign, 'client_name'>[],
     [],
   );
   const users = useLoad(async () => must(await supabase.rpc('dialer_users')) as DialerUser[], []);
-  const avatars = useAvatarUrls(users.data);
 
+  // Per rep and client; narrowed to the chosen team member below.
   const stats = useLoad(
     async () =>
-      must(
-        await supabase.rpc('dialer_performance_stats', {
-          p_from: bounds.from ?? '2000-01-01T00:00:00Z',
-          p_to: bounds.to ?? new Date(Date.now() + 60_000).toISOString(),
-          p_client_name: clientName || null,
-          p_campaign_id: null,
-        }),
-      ) as PerfRow[],
+      must(await supabase.rpc('dialer_performance_stats', { p_from: from, p_to: to, p_client_name: clientName || null, p_campaign_id: null })) as PerfRow[],
     [bounds.from, bounds.to, clientName],
   );
 
   // Each rep's dialing time, for calls per hour (sessions of calls; a 15+ minute gap starts a new one).
   const activity = useLoad(
     async () =>
-      must(
-        await supabase.rpc('dialer_rep_activity', {
-          p_from: bounds.from ?? '2000-01-01T00:00:00Z',
-          p_to: bounds.to ?? new Date(Date.now() + 60_000).toISOString(),
-          p_client_name: clientName || null,
-          p_campaign_id: null,
-        }),
-      ) as ActivityRow[],
+      must(await supabase.rpc('dialer_rep_activity', { p_from: from, p_to: to, p_client_name: clientName || null, p_campaign_id: null })) as ActivityRow[],
     [bounds.from, bounds.to, clientName],
   );
-  const activeByUser = useMemo(() => new Map((activity.data ?? []).map((a) => [a.user_id, a.active_seconds])), [activity.data]);
-  const totalActive = (activity.data ?? []).reduce((sum, a) => sum + a.active_seconds, 0);
 
   const clients = useMemo(() => [...new Set((campaigns.data ?? []).map((c) => c.client_name))].sort((a, b) => a.localeCompare(b)), [campaigns.data]);
+  const team = useMemo(
+    () =>
+      (users.data ?? [])
+        .filter((u) => u.role === 'team' || u.role === 'admin')
+        .map((u) => ({ id: u.id, name: u.display_name || u.email }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [users.data],
+  );
 
-  const total = useMemo(() => (stats.data ?? []).reduce<Totals>((sum, r) => add(sum, r), EMPTY), [stats.data]);
-  const lines = useMemo(() => {
-    const byKey = new Map<string, Line>();
-    for (const r of stats.data ?? []) {
-      const key = r.user_id ?? 'unknown';
-      const user = users.data?.find((u) => u.id === r.user_id);
-      const name = user?.display_name || r.agent_name || user?.email || 'Unknown';
-      const prev = byKey.get(key);
-      const active = r.user_id ? (activeByUser.get(r.user_id) ?? null) : null;
-      byKey.set(key, { ...(prev ?? { key, name, userId: r.user_id }), ...add(prev ?? EMPTY, r), active_seconds: active });
-    }
-    const dir = sort.desc ? -1 : 1;
-    return [...byKey.values()].sort((a, b) => {
-      const x = sortValue(a, sort.key);
-      const y = sortValue(b, sort.key);
-      return x < y ? -dir : x > y ? dir : a.name.localeCompare(b.name);
-    });
-  }, [stats.data, users.data, sort, activeByUser]);
+  const total = useMemo(
+    () => (stats.data ?? []).filter((r) => !userId || r.user_id === userId).reduce<Totals>((sum, r) => add(sum, r), EMPTY),
+    [stats.data, userId],
+  );
+  const totalActive = (activity.data ?? []).filter((a) => !userId || a.user_id === userId).reduce((sum, a) => sum + a.active_seconds, 0);
 
-  const toggleSort = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'name' }));
   const select = 'field !w-auto !rounded-full !py-2 text-sm';
   const loading = stats.loading;
 
   return (
     <>
-      <PageHeader title="Performance" subtitle="How each team member and client is tracking." />
+      <PageHeader title="Performance" subtitle="How the team and each client is tracking." />
 
       <div className="mb-5 flex animate-appear flex-wrap items-center gap-2">
         <DateRangeFilter value={range} onChange={setRange} presets={['month', 'lastMonth', 'today', '7', '30', '90', 'all', 'custom']} />
-        <select
-          aria-label="Client"
-          className={select}
-          value={clientName}
-          onChange={(e) => setClientName(e.target.value)}
-        >
+        <select aria-label="Client" className={select} value={clientName} onChange={(e) => setClientName(e.target.value)}>
           <option value="">All clients</option>
           {clients.map((name) => (
             <option key={name} value={name}>
               {name}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Team member" className={select} value={userId} onChange={(e) => setUserId(e.target.value)}>
+          <option value="">All team members</option>
+          {team.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
             </option>
           ))}
         </select>
@@ -193,67 +147,10 @@ export default function Performance() {
             />
           </div>
 
-          <PerformanceTrend
-            range={range}
-            from={bounds.from ?? '2000-01-01T00:00:00Z'}
-            to={bounds.to ?? new Date(Date.now() + 60_000).toISOString()}
-            clientName={clientName || null}
-            campaignId={null}
-          />
-
-          <h2 className="mb-3 mt-8 animate-appear font-display text-lg font-medium">By team member</h2>
-
-          <section className="card animate-appear p-4 sm:p-6">
-            {loading && !stats.data ? (
-              <LoadingRows label="Loading performance…" />
-            ) : (
-              <div className="relative -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-                <table className="w-full min-w-[900px]">
-                  <thead className="border-b border-line">
-                    <tr>
-                      <SortHeader label="Team member" col="name" sort={sort} onSort={toggleSort} />
-                      {COLUMNS.map((c) => (
-                        <SortHeader key={c.key} label={c.label} col={c.key} sort={sort} onSort={toggleSort} right={c.numeric} />
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line">
-                    {!lines.length ? (
-                      <EmptyRow colSpan={COLUMNS.length + 1}>No calls in this period.</EmptyRow>
-                    ) : (
-                      lines.map((l) => (
-                        <tr key={l.key}>
-                          <td className="td">
-                            <span className="flex items-center gap-3">
-                              <Avatar url={l.userId ? avatars.get(l.userId) : undefined} name={l.name} />
-                              <span className="font-medium">{l.name}</span>
-                            </span>
-                          </td>
-                          <Cells line={l} />
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                  {lines.length > 1 && (
-                    <tfoot className="border-t-2 border-line font-medium">
-                      <tr>
-                        <td className="td">Total</td>
-                        <Cells line={{ ...total, key: 'total', name: 'Total', userId: null, active_seconds: totalActive }} />
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
-            )}
-          </section>
+          <PerformanceTrend range={range} from={from} to={to} clientName={clientName || null} userId={userId || null} />
 
           <section className="card mt-8 animate-appear p-4 sm:p-6">
-            <PickupTimes
-              from={bounds.from ?? '2000-01-01T00:00:00Z'}
-              to={bounds.to ?? new Date(Date.now() + 60_000).toISOString()}
-              clientName={clientName || null}
-              campaignId={null}
-            />
+            <PickupTimes from={from} to={to} clientName={clientName || null} userId={userId || null} />
           </section>
           <p className="mt-3 text-xs text-ink-muted">
             Calls/hr is dials ÷ dialing time. Dialing time runs from the first call to the end of the last in each session, plus a minute for the last
@@ -262,35 +159,5 @@ export default function Performance() {
         </>
       )}
     </>
-  );
-}
-
-function Cells({ line: l }: { line: Line }) {
-  const cph = callsPerHour(l.dials, l.active_seconds);
-  return (
-    <>
-      <td className="td text-right tabular-nums">{l.dials.toLocaleString()}</td>
-      <td className="td text-right tabular-nums">{l.connects.toLocaleString()}</td>
-      <td className="td text-right tabular-nums">{percent(l.connects, l.dials)}</td>
-      <td className="td text-right tabular-nums">{l.appointments.toLocaleString()}</td>
-      <td className="td text-right tabular-nums">{percent(l.appointments, l.dials)}</td>
-      <td className="td text-right tabular-nums">{l.follow_ups.toLocaleString()}</td>
-      <td className="td text-right tabular-nums">{formatTalkTime(l.talk_seconds)}</td>
-      <td className="td text-right tabular-nums">{l.active_seconds ? formatTalkTime(l.active_seconds) : '—'}</td>
-      <td className="td text-right tabular-nums">{cph != null ? cph.toFixed(1) : '—'}</td>
-      <td className="td whitespace-nowrap tabular-nums text-ink-muted">{formatDateTime(l.last_call_at)}</td>
-    </>
-  );
-}
-
-function SortHeader({ label, col, sort, onSort, right }: { label: string; col: SortKey; sort: { key: SortKey; desc: boolean }; onSort: (k: SortKey) => void; right?: boolean }) {
-  const active = sort.key === col;
-  return (
-    <th className={`th ${right ? 'text-right' : ''}`} aria-sort={active ? (sort.desc ? 'descending' : 'ascending') : undefined}>
-      <button onClick={() => onSort(col)} className={`inline-flex items-center gap-1 hover:text-ink ${active ? 'text-ink' : ''}`}>
-        {label}
-        {active && (sort.desc ? <ArrowDown size={13} /> : <ArrowUp size={13} />)}
-      </button>
-    </th>
   );
 }

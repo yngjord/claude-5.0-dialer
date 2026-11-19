@@ -1299,3 +1299,55 @@ language sql stable security invoker set search_path = public as $$
 $$;
 revoke execute on function public.dialer_dialing_sessions(timestamptz, timestamptz, text, uuid, int) from public, anon;
 grant execute on function public.dialer_dialing_sessions(timestamptz, timestamptz, text, uuid, int) to authenticated, service_role;
+
+-- ── Performance by team member ──────────────────────────────────────────────────────────────────────────────────
+-- The Performance page filters by date, client and team member (no campaign filter: a campaign's page has its own
+-- metrics). These replace dialer_performance_trend and dialer_pickup_by_time for it; the session-view functions
+-- (dialer_pickup_by_session_part, dialer_dialing_sessions) were dropped from the page. Once the app no longer calls
+-- them, drop by hand:
+--   drop function public.dialer_performance_trend(timestamptz, timestamptz, text, text, uuid);
+--   drop function public.dialer_pickup_by_time(timestamptz, timestamptz, text, uuid);
+--   drop function public.dialer_pickup_by_session_part(timestamptz, timestamptz, text, uuid, int);
+--   drop function public.dialer_dialing_sessions(timestamptz, timestamptz, text, uuid, int);
+create or replace function public.dialer_activity_trend(p_from timestamptz, p_to timestamptz, p_bucket text,
+                                                        p_client_name text default null, p_user_id uuid default null)
+returns table (bucket text, dials int, connects int, leads int, appointments int)
+language sql stable security invoker set search_path = public as $$
+  select case p_bucket
+           when 'hour' then to_char(x.started_at at time zone 'Australia/Sydney', 'YYYY-MM-DD HH24')
+           when 'week' then to_char(date_trunc('week', x.started_at at time zone 'Australia/Sydney'), 'YYYY-MM-DD')
+           when 'month' then to_char(date_trunc('month', x.started_at at time zone 'Australia/Sydney'), 'YYYY-MM-DD')
+           else to_char(x.started_at at time zone 'Australia/Sydney', 'YYYY-MM-DD')
+         end as bucket,
+         count(*)::int as dials,
+         count(*) filter (where x.pickup_status = 'Human Pickup')::int as connects,
+         count(*) filter (where x.disposition in ('Interested - Needs Follow-Up', 'Interested - Appointment Set'))::int as leads,
+         count(*) filter (where x.disposition = 'Interested - Appointment Set')::int as appointments
+  from dialer_calls x
+  where x.direction = 'outbound' and x.source = 'dialer'
+    and x.started_at >= p_from and x.started_at < p_to
+    and (p_client_name is null or x.client_name = p_client_name)
+    and (p_user_id is null or x.user_id = p_user_id)
+  group by 1
+  order by 1
+$$;
+revoke execute on function public.dialer_activity_trend(timestamptz, timestamptz, text, text, uuid) from public, anon;
+grant execute on function public.dialer_activity_trend(timestamptz, timestamptz, text, text, uuid) to authenticated, service_role;
+
+create or replace function public.dialer_pickup_times(p_from timestamptz, p_to timestamptz, p_client_name text default null, p_user_id uuid default null)
+returns table (dow int, hour int, dials int, human int)
+language sql stable security invoker set search_path = public as $$
+  select extract(isodow from x.started_at at time zone 'Australia/Sydney')::int as dow,
+         extract(hour from x.started_at at time zone 'Australia/Sydney')::int as hour,
+         count(*)::int as dials,
+         count(*) filter (where x.pickup_status = 'Human Pickup')::int as human
+  from dialer_calls x
+  where is_dialer_admin()
+    and x.direction = 'outbound' and x.source = 'dialer' and x.pickup_status is distinct from 'Failed'
+    and x.started_at >= p_from and x.started_at < p_to
+    and (p_client_name is null or x.client_name = p_client_name)
+    and (p_user_id is null or x.user_id = p_user_id)
+  group by 1, 2
+$$;
+revoke execute on function public.dialer_pickup_times(timestamptz, timestamptz, text, uuid) from public, anon;
+grant execute on function public.dialer_pickup_times(timestamptz, timestamptz, text, uuid) to authenticated, service_role;

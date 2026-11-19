@@ -581,6 +581,11 @@ describe('stats', () => {
     ]);
     expect(await as(TEAM2, () => rows(`select * from dialer_rep_activity(${range})`))).toEqual([]);
     expect(await as(TEAM2, () => rows(`select * from dialer_pickup_by_time(${range})`))).toEqual([]);
+    // The Performance page's team member filter.
+    expect(await as(ADMIN, () => rows(`select * from dialer_pickup_times(${range}, null, '${TEAM2}') order by hour`))).toEqual(byTime);
+    expect(await as(ADMIN, () => rows(`select * from dialer_pickup_times(${range}, null, '${ADMIN}')`))).toEqual([]);
+    const trend = await as(ADMIN, () => rows(`select * from dialer_activity_trend(${range}, 'day', null, '${TEAM2}')`));
+    expect(trend).toEqual([{ bucket: '2026-10-20', dials: 4, connects: 2, leads: 0, appointments: 0 }]);
     await pg.exec(`delete from dialer_calls where user_id = '${TEAM2}' and started_at::date = '2026-10-20'`);
   });
 });

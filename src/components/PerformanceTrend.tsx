@@ -64,15 +64,15 @@ const PAD = { top: 16, right: 16, bottom: 30, left: 40 };
 
 /**
  * Admin Performance: calls made, human answers, leads and meetings over time, for the page's date range, client and
- * campaign. Same look as the client portal's Lead activity chart; the legend switches series on and off.
+ * team member. Same look as the client portal's Lead activity chart; the legend switches series on and off.
  */
-export function PerformanceTrend({ range, from, to, clientName, campaignId }: { range: DateRange; from: string; to: string; clientName: string | null; campaignId: string | null }) {
+export function PerformanceTrend({ range, from, to, clientName, userId }: { range: DateRange; from: string; to: string; clientName: string | null; userId: string | null }) {
   const size = bucketSize(range);
   const data = useLoad(
     async () =>
-      must(await supabase.rpc('dialer_performance_trend', { p_from: from, p_to: to, p_bucket: size, p_client_name: clientName, p_campaign_id: campaignId })) as TrendRow[],
+      must(await supabase.rpc('dialer_activity_trend', { p_from: from, p_to: to, p_bucket: size, p_client_name: clientName, p_user_id: userId })) as TrendRow[],
     // An open-ended range's end is "now", which moves on every render: refetch at most once a minute for it.
-    [from, to.slice(0, 16), size, clientName, campaignId],
+    [from, to.slice(0, 16), size, clientName, userId],
   );
   const [shown, setShown] = useState<Set<SeriesKey>>(new Set(ORDER));
   const [rawHover, setHover] = useState<number | null>(null);
