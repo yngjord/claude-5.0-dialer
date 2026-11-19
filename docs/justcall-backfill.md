@@ -66,3 +66,19 @@ dial, and the reps who dialled them as members. All 2,991 JustCall calls are lin
 Campaigns tab labels them "JustCall" and opens their calls in Call logs. Their dial, connect and appointment counts
 come from the calls, so they inherit the conservative pickup statuses above; appointments are only calls the rep
 marked Appointment Set (no Airtable cross-check). Performance still counts new-dialer calls only.
+
+## Jordan's click-to-call calls (done 20 Nov 2026)
+
+JustCall's Call Logs export for 1–31 Oct 2026 from Jordan's own number (+61468011964): **22 calls** (18 outbound, 4
+missed inbound), mostly callbacks on SDRs' warm leads and follow-ups on founder emails/LinkedIn chats. Added to
+`dialer_calls` with `source = 'justcall'`, `campaign_name = 'Click-to-call'` (no campaign), `pickup_source = 'import'`,
+Jordan as the rep, the JustCall Call SID in `twilio_call_sid`, and Sydney-time start/end.
+
+- **Recordings:** 19 calls have one, converted to 32 kbps MP3 and stored in `dialer-recordings` as `{callId}.mp3`; the
+  other 3 (missed inbound) had no audio. JustCall serves recordings in 250 KB ranges, so each was fetched in pieces.
+- **Pickup and disposition** were read from the recordings (transcribed locally with Whisper): 7 Human Pickup (4
+  Appointment Set, 1 Needs Follow-Up, 1 Callback, 1 Not Interested), 7 Machine Pickup (voicemail or call screener),
+  8 Unanswered. Each call's notes say what happened and start with `[JustCall click-to-call]`.
+- **Who:** name, company and client filled in where the number matched a contact, an Airtable lead or the recording
+  (Morfless 6, Kintell 13, unknown 3). Not linked to contacts or leads.
+- The upload ran through a temporary Supabase Edge Function (`tmp-recording-upload`), now disabled; it can be deleted.
