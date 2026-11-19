@@ -87,7 +87,7 @@ function sortValue(l: Line, key: SortKey): string | number {
 
 /**
  * Admin-only: how each team member and each client is performing over a date range, optionally narrowed to one
- * client or campaign: dials, outcomes, calls per hour, and the best times of day to call. Counts calls made in the
+ * client (a campaign's own page has its metrics): dials, outcomes, calls per hour, and the best times of day to call. Counts calls made in the
  * dialer, like the Campaigns metrics.
  */
 export default function Performance() {
@@ -95,7 +95,6 @@ export default function Performance() {
   const bounds = rangeBounds(range);
   const [view, setView] = useState<View>('team');
   const [clientName, setClientName] = useState('');
-  const [campaignId, setCampaignId] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'dials', desc: true });
 
   const campaigns = useLoad(
@@ -113,10 +112,10 @@ export default function Performance() {
           p_from: bounds.from ?? '2000-01-01T00:00:00Z',
           p_to: bounds.to ?? new Date(Date.now() + 60_000).toISOString(),
           p_client_name: clientName || null,
-          p_campaign_id: campaignId || null,
+          p_campaign_id: null,
         }),
       ) as PerfRow[],
-    [bounds.from, bounds.to, clientName, campaignId],
+    [bounds.from, bounds.to, clientName],
   );
 
   // Each rep's dialing time, for calls per hour (sessions of calls; a 15+ minute gap starts a new one).
@@ -127,17 +126,16 @@ export default function Performance() {
           p_from: bounds.from ?? '2000-01-01T00:00:00Z',
           p_to: bounds.to ?? new Date(Date.now() + 60_000).toISOString(),
           p_client_name: clientName || null,
-          p_campaign_id: campaignId || null,
+          p_campaign_id: null,
         }),
       ) as ActivityRow[],
-    [bounds.from, bounds.to, clientName, campaignId],
+    [bounds.from, bounds.to, clientName],
   );
   const activeByUser = useMemo(() => new Map((activity.data ?? []).map((a) => [a.user_id, a.active_seconds])), [activity.data]);
   const totalActive = (activity.data ?? []).reduce((sum, a) => sum + a.active_seconds, 0);
 
   const clients = useMemo(() => [...new Set((campaigns.data ?? []).map((c) => c.client_name))].sort((a, b) => a.localeCompare(b)), [campaigns.data]);
   const clientIds = useMemo(() => new Map((campaigns.data ?? []).map((c) => [c.client_name, c.airtable_client_id])), [campaigns.data]);
-  const campaignOptions = (campaigns.data ?? []).filter((c) => !clientName || c.client_name === clientName);
 
   const total = useMemo(() => (stats.data ?? []).reduce<Totals>((sum, r) => add(sum, r), EMPTY), [stats.data]);
   const lines = useMemo(() => {
@@ -173,23 +171,12 @@ export default function Performance() {
           aria-label="Client"
           className={select}
           value={clientName}
-          onChange={(e) => {
-            setClientName(e.target.value);
-            setCampaignId('');
-          }}
+          onChange={(e) => setClientName(e.target.value)}
         >
           <option value="">All clients</option>
           {clients.map((name) => (
             <option key={name} value={name}>
               {name}
-            </option>
-          ))}
-        </select>
-        <select aria-label="Campaign" className={select} value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
-          <option value="">All campaigns</option>
-          {campaignOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
             </option>
           ))}
         </select>
@@ -284,7 +271,7 @@ export default function Performance() {
             from={bounds.from ?? '2000-01-01T00:00:00Z'}
             to={bounds.to ?? new Date(Date.now() + 60_000).toISOString()}
             clientName={clientName || null}
-            campaignId={campaignId || null}
+            campaignId={null}
           />
 
           <section className="card mt-8 animate-appear p-4 sm:p-6">
@@ -292,7 +279,7 @@ export default function Performance() {
               from={bounds.from ?? '2000-01-01T00:00:00Z'}
               to={bounds.to ?? new Date(Date.now() + 60_000).toISOString()}
               clientName={clientName || null}
-              campaignId={campaignId || null}
+              campaignId={null}
             />
           </section>
           <p className="mt-3 text-xs text-ink-muted">
