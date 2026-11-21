@@ -431,3 +431,18 @@ describe('inbound evergreen leads', () => {
     expect(mergeContext('A', 'B', '2026-11-19')).toBe('A\n\n— New submission (2026-11-19): B');
   });
 });
+
+import { warmupCap, warmupLabel } from './numberWarmup';
+
+describe('caller number warm-up', () => {
+  it('ramps from 30 to 100 calls a day over three weeks, then no cap (same as the database)', () => {
+    expect([1, 7, 8, 14, 15, 21, 22].map(warmupCap)).toEqual([30, 30, 60, 60, 100, 100, null]);
+  });
+  it('describes each number', () => {
+    const u = { number_id: 'n', e164: '+61400000000', created_at: '', first_dial_day: '2026-11-19', warmup_day: 3, dials_today: 12, daily_cap: 30 };
+    expect(warmupLabel(u)).toEqual({ text: 'Warming up · day 3 of 21 · 12/30 today', tone: 'amber' });
+    expect(warmupLabel({ ...u, dials_today: 30 }).text).toContain('full, others take over');
+    expect(warmupLabel({ ...u, first_dial_day: null })).toEqual({ text: 'New · starts at 30 calls a day', tone: 'grey' });
+    expect(warmupLabel({ ...u, daily_cap: null, dials_today: 18 })).toEqual({ text: 'Ready · 18 today', tone: 'green' });
+  });
+});

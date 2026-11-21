@@ -45,7 +45,14 @@ export default handler(async (req) => {
         client_name: string;
       } | null)
     : null;
-  const from = ours ? last.our_number : await pickCallerNumber(db(), campaign);
+  // No texts yet: the number that last called them (so they recognise it), else the campaign's.
+  const lastCall = ours
+    ? null
+    : (must(
+        await db().from('dialer_calls').select('from_number').eq('to_number', phone.e164).eq('direction', 'outbound').not('from_number', 'is', null).order('started_at', { ascending: false }).limit(1).maybeSingle(),
+      ) as { from_number: string } | null);
+  const calledFrom = lastCall && must(await db().from('dialer_phone_numbers').select('e164').eq('e164', lastCall.from_number).maybeSingle());
+  const from = ours ? last.our_number : calledFrom ? lastCall.from_number : await pickCallerNumber(db(), campaign);
   if (!from) throw new HttpError(400, "No number is set up for this client. Ask an admin to add one.");
 
   const msg = await twilioClient().messages.create({ to: phone.e164, from, body: text, statusCallback: callbackUrl(req, '/api/twilio/sms-status') });

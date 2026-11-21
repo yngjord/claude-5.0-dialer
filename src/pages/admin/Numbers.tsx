@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/Button';
 import { Spinner } from '../../components/ui/Spinner';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../../components/ui/States';
 import { api, must, useLoad } from '../../lib/api';
+import { warmupLabel, type NumberUsage } from '../../../shared/numberWarmup';
 import { supabase } from '../../lib/supabase';
 import { BuyNumberModal } from './BuyNumberModal';
 import { RedOrb } from '../../components/ui/RedOrb';
@@ -21,6 +22,8 @@ import { TwilioSetupCard } from './TwilioSetupCard';
 export default function Numbers() {
   const list = useLoad(async () => must(await supabase.from('dialer_phone_numbers').select('*').order('e164')) as PhoneNumber[], []);
   const clients = useLoad(() => api<AirtableClient[]>('clients'), []);
+  // Each number's warm-up (new numbers make fewer calls a day for their first three weeks).
+  const usage = useLoad(async () => must(await supabase.rpc('dialer_number_usage', { p_ids: null })) as NumberUsage[], []);
   const alerts = useNumberAlerts(true);
   const [syncing, setSyncing] = useState(false);
   const [buying, setBuying] = useState(false);
@@ -111,6 +114,7 @@ export default function Numbers() {
                           {formatPhone(n.e164)}
                           {alerts.get(n.id)?.alert && <RedOrb title={alertText(alerts.get(n.id)!)} />}
                         </span>
+                        <WarmupLine usage={usage.data?.find((u) => u.number_id === n.id)} />
                       </td>
                       <td className="td">
                         <input
@@ -185,4 +189,11 @@ export default function Numbers() {
       )}
     </>
   );
+}
+
+/** Under the number: its warm-up state, e.g. "Warming up · day 3 of 21 · 12/30 today". */
+function WarmupLine({ usage }: { usage: NumberUsage | undefined }) {
+  const w = warmupLabel(usage);
+  if (!w.text) return null;
+  return <span className={`mt-0.5 block text-xs font-normal ${w.tone === 'amber' ? 'text-amber-700' : w.tone === 'green' ? 'text-emerald-700' : 'text-ink-faint'}`}>{w.text}</span>;
 }

@@ -530,10 +530,8 @@ begin
     return jsonb_build_object('error', 'member');
   end if;
 
-  caller := coalesce(
-    (select e164 from dialer_phone_numbers where id = camp.caller_number_id),
-    (select e164 from dialer_phone_numbers where client_name = camp.client_name order by created_at limit 1)
-  );
+  -- Rotates across the campaign's numbers, with new numbers' warm-up caps (dialer_pick_caller, defined further down).
+  caller := dialer_pick_caller(camp.id, c.phone_e164);
 
   insert into dialer_calls (id, direction, campaign_id, contact_id, user_id, agent_name, client_name, campaign_name, full_name, email,
                             company, linkedin, website, phone_e164, from_number, to_number, twilio_call_sid, twilio_status)
@@ -694,6 +692,8 @@ begin
   insert into dialer_campaigns (name, client_name, airtable_client_id, caller_number_id, status, created_by)
   values (trim(p_name), src.client_name, src.airtable_client_id, src.caller_number_id, p_status, auth.uid())
   returning id into new_id;
+  insert into dialer_campaign_numbers (campaign_id, number_id)
+  select new_id, cn.number_id from dialer_campaign_numbers cn where cn.campaign_id = p_campaign_id;
 
   -- The team member (only one, even if the original has more from before that rule), plus any admins.
   insert into dialer_campaign_members (campaign_id, user_id)
@@ -1443,3 +1443,88 @@ create table if not exists public.dialer_campaign_clay (
   columns jsonb not null default '[]'
 );
 alter table public.dialer_campaign_clay enable row level security;
+
+-- Several caller numbers per campaign, rotated on every dial, with a warm-up for new numbers (21 Nov 2026).
+-- dialer_campaigns.caller_number_id is kept (set to the first chosen number) for older code; calls use this table.
+create table if not exists public.dialer_campaign_numbers (
+  campaign_id uuid not null references public.dialer_campaigns(id) on delete cascade,
+  number_id uuid not null references public.dialer_phone_numbers(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (campaign_id, number_id)
+);
+alter table public.dialer_campaign_numbers enable row level security;
+drop policy if exists dialer_campaign_numbers_read on public.dialer_campaign_numbers;
+create policy dialer_campaign_numbers_read on public.dialer_campaign_numbers for select to authenticated using (public.dialer_can_access_campaign(campaign_id));
+drop policy if exists dialer_campaign_numbers_admin on public.dialer_campaign_numbers;
+create policy dialer_campaign_numbers_admin on public.dialer_campaign_numbers for all to authenticated using (public.is_dialer_admin()) with check (public.is_dialer_admin());
+insert into public.dialer_campaign_numbers (campaign_id, number_id)
+select id, caller_number_id from public.dialer_campaigns where caller_number_id is not null
+on conflict do nothing;
+create index if not exists dialer_calls_from_number on public.dialer_calls (from_number, started_at);
+
+-- Warm-up: how many calls a number may make on day N of dialling (day 1 = the first Sydney day it dialled). Null =
+-- warmed up (no cap). Rule-of-thumb ramp to keep new numbers from being flagged as spam by carriers and caller-ID apps.
+create or replace function public.dialer_warmup_cap(p_day int) returns int language sql immutable as $$
+  select case when p_day <= 7 then 30 when p_day <= 14 then 60 when p_day <= 21 then 100 else null end
+$$;
+
+-- Each number's warm-up day, today's dials and today's cap. Admins and the server only (others get no rows).
+create or replace function public.dialer_number_usage(p_ids uuid[] default null)
+returns table (number_id uuid, e164 text, created_at timestamptz, first_dial_day date, warmup_day int, dials_today int, daily_cap int)
+language sql stable security definer set search_path = public as $$
+  with today as (select (now() at time zone 'Australia/Sydney')::date as d)
+  select n.id, n.e164, n.created_at, f.first_day,
+         coalesce(t.d - f.first_day + 1, 1),
+         (select count(*) from dialer_calls c
+          where c.from_number = n.e164 and c.direction = 'outbound' and c.started_at >= (t.d::timestamp at time zone 'Australia/Sydney'))::int,
+         dialer_warmup_cap(coalesce(t.d - f.first_day + 1, 1))
+  from dialer_phone_numbers n
+  cross join today t
+  left join lateral (
+    select (min(c.started_at) at time zone 'Australia/Sydney')::date as first_day
+    from dialer_calls c where c.from_number = n.e164 and c.direction = 'outbound'
+  ) f on true
+  where (p_ids is null or n.id = any(p_ids))
+    and (is_dialer_admin() or coalesce(auth.role(), '') = 'service_role')
+$$;
+
+-- The number to dial this person from, out of the campaign's numbers (or, if it has none, its client's oldest):
+-- 1. the number they were last called from, so they recognise it, unless that number is at its warm-up cap;
+-- 2. otherwise the least used today relative to its cap (warmed-up numbers count against 150 a day, for balance),
+--    so every dial rotates and a new number's calls spread across the day;
+-- 3. if every number is at its cap, the oldest one: reps are never blocked.
+create or replace function public.dialer_pick_caller(p_campaign_id uuid, p_to text)
+returns text language plpgsql stable security definer set search_path = public as $$
+declare
+  ids uuid[];
+  picked text;
+begin
+  select array_agg(number_id) into ids from dialer_campaign_numbers where campaign_id = p_campaign_id;
+  if ids is null then
+    select array_agg(id) into ids from (
+      select n.id from dialer_phone_numbers n join dialer_campaigns c on c.client_name = n.client_name
+      where c.id = p_campaign_id order by n.created_at limit 1) x;
+  end if;
+  if ids is null then return null; end if;
+
+  with u as (select * from dialer_number_usage(ids))
+  select u.e164 into picked from u
+  where u.e164 = (select c.from_number from dialer_calls c
+                  where c.to_number = p_to and c.direction = 'outbound' and c.from_number in (select e164 from u)
+                  order by c.started_at desc limit 1)
+    and (u.daily_cap is null or u.dials_today < u.daily_cap);
+  if picked is not null then return picked; end if;
+
+  with u as (select * from dialer_number_usage(ids))
+  select u.e164 into picked from u
+  where u.daily_cap is null or u.dials_today < u.daily_cap
+  order by u.dials_today::numeric / coalesce(u.daily_cap, 150), u.first_dial_day nulls last, u.created_at
+  limit 1;
+  if picked is not null then return picked; end if;
+
+  with u as (select * from dialer_number_usage(ids))
+  select u.e164 into picked from u order by u.first_dial_day nulls last, u.created_at limit 1;
+  return picked;
+end $$;
+revoke execute on function public.dialer_pick_caller(uuid, text) from public, anon, authenticated;
+grant execute on function public.dialer_pick_caller(uuid, text) to service_role;

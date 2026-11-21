@@ -1,6 +1,7 @@
 import { Camera, FileText, Plus, Trash2 } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { warmupLabel, type NumberUsage } from '../../../shared/numberWarmup';
 import { formatPhone } from '../../../shared/phone';
 import type { AirtableClient, Campaign, CampaignStats, DialerUser, PhoneNumber, Script } from '../../../shared/types';
 import { useAuth } from '../../auth/AuthProvider';
@@ -47,7 +48,31 @@ export function CampaignForm({
   }, [campaign]);
   const [name, setName] = useState(campaign?.name ?? '');
   const [clientId, setClientId] = useState(campaign?.airtable_client_id ?? '');
-  const [numberId, setNumberId] = useState(campaign?.caller_number_id ?? '');
+  // The numbers this campaign calls from: each dial rotates across them (new numbers within their warm-up cap).
+  const [numberIds, setNumberIds] = useState<string[] | null>(campaign ? null : []);
+  const [numbersTouched, setNumbersTouched] = useState(false);
+  useEffect(() => {
+    if (!campaign) return;
+    supabase
+      .from('dialer_campaign_numbers')
+      .select('number_id')
+      .eq('campaign_id', campaign.id)
+      .then(({ data }) => {
+        const ids = (data ?? []).map((r: { number_id: string }) => r.number_id);
+        setNumberIds(ids.length ? ids : campaign.caller_number_id ? [campaign.caller_number_id] : []);
+      });
+  }, [campaign]);
+  const usage = useLoad(async () => must(await supabase.rpc('dialer_number_usage', { p_ids: null })) as NumberUsage[], []);
+  const pickedClient = clients.data?.find((c) => c.id === clientId);
+  // A new campaign starts with all its client's numbers ticked (except the click-to-call number) until changed.
+  const selectedNumbers =
+    !campaign && !numbersTouched
+      ? numbers.filter((n) => pickedClient && n.client_name === pickedClient.name && !n.is_click_to_call).map((n) => n.id)
+      : (numberIds ?? []);
+  const toggleNumber = (id: string) => {
+    setNumbersTouched(true);
+    setNumberIds(selectedNumbers.includes(id) ? selectedNumbers.filter((x) => x !== id) : [...selectedNumbers, id]);
+  };
   const [evergreen, setEvergreen] = useState(campaign?.is_evergreen ?? false);
   const [status, setStatus] = useState<Campaign['status']>(campaign?.status ?? 'active');
   const team = users.filter((u) => u.role === 'team');
@@ -71,9 +96,10 @@ export function CampaignForm({
     const client = clients.data?.find((c) => c.id === clientId);
     if (!name.trim()) return setError('Give the campaign a name.');
     if (!client) return setError('Choose the client.');
-    // Every campaign needs a number to call from: one picked here, or the client's own (no account-wide fallback).
-    if (!numberId && !numbers.some((n) => n.client_name === client.name))
-      return setError(`${client.name} has no phone number yet. Pick a caller number, or assign one to ${client.name} in Phone numbers.`);
+    // Every campaign needs a number to call from: ones ticked here, or the client's own (no account-wide fallback).
+    const chosen = selectedNumbers;
+    if (!chosen.length && !numbers.some((n) => n.client_name === client.name))
+      return setError(`${client.name} has no phone number yet. Tick a caller number, or assign one to ${client.name} in Phone numbers.`);
 
     setSaving(true);
     setError(null);
@@ -81,7 +107,8 @@ export function CampaignForm({
       name: name.trim(),
       client_name: client.name,
       airtable_client_id: client.id,
-      caller_number_id: numberId || null,
+      // Kept for older code (texts fall back to it); calls rotate across dialer_campaign_numbers.
+      caller_number_id: chosen[0] ?? null,
       is_evergreen: evergreen,
       script_id: pickedScript || null,
       status: newStatus ?? status,
@@ -90,6 +117,7 @@ export function CampaignForm({
       const id = campaign
         ? (must(await supabase.from('dialer_campaigns').update(fields).eq('id', campaign.id)), campaign.id)
         : (must(await supabase.from('dialer_campaigns').insert({ ...fields, created_by: me?.userId }).select('id').single()) as { id: string }).id;
+      await saveCampaignNumbers(id, chosen);
       await setTeamMember(id, assignee || null, teamBefore);
       onSaved();
     } catch (err) {
@@ -105,7 +133,7 @@ export function CampaignForm({
 
   if (campaign && deleting) return <DeleteCampaignModal campaign={campaign} onCancel={() => setDeleting(false)} onDeleted={onSaved} />;
   const client = clients.data?.find((c) => c.id === clientId);
-  // The number "The client's number" resolves to (the oldest, as when calling).
+  // The number used when none are ticked (the client's oldest, as when calling).
   const clientNumber = client ? numbers.filter((n) => n.client_name === client.name).sort((a, b) => a.created_at.localeCompare(b.created_at))[0] : undefined;
   if (managingScripts && client) {
     return (
@@ -176,29 +204,47 @@ export function CampaignForm({
           <p className="mt-1.5 text-xs text-ink-faint">Calls show in this client's Cold Call Logs in the portal, and Leads are linked to them.</p>
         </div>
         <div>
-          <label htmlFor="c-number" className="mb-2 block text-sm font-medium text-ink-soft">
-            Caller number
-          </label>
-          <select id="c-number" className="field" value={numberId} onChange={(e) => setNumberId(e.target.value)}>
-            <option value="">
-              {!client
-                ? "The client's number"
-                : clientNumber
-                  ? `The client's number (${formatPhone(clientNumber.e164)}${clientNumber.label ? ` · ${clientNumber.label}` : ''})`
-                  : `The client's number (${client.name} has none yet)`}
-            </option>
-            {numbers.map((n) => (
-              <option key={n.id} value={n.id}>
-                {formatPhone(n.e164)} {n.label ? `· ${n.label}` : ''}
-              </option>
-            ))}
-          </select>
-          {client && !numberId && !clientNumber ? (
+          <p className="mb-2 block text-sm font-medium text-ink-soft">Caller numbers</p>
+          {numberIds === null ? (
+            <div className="skeleton h-16 w-full" />
+          ) : (
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-2xl border border-line p-2">
+              {[...numbers]
+                .sort((a, b) => Number(b.client_name === client?.name) - Number(a.client_name === client?.name) || a.created_at.localeCompare(b.created_at))
+                .map((n) => {
+                  const w = warmupLabel(usage.data?.find((u) => u.number_id === n.id));
+                  return (
+                    <label key={n.id} className="flex cursor-pointer items-start gap-3 rounded-xl px-2 py-1.5 text-sm hover:bg-black/[0.03]">
+                      <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand" checked={selectedNumbers.includes(n.id)} onChange={() => toggleNumber(n.id)} />
+                      <span className="min-w-0 flex-1">
+                        <span className="font-medium tabular-nums">{formatPhone(n.e164)}</span>
+                        {n.label && <span className="text-ink-muted"> · {n.label}</span>}
+                        {n.client_name && n.client_name !== client?.name && <span className="text-ink-faint"> · {n.client_name}</span>}
+                        {n.is_click_to_call && <span className="text-ink-faint"> · click-to-call</span>}
+                        {w.text && (
+                          <span className={`block text-xs ${w.tone === 'amber' ? 'text-amber-700' : w.tone === 'green' ? 'text-emerald-700' : 'text-ink-faint'}`}>{w.text}</span>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })}
+              {!numbers.length && <p className="px-2 py-1.5 text-sm text-ink-faint">No numbers yet. Buy one in Phone numbers.</p>}
+            </div>
+          )}
+          {client && !selectedNumbers.length && !clientNumber ? (
             <p className="mt-1.5 text-xs text-red-600">
-              {client.name} has no phone number. Pick one above, or assign one to {client.name} in Phone numbers, before saving.
+              {client.name} has no phone number. Tick one above, or assign one to {client.name} in Phone numbers, before saving.
             </p>
           ) : (
-            <p className="mt-1.5 text-xs text-ink-faint">Leave as the client's number unless this campaign needs a different one. Set client numbers in Phone numbers.</p>
+            <p className="mt-1.5 text-xs text-ink-faint">
+              {selectedNumbers.length > 1
+                ? `Each dial rotates across these ${selectedNumbers.length} numbers. New numbers warm up over 3 weeks (30, then 60, then 100 calls a day); when one is full the others take over, so reps are never blocked.`
+                : selectedNumbers.length === 1
+                  ? 'Tick more numbers to rotate between them on every dial. New numbers warm up over 3 weeks.'
+                  : clientNumber
+                    ? `None ticked: calls go out from ${client?.name}'s number (${formatPhone(clientNumber.e164)}).`
+                    : 'Tick the numbers this campaign calls from.'}
+            </p>
           )}
         </div>
         <label className="flex items-start gap-3 rounded-2xl border border-line px-4 py-3 text-sm">
@@ -580,4 +626,14 @@ export function MembersModal({
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
     </Modal>
   );
+}
+
+/** Makes the campaign's caller numbers exactly these (admins only, by RLS). */
+async function saveCampaignNumbers(campaignId: string, ids: string[]) {
+  const { data } = await supabase.from('dialer_campaign_numbers').select('number_id').eq('campaign_id', campaignId);
+  const before = (data ?? []).map((r: { number_id: string }) => r.number_id);
+  const remove = before.filter((id) => !ids.includes(id));
+  const add = ids.filter((id) => !before.includes(id));
+  if (remove.length) must(await supabase.from('dialer_campaign_numbers').delete().eq('campaign_id', campaignId).in('number_id', remove));
+  if (add.length) must(await supabase.from('dialer_campaign_numbers').insert(add.map((number_id) => ({ campaign_id: campaignId, number_id }))));
 }

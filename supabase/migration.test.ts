@@ -700,3 +700,61 @@ describe('AI call insights', () => {
     await expect(as(ADMIN, () => pg.query('select dialer_ai_insight_start_run($1, $2, 1)', [CAMPAIGN, ADMIN]))).rejects.toThrow(/permission denied/);
   });
 });
+
+describe('caller numbers: rotation and warm-up', () => {
+  const CAMP = '10000000-0000-0000-0000-0000000000a1';
+  const OLD = '30000000-0000-0000-0000-0000000000a1';
+  const NEW = '30000000-0000-0000-0000-0000000000a2';
+  const pick = (to: string) => asServer(async () => (await rows<{ n: string | null }>('select dialer_pick_caller($1, $2) as n', [CAMP, to]))[0].n);
+  // A dial from a number, `daysAgo` Sydney days back (0 = today).
+  const dial = (from: string, to: string, daysAgo = 0) =>
+    pg.query(
+      `insert into dialer_calls (direction, campaign_id, from_number, to_number, started_at, twilio_status)
+       values ('outbound', $1, $2, $3, ((now() at time zone 'Australia/Sydney')::date - $4::int)::timestamp at time zone 'Australia/Sydney' + interval '10 hours', 'completed')`,
+      [CAMP, from, to, daysAgo],
+    );
+
+  it('rotates across the campaign numbers, caps new ones while they warm up, and never blocks', async () => {
+    await pg.exec(`
+      insert into dialer_campaigns (id, name, client_name, airtable_client_id) values ('${CAMP}', 'Rotation', 'Rotateco', 'recRot');
+      insert into dialer_phone_numbers (id, e164, client_name, created_at) values
+        ('${OLD}', '+61400000501', 'Rotateco', now() - interval '60 days'),
+        ('${NEW}', '+61400000502', 'Rotateco', now());
+    `);
+    // No numbers chosen for the campaign: the client's oldest.
+    expect(await pick('+61411000001')).toBe('+61400000501');
+
+    await pg.exec(`insert into dialer_campaign_numbers (campaign_id, number_id) values ('${CAMP}', '${OLD}'), ('${CAMP}', '${NEW}')`);
+    await dial('+61400000501', '+61411999999', 40); // the old number started dialling 40 days ago: warmed up
+    for (let i = 0; i < 20; i++) await dial('+61400000501', `+614119000${String(i).padStart(2, '0')}`);
+    // Old number: 20 today out of a nominal 150 (13%); new number: 0 of 30. The new one goes next.
+    expect(await pick('+61411000002')).toBe('+61400000502');
+    // The new number's usage counts against its cap of 30: after 4 dials (13%) it's level, after 5 the old one is next.
+    for (let i = 0; i < 5; i++) await dial('+61400000502', `+614118000${i}`);
+    expect(await pick('+61411000003')).toBe('+61400000501');
+
+    // Same person, same number: someone last called from the new number is called from it again.
+    expect(await pick('+6141180001')).toBe('+61400000502');
+
+    const usage = await as(ADMIN, () => rows<{ e164: string; warmup_day: number; dials_today: number; daily_cap: number | null }>('select e164, warmup_day, dials_today, daily_cap from dialer_number_usage($1) order by e164', [[OLD, NEW]]));
+    expect(usage).toEqual([
+      { e164: '+61400000501', warmup_day: 41, dials_today: 20, daily_cap: null },
+      { e164: '+61400000502', warmup_day: 1, dials_today: 5, daily_cap: 30 },
+    ]);
+    expect(await as(TEAM1, () => rows('select * from dialer_number_usage(null)'))).toEqual([]);
+
+    // At its cap of 30 the new number is skipped, even for someone last called from it.
+    for (let i = 5; i < 30; i++) await dial('+61400000502', `+614118100${String(i).padStart(2, '0')}`);
+    expect(await pick('+6141180001')).toBe('+61400000501');
+
+    // Every number at its cap: the oldest is used, so reps are never blocked.
+    await pg.exec(`delete from dialer_campaign_numbers where campaign_id = '${CAMP}' and number_id = '${OLD}'`);
+    expect(await pick('+61411000004')).toBe('+61400000502');
+    await expect(as(ADMIN, () => pg.query('select dialer_pick_caller($1, $2)', [CAMP, 'x']))).rejects.toThrow(/permission denied/);
+  });
+
+  it('warms up over three weeks', async () => {
+    expect((await rows<{ c: number[] }>('select array[dialer_warmup_cap(1), dialer_warmup_cap(7), dialer_warmup_cap(8), dialer_warmup_cap(14), dialer_warmup_cap(15), dialer_warmup_cap(21)] as c'))[0].c).toEqual([30, 30, 60, 60, 100, 100]);
+    expect((await rows<{ c: number | null }>('select dialer_warmup_cap(22) as c'))[0].c).toBeNull();
+  });
+});
