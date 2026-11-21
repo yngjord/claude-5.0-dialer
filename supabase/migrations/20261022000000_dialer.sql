@@ -205,7 +205,7 @@ create table if not exists public.dialer_calls (
 );
 alter table public.dialer_calls drop constraint if exists dialer_calls_disposition_check;
 alter table public.dialer_calls add constraint dialer_calls_disposition_check check (disposition in (
-  'Interested - Appointment Set', 'Interested - Needs Follow-Up', 'Callback', 'Not Interested', 'Left Voicemail', 'No Answer',
+  'Interested - Appointment Set', 'Interested - Needs Follow-Up', 'Referral', 'Callback', 'Not Interested', 'Left Voicemail', 'No Answer',
   'Unqualified Lead', 'Wrong Number', 'Do Not Call', 'Disconnected Number'));
 create index if not exists dialer_calls_client on public.dialer_calls (client_name, started_at desc);
 create index if not exists dialer_calls_campaign on public.dialer_calls (campaign_id, started_at desc);
@@ -784,7 +784,7 @@ language sql stable security invoker set search_path = public as $$
          count(*) filter (where x.pickup_status = 'Machine Pickup')::int as machine,
          count(*) filter (where x.pickup_status in ('Unanswered', 'Busy', 'Failed'))::int as unanswered,
          count(*) filter (where x.disposition = 'Interested - Appointment Set')::int as appointments,
-         count(*) filter (where x.disposition = 'Interested - Needs Follow-Up')::int as follow_ups,
+         count(*) filter (where x.disposition in ('Interested - Needs Follow-Up', 'Referral'))::int as follow_ups,
          coalesce(sum(x.duration_s) filter (where x.pickup_status = 'Human Pickup'), 0)::int as talk_seconds
   from dialer_calls x
   where x.direction = 'outbound' and x.source = 'dialer'
@@ -810,7 +810,7 @@ language sql stable security invoker set search_path = public as $$
          count(*) filter (where x.pickup_status = 'Machine Pickup')::int as machine,
          count(*) filter (where x.pickup_status in ('Unanswered', 'Busy', 'Failed'))::int as unanswered,
          count(*) filter (where x.disposition = 'Interested - Appointment Set')::int as appointments,
-         count(*) filter (where x.disposition = 'Interested - Needs Follow-Up')::int as follow_ups,
+         count(*) filter (where x.disposition in ('Interested - Needs Follow-Up', 'Referral'))::int as follow_ups,
          coalesce(sum(x.duration_s) filter (where x.pickup_status = 'Human Pickup'), 0)::int as talk_seconds,
          max(x.started_at) as last_call_at
   from dialer_calls x
@@ -1316,7 +1316,7 @@ language sql stable security invoker set search_path = public as $$
          end as bucket,
          count(*)::int as dials,
          count(*) filter (where x.pickup_status = 'Human Pickup')::int as connects,
-         count(*) filter (where x.disposition in ('Interested - Needs Follow-Up', 'Interested - Appointment Set'))::int as leads,
+         count(*) filter (where x.disposition in ('Interested - Needs Follow-Up', 'Interested - Appointment Set', 'Referral'))::int as leads,
          count(*) filter (where x.disposition = 'Interested - Appointment Set')::int as appointments
   from dialer_calls x
   where x.direction = 'outbound' and x.source = 'dialer'
@@ -1357,3 +1357,9 @@ drop function if exists public.dialer_dialing_sessions(timestamptz, timestamptz,
 -- (heard_ms) and first spoke (spoke_ms), Twilio's quality warnings, the mic and speaker in use, browser and edge.
 -- Written by POST /api/call-audio when an answered call ends.
 alter table public.dialer_calls add column if not exists client_audio jsonb;
+
+-- Referral disposition (21 Nov 2026): the person called referred us to someone else. The dialer makes two linked
+-- Airtable leads, the parent (the person called) in airtable_lead_id and the sublead (the person referred) here, so a
+-- retry or an edit never makes the sublead twice. Referrals count as leads in the stats (disposition list above and
+-- dialer_call_stats / dialer_performance_stats / dialer_activity_trend updated in place).
+alter table public.dialer_calls add column if not exists airtable_sublead_id text;

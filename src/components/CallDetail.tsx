@@ -70,10 +70,12 @@ export function CallDetail({ callId }: { callId: string }) {
         </div>
         {row.airtable_lead_id && (
           <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-emerald-700">
-            <CheckCircle2 size={15} /> Lead created in Airtable
+            <CheckCircle2 size={15} /> {row.airtable_sublead_id ? 'Lead and referred sublead created in Airtable' : 'Lead created in Airtable'}
           </p>
         )}
-        {row.lead_sync_error && !row.airtable_lead_id && <p className="mt-3 text-sm text-amber-700">Lead not created: {row.lead_sync_error}</p>}
+        {row.lead_sync_error && (!row.airtable_lead_id || (row.disposition === 'Referral' && !row.airtable_sublead_id)) && (
+          <p className="mt-3 text-sm text-amber-700">{row.airtable_lead_id ? 'Referred sublead not created' : 'Lead not created'}: {row.lead_sync_error}</p>
+        )}
       </div>
 
       {row.notes && (

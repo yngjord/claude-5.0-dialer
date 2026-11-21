@@ -1,9 +1,9 @@
-import { AlertTriangle, CalendarClock, CalendarPlus, CheckCircle2, Phone } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CalendarPlus, CheckCircle2, Phone, UserRoundPlus } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { APPOINTMENT_SET, CALLBACK, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, type Disposition, type PickupStatus } from '../../shared/constants';
+import { APPOINTMENT_SET, CALLBACK, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, REFERRAL, type Disposition, type PickupStatus } from '../../shared/constants';
 import { carrierFailure } from '../../shared/callFailure';
 import { invitesBroken, parseGuests, renderTemplate, sendsInvites, validateInvite, type InviteInput } from '../../shared/calendar';
-import { validateLead } from '../../shared/leads';
+import { validateLead, validateReferral, type ReferralInput } from '../../shared/leads';
 import { zonedTimeToUtc } from '../../shared/time';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { api } from '../lib/api';
@@ -41,6 +41,8 @@ export interface SavedWrapUp {
   /** The booked callback time (Callback only). */
   callbackAt: string | null;
   leadCreated: boolean;
+  /** Referral: the referred person's lead was created too. */
+  subleadCreated?: boolean;
 }
 
 /** "2026-10-29T01:30:00Z" in Sydney → ["2026-10-29", "12:30"]. */
@@ -74,6 +76,9 @@ export function WrapUpForm({
   const [fullName, setFullName] = useState(call.contact.full_name ?? '');
   const [email, setEmail] = useState(call.contact.email ?? '');
   const [phone, setPhone] = useState(call.contact.phone_e164);
+  // Referral: who they referred the rep to (becomes a sublead of this call's lead).
+  const [referral, setReferral] = useState<ReferralInput>({ fullName: '', email: '', phone: '', linkedin: '' });
+  const setRef = (key: keyof ReferralInput) => (v: string) => setReferral((r) => ({ ...r, [key]: v }));
   const [bookedFor, setBookedFor] = useState('');
   const [time, setTime] = useState('');
   const [tz, setTz] = useState(call.contact.phone_e164.startsWith('+64') ? 'Pacific/Auckland' : 'Australia/Sydney');
@@ -115,6 +120,9 @@ export function WrapUpForm({
   // Click-to-call calls have no campaign: they don't make CRM leads or book callbacks.
   const oneOff = call.mode === 'oneoff';
   const needsLead = !!disposition && LEAD_DISPOSITIONS.includes(disposition) && !leadExists && !oneOff;
+  // Referral: the referred person's details, unless this call already made their lead. Asked for even when the call's
+  // own lead exists (an edit that turns a follow-up into a referral adds the sublead to it).
+  const needsReferral = disposition === REFERRAL && !saved?.subleadCreated && !oneOff;
   // Google Calendar invite: only for clients whose host connected their calendar and has invites switched on.
   const calendar = useClientCalendar(oneOff ? null : call.contact.airtable_client_id);
   const invites = needsLead && disposition === APPOINTMENT_SET && sendsInvites(calendar);
@@ -161,6 +169,10 @@ export function WrapUpForm({
       const problems = validateLead(disposition, lead);
       if (problems.length) return setError(problems.join(' '));
     }
+    if (needsReferral) {
+      const problems = validateReferral(referral);
+      if (problems.length) return setError(problems.join(' '));
+    }
     if (invites) {
       if (!email.trim()) return setError('Prospect email is required to send the calendar invite.');
       const problems = invite ? validateInvite(invite) : ['Choose when the meeting is.'];
@@ -177,6 +189,7 @@ export function WrapUpForm({
         disposition,
         notes,
         ...(needsLead ? { lead } : {}),
+        ...(needsReferral ? { referral } : {}),
         ...(invites && invite ? { invite } : {}),
         ...(callbackAt ? { callbackAt: callbackAt.toISOString() } : {}),
       };
@@ -253,7 +266,10 @@ export function WrapUpForm({
       </div>
 
       {leadExists && !!disposition && LEAD_DISPOSITIONS.includes(disposition) && (
-        <p className="rounded-2xl bg-brand-tint px-4 py-3 text-sm text-brand">This call already created its lead in the CRM. Saving here won't change the lead.</p>
+        <p className="rounded-2xl bg-brand-tint px-4 py-3 text-sm text-brand">
+          This call already created its lead in the CRM. Saving here won't change the lead
+          {needsReferral ? ', but adds the referred person as a sublead of it' : ''}.
+        </p>
       )}
       {oneOff && !!disposition && LEAD_DISPOSITIONS.includes(disposition) && (
         <p className="rounded-2xl bg-brand-tint px-4 py-3 text-sm text-brand">Click-to-call calls don't create CRM leads: update the lead in MaronlyOS.</p>
@@ -262,8 +278,14 @@ export function WrapUpForm({
       {needsLead && (
         <div className="space-y-4 rounded-card border-2 border-brand/20 bg-brand-tint/50 p-4 sm:p-5">
           <p className="flex items-center gap-2 font-display text-[15px] font-medium text-brand">
-            <CheckCircle2 size={18} /> {disposition === APPOINTMENT_SET ? 'Creates a new lead and booking request inside the CRM' : 'Creates a new lead inside the CRM'}
+            <CheckCircle2 size={18} />{' '}
+            {disposition === APPOINTMENT_SET
+              ? 'Creates a new lead and booking request inside the CRM'
+              : disposition === REFERRAL
+                ? 'Creates two linked leads inside the CRM: the person you spoke to, and the person they referred you to'
+                : 'Creates a new lead inside the CRM'}
           </p>
+          {disposition === REFERRAL && <p className="-mt-2 text-sm font-medium text-ink-soft">Person you spoke to (gets the call recording)</p>}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field id="lead-name" label="Prospect full name" value={fullName} onChange={setFullName} required />
             <Field id="lead-email" label="Email address" type="email" value={email} onChange={setEmail} required={invites} />
@@ -332,6 +354,21 @@ export function WrapUpForm({
         </div>
       )}
 
+      {needsReferral && (
+        <div className="space-y-4 rounded-card border-2 border-emerald-200 bg-emerald-50/60 p-4 sm:p-5">
+          <p className="flex items-center gap-2 font-display text-[15px] font-medium text-emerald-800">
+            <UserRoundPlus size={18} /> Who they referred you to
+          </p>
+          <p className="-mt-2 text-xs text-emerald-900/70">Saved as a sublead of the lead above, due for follow-up today.</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field id="ref-name" label="Full name" value={referral.fullName} onChange={setRef('fullName')} required />
+            <Field id="ref-email" label="Email address" type="email" value={referral.email} onChange={setRef('email')} />
+            <Field id="ref-phone" label="Phone number" type="tel" value={referral.phone} onChange={setRef('phone')} />
+            <Field id="ref-linkedin" label="LinkedIn profile" value={referral.linkedin} onChange={setRef('linkedin')} placeholder="https://linkedin.com/in/…" />
+          </div>
+        </div>
+      )}
+
       {disposition === CALLBACK && (
         <div className="space-y-4 rounded-card border-2 border-purple-200 bg-purple-50/60 p-4 sm:p-5">
           <p className="flex items-center gap-2 font-display text-[15px] font-medium text-purple-800">
@@ -369,7 +406,9 @@ export function WrapUpForm({
       <div>
         <label htmlFor="notes" className="mb-2 block text-sm font-medium text-ink-soft">
           Notes{' '}
-          {needsLead ? (
+          {needsLead && needsReferral ? (
+            <span className="font-normal text-ink-faint">(saved to both leads' notes)</span>
+          ) : needsLead || needsReferral ? (
             <span className="font-normal text-ink-faint">(saved to the lead's notes)</span>
           ) : disposition === CALLBACK ? (
             <span className="font-normal text-ink-faint">(shown to you when you call back)</span>
@@ -381,7 +420,13 @@ export function WrapUpForm({
           className="field resize-y"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder={disposition === CALLBACK ? 'What to remember: who you spoke to, what they asked for, why to call back' : 'What happened on the call?'}
+          placeholder={
+            disposition === CALLBACK
+              ? 'What to remember: who you spoke to, what they asked for, why to call back'
+              : disposition === REFERRAL
+                ? 'Who they referred you to and why, the best way to reach them, whether to mention their name'
+                : 'What happened on the call?'
+          }
         />
       </div>
 

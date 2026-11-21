@@ -3,7 +3,19 @@ import { mergeContext, validateInboundLead } from './inboundLead';
 import { checkReputation } from './numberHealth';
 import { parseGuests, renderTemplate, sendsInvites, validateInvite } from './calendar';
 import { buildImport, customFieldKey, guessMapping, parseCsv } from './csv';
-import { buildBookingFields, buildLeadFields, LEAD_FIELDS as F, leadTranscriptText, recordingLink, todayInSydney, validateLead, validateManualBooking, type LeadInput } from './leads';
+import {
+  buildBookingFields,
+  buildLeadFields,
+  buildSubleadFields,
+  LEAD_FIELDS as F,
+  leadTranscriptText,
+  recordingLink,
+  todayInSydney,
+  validateLead,
+  validateManualBooking,
+  validateReferral,
+  type LeadInput,
+} from './leads';
 import { contactOutcome } from './outcomes';
 import { formatPhone, normalizeCallable, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
@@ -82,7 +94,48 @@ describe('leads', () => {
       [F.stage]: 'Nurture',
       [F.nextFollowUp]: '2026-10-22',
       fldKG3QEhKosSdvxc: 'tom@maronly.com',
+      [F.leadType]: 'Parent',
     });
+  });
+
+  it('builds the parent lead for a Referral: the person called, with the recording, noting who they referred us to', () => {
+    const fields = buildLeadFields('Referral', lead, { ...ctx, referredName: ' Sam Lee ' });
+    expect(fields).toMatchObject({
+      [F.fullName]: 'Jane Doe',
+      [F.stage]: 'Nurture',
+      [F.leadType]: 'Parent',
+      [F.callRecordingLink]: 'https://dialer.maronly.com.au/r/abc.mp3',
+      [F.notes]: 'Referred us to Sam Lee.\n\nCall back Tues',
+    });
+    // The follow-up is with the referred person, so the parent isn't due for one.
+    expect(fields).not.toHaveProperty(F.nextFollowUp);
+  });
+
+  it('builds the sublead for a Referral, linked to its parent and due for follow-up', () => {
+    const referral = { fullName: ' Sam Lee ', email: 'sam@acme.com ', phone: '', linkedin: '' };
+    const sub = { parentLeadId: 'recPARENT0000000A', referredBy: 'Jane Doe', company: 'Acme', notes: 'Sam runs marketing', airtableClientId: 'recABC', campaignName: 'Kintell Oct', website: 'acme.com', todaySydney: '2026-10-22', attributedTo: 'tom@maronly.com' };
+    expect(buildSubleadFields(referral, sub)).toEqual({
+      [F.fullName]: 'Sam Lee',
+      [F.email]: 'sam@acme.com',
+      [F.client]: ['recABC'],
+      [F.channel]: 'Cold Call',
+      [F.campaignName]: 'Kintell Oct',
+      [F.notes]: 'Referred by Jane Doe at Acme on a cold call.\n\nSam runs marketing',
+      [F.website]: 'acme.com',
+      [F.recordStatus]: 'Open',
+      [F.stage]: 'Nurture',
+      [F.nextFollowUp]: '2026-10-22',
+      [F.attributedTo]: 'tom@maronly.com',
+      [F.leadType]: 'Sublead',
+      [F.parentLead]: ['recPARENT0000000A'],
+    });
+    expect(buildSubleadFields(referral, { ...sub, company: null, notes: '' })[F.notes]).toBe('Referred by Jane Doe on a cold call.');
+  });
+
+  it('validates the referred person', () => {
+    expect(validateReferral({ fullName: 'Sam Lee', email: '', phone: '', linkedin: '' })).toEqual([]);
+    expect(validateReferral({ fullName: ' ', email: 'nope', phone: '', linkedin: '' })).toHaveLength(2);
+    expect(validateReferral(undefined)).toEqual(['Fill in who they referred you to.']);
   });
 
   it('builds a Booking lead for Appointment Set', () => {

@@ -52,6 +52,7 @@ export function EditLastCallModal({
             notes: row.notes,
             callbackAt: row.disposition === 'Callback' ? call.contact.next_attempt_at : null,
             leadCreated: !!row.airtable_lead_id,
+            subleadCreated: !!row.airtable_sublead_id,
           }}
           onDone={(result) => onSaved({ pickup_status: row.pickup_status, disposition: row.disposition }, result)}
         />

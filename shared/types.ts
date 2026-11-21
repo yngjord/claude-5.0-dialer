@@ -1,6 +1,6 @@
 import type { InviteInput } from './calendar';
 import type { ContactStatus, Disposition, PickupStatus } from './constants';
-import type { LeadInput } from './leads';
+import type { LeadInput, ReferralInput } from './leads';
 
 // Row shapes of the Supabase tables (supabase/migrations). Timestamps are ISO strings.
 
@@ -152,6 +152,8 @@ export interface CallRow {
   transcript_synced_at: string | null;
   visible: boolean;
   airtable_lead_id: string | null;
+  /** Referral: the referred person's lead (a sublead of airtable_lead_id). */
+  airtable_sublead_id?: string | null;
   lead_sync_error: string | null;
   read_at: string | null;
   justcall_call_id: number | null;
@@ -202,6 +204,8 @@ export interface WrapUpRequest {
   /** Callback only: when to call back (ISO timestamp). */
   callbackAt?: string | null;
   lead?: LeadInput;
+  /** Referral only: the person the prospect referred us to (becomes a sublead of the call's lead). */
+  referral?: ReferralInput;
   /** Appointment Set for a client with invites switched on: the Google Calendar invite to send. */
   invite?: InviteInput;
 }

@@ -1,7 +1,7 @@
 import type { Config } from '@netlify/functions';
-import { APPOINTMENT_SET, CALLBACK, CONNECTED_PICKUP_STATUS, isDisposition, isPickupStatus, LEAD_DISPOSITIONS } from '../../shared/constants';
+import { APPOINTMENT_SET, CALLBACK, CONNECTED_PICKUP_STATUS, isDisposition, isPickupStatus, LEAD_DISPOSITIONS, REFERRAL } from '../../shared/constants';
 import { sendsInvites, validateInvite, type ClientCalendar } from '../../shared/calendar';
-import { buildLeadFields, recordingLink, todayInSydney, validateLead } from '../../shared/leads';
+import { buildLeadFields, buildSubleadFields, recordingLink, todayInSydney, validateLead, validateReferral } from '../../shared/leads';
 import { contactOutcome } from '../../shared/outcomes';
 import type { WrapUpRequest, WrapUpResponse } from '../../shared/types';
 import { createRecord } from './_lib/airtable';
@@ -26,7 +26,8 @@ const REFUSALS: Record<string, [number, string]> = {
  * until the callback time). For the two "Interested" dispositions it
  * then creates the lead in the CRM (Airtable), with a permanent link to the call recording (/r/{callId}.mp3), so
  * only those saves wait on Airtable. Appointment Set then also creates a Booking Request linked to that lead (date,
- * time and notes), which is what triggers the booking automation in Airtable. If the client has Google Calendar
+ * time and notes), which is what triggers the booking automation in Airtable. Referral also creates a sublead (the
+ * person they referred us to) linked to that lead through Parent lead. If the client has Google Calendar
  * invites switched on, it then sends the invite from the host's calendar (one per call, so retries don't repeat it).
  *
  * Safe to submit again (the dialer's "Edit last call" does): the contact's attempt count only goes up once, and a
@@ -48,6 +49,13 @@ export default handler(async (req, context) => {
   }
 
   let needsLead = LEAD_DISPOSITIONS.includes(body.disposition);
+  // Referral: the referred person's details make the sublead. Checked even when the call's lead already exists, as
+  // "Edit last call" can turn a follow-up into a referral.
+  const referral = body.disposition === REFERRAL && body.referral ? body.referral : null;
+  if (body.disposition === REFERRAL && (body.lead || referral)) {
+    const problems = validateReferral(referral);
+    if (problems.length) throw new HttpError(400, problems.join(' '));
+  }
   // No lead details sent: a call that already made its lead (correcting it from the dialer) or a click-to-call
   // call (no campaign, so no client to make one for; the CRM it came from has the lead).
   if (needsLead && !body.lead) {
@@ -123,6 +131,7 @@ export default handler(async (req, context) => {
           attributedTo: user.email,
           // The site the rep is on (dialer.maronly.com.au in production), so preview leads link to the preview.
           recordingLink: recordingLink(new URL(req.url).origin, body.callId),
+          referredName: referral?.fullName,
         }),
       );
       await Promise.all([
@@ -139,7 +148,41 @@ export default handler(async (req, context) => {
     }
   }
 
-  // 2. Appointment Set: the Booking Request, linked to that lead. On "Retry" (lead made earlier by this call) it's
+  // 2. Referral: the sublead (once per call), linked to the call's lead. Also made when the lead came from an earlier
+  // save of this call (a retry, or an edit that turned it into a referral).
+  if (referral && leadId && !leadError) {
+    try {
+      const call = must(await db().from('dialer_calls').select('airtable_sublead_id, full_name, company').eq('id', body.callId).maybeSingle()) as {
+        airtable_sublead_id: string | null;
+        full_name: string | null;
+        company: string | null;
+      } | null;
+      if (!call?.airtable_sublead_id) {
+        if (!saved.airtable_client_id) throw new HttpError(400, "This call's campaign no longer exists, so a lead can't be created.");
+        const subleadId = await createRecord(
+          'Leads',
+          buildSubleadFields(referral, {
+            parentLeadId: leadId,
+            referredBy: body.lead?.fullName?.trim() || call?.full_name || '',
+            company: call?.company ?? null,
+            notes: body.notes ?? '',
+            airtableClientId: saved.airtable_client_id,
+            campaignName: saved.campaign_name ?? '',
+            website: saved.website,
+            todaySydney: todayInSydney(),
+            attributedTo: user.email,
+          }),
+        );
+        must(await db().from('dialer_calls').update({ airtable_sublead_id: subleadId, lead_sync_error: null }).eq('id', body.callId));
+      }
+    } catch (err) {
+      leadError = `The lead for the person you spoke to was created, but not the one for the person they referred you to. ${err instanceof Error ? err.message : ''}`.trim();
+      console.error('Sublead creation failed for call', body.callId, err);
+      must(await db().from('dialer_calls').update({ lead_sync_error: leadError }).eq('id', body.callId));
+    }
+  }
+
+  // 3. Appointment Set: the Booking Request, linked to that lead. On "Retry" (lead made earlier by this call) it's
   // only created if this call's lead doesn't have one yet.
   if (needsLead && body.lead && leadId && !leadError && body.disposition === APPOINTMENT_SET) {
     try {
@@ -152,7 +195,7 @@ export default handler(async (req, context) => {
     }
   }
 
-  // 3. The Google Calendar invite, from the client's connected calendar (only if the rep's form sent one).
+  // 4. The Google Calendar invite, from the client's connected calendar (only if the rep's form sent one).
   let inviteSent = false;
   if (sendInvite && leadId && !leadError && saved.airtable_client_id) {
     try {

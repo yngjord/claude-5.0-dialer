@@ -1,4 +1,4 @@
-import { APPOINTMENT_SET, type Disposition } from './constants';
+import { APPOINTMENT_SET, REFERRAL, type Disposition } from './constants';
 
 /** The extra fields the wrap-up form shows for the two "Interested" dispositions. */
 export interface LeadInput {
@@ -10,6 +10,14 @@ export interface LeadInput {
   bookedFor?: string | null;
   /** Free text, e.g. "2:30pm AEDT". Appointment Set only (required). */
   timeBookedFor?: string | null;
+}
+
+/** Referral: the person the prospect referred us to. Becomes a sublead of the call's lead. */
+export interface ReferralInput {
+  fullName: string;
+  email: string;
+  phone: string;
+  linkedin: string;
 }
 
 /**
@@ -37,6 +45,8 @@ export const LEAD_FIELDS = {
   recordCreated: 'fldBWnRJxBXSXIYSy', // Record Created
   transcript: 'fldJSugGAtJaRppT2', // Cold Call Transcript (long text): written once Twilio's transcript is ready
   bookings: 'fldujowUw1gZFjQHE', // Bookings (link to Booking Requests)
+  leadType: 'fldejlQ4xuZaEK2Wc', // Lead Type: Parent | Sublead
+  parentLead: 'fld05rnbSwj9JKhKo', // Parent lead (link to Leads, set on a sublead; the parent's Subleads fills itself)
 } as const;
 
 /** Airtable table "Booking Requests": one per meeting booked, linked to its lead. Fields by id, names as comments. */
@@ -70,6 +80,15 @@ export function validateLead(disposition: Disposition, lead: LeadInput): string[
   return errors;
 }
 
+/** Problems with the referred person's details (Referral); empty when they can be sent. */
+export function validateReferral(referral: ReferralInput | null | undefined): string[] {
+  if (!referral) return ['Fill in who they referred you to.'];
+  const errors: string[] = [];
+  if (!referral.fullName?.trim()) errors.push("The referred person's full name is required.");
+  if (referral.email?.trim() && !EMAIL.test(referral.email.trim())) errors.push("The referred person's email address looks wrong.");
+  return errors;
+}
+
 /** A booking added by hand from the Leads tab (replaces the Airtable "New Booking" form). */
 export interface ManualBookingInput {
   airtableClientId: string;
@@ -96,7 +115,17 @@ export function validateManualBooking(input: ManualBookingInput): string[] {
 export function buildLeadFields(
   disposition: Disposition,
   lead: LeadInput,
-  ctx: { airtableClientId: string; campaignName: string; linkedin: string | null; website: string | null; todaySydney: string; attributedTo: string; recordingLink?: string },
+  ctx: {
+    airtableClientId: string;
+    campaignName: string;
+    linkedin: string | null;
+    website: string | null;
+    todaySydney: string;
+    attributedTo: string;
+    recordingLink?: string;
+    /** Referral: who they referred us to, noted on the parent lead. */
+    referredName?: string;
+  },
 ): LeadFields {
   const F = LEAD_FIELDS;
   const fields: LeadFields = {
@@ -112,9 +141,14 @@ export function buildLeadFields(
     [F.recordStatus]: 'Open',
     [F.callRecordingLink]: ctx.recordingLink ?? '',
     [F.attributedTo]: ctx.attributedTo.trim(),
+    [F.leadType]: 'Parent',
   };
 
-  if (disposition === APPOINTMENT_SET) {
+  if (disposition === REFERRAL) {
+    // The follow-up is with the referred person (the sublead), so the parent isn't due for one itself.
+    fields[F.stage] = 'Nurture';
+    if (ctx.referredName?.trim()) fields[F.notes] = [`Referred us to ${ctx.referredName.trim()}.`, lead.notes.trim()].filter(Boolean).join('\n\n');
+  } else if (disposition === APPOINTMENT_SET) {
     // Also on the Booking Request (buildBookingFields), created right after the lead.
     fields[F.stage] = 'Booking';
     fields[F.dateBookedFor] = lead.bookedFor ?? '';
@@ -126,6 +160,47 @@ export function buildLeadFields(
     fields[F.nextFollowUp] = ctx.todaySydney;
   }
 
+  return Object.fromEntries(Object.entries(fields).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : v !== '' && v != null)));
+}
+
+/**
+ * The sublead for a Referral: the person the prospect referred us to, linked to the parent lead (the person called).
+ * It's due for follow-up from today, as reaching them is the rep's next step. The call recording stays on the parent:
+ * the sublead wasn't on the call.
+ */
+export function buildSubleadFields(
+  referral: ReferralInput,
+  ctx: {
+    parentLeadId: string;
+    referredBy: string;
+    company: string | null;
+    notes: string;
+    airtableClientId: string;
+    campaignName: string;
+    website: string | null;
+    todaySydney: string;
+    attributedTo: string;
+  },
+): LeadFields {
+  const F = LEAD_FIELDS;
+  const by = [ctx.referredBy.trim(), ctx.company?.trim()].filter(Boolean).join(' at ');
+  const fields: LeadFields = {
+    [F.fullName]: referral.fullName.trim(),
+    [F.email]: referral.email.trim(),
+    [F.phone]: referral.phone.trim(),
+    [F.linkedin]: referral.linkedin.trim(),
+    [F.client]: [ctx.airtableClientId],
+    [F.channel]: 'Cold Call',
+    [F.campaignName]: ctx.campaignName,
+    [F.notes]: [by ? `Referred by ${by} on a cold call.` : 'Referred on a cold call.', ctx.notes.trim()].filter(Boolean).join('\n\n'),
+    [F.website]: ctx.website?.trim() ?? '',
+    [F.recordStatus]: 'Open',
+    [F.stage]: 'Nurture',
+    [F.nextFollowUp]: ctx.todaySydney,
+    [F.attributedTo]: ctx.attributedTo.trim(),
+    [F.leadType]: 'Sublead',
+    [F.parentLead]: [ctx.parentLeadId],
+  };
   return Object.fromEntries(Object.entries(fields).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : v !== '' && v != null)));
 }
 

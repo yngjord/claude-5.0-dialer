@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, FileText, LogOut, Pause, Pencil, Phone, PhoneOutgoing, SkipForward, Square } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { APPOINTMENT_SET, CONNECTED_PICKUP_STATUS, NEEDS_FOLLOW_UP } from '../../shared/constants';
+import { CONNECTED_PICKUP_STATUS, LEAD_DISPOSITIONS, type Disposition } from '../../shared/constants';
 import { formatPhone } from '../../shared/phone';
 import type { CallRow, Campaign, CampaignStats, Contact } from '../../shared/types';
 import { useAuth } from '../auth/AuthProvider';
@@ -215,7 +215,7 @@ export default function Dialer() {
     setSession((s) => ({
       ...s,
       connects: s.connects + (result.pickup === CONNECTED_PICKUP_STATUS ? 1 : 0),
-      leads: s.leads + (result.disposition === APPOINTMENT_SET || result.disposition === NEEDS_FOLLOW_UP ? 1 : 0),
+      leads: s.leads + (LEAD_DISPOSITIONS.includes(result.disposition) ? 1 : 0),
     }));
     clear();
     setContact(null);
@@ -228,7 +228,7 @@ export default function Dialer() {
 
   // An edit to the last call: keep the session's connects and leads counts in step with the change.
   const afterEdit = (before: Pick<CallRow, 'pickup_status' | 'disposition'>, after: WrapUpResult) => {
-    const isLead = (d: string | null) => d === APPOINTMENT_SET || d === NEEDS_FOLLOW_UP;
+    const isLead = (d: string | null) => !!d && LEAD_DISPOSITIONS.includes(d as Disposition);
     setSession((s) => ({
       ...s,
       connects: s.connects + (after.pickup === CONNECTED_PICKUP_STATUS ? 1 : 0) - (before.pickup_status === CONNECTED_PICKUP_STATUS ? 1 : 0),
