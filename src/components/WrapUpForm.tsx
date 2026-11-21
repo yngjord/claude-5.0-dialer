@@ -285,7 +285,7 @@ export function WrapUpForm({
                 ? 'Creates two linked leads inside the CRM: the person you spoke to, and the person they referred you to'
                 : 'Creates a new lead inside the CRM'}
           </p>
-          {disposition === REFERRAL && <p className="-mt-2 text-sm font-medium text-ink-soft">Person you spoke to (gets the call recording)</p>}
+          {disposition === REFERRAL && <p className="-mt-2 text-sm font-medium text-ink-soft">Person you spoke to</p>}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field id="lead-name" label="Prospect full name" value={fullName} onChange={setFullName} required />
             <Field id="lead-email" label="Email address" type="email" value={email} onChange={setEmail} required={invites} />
@@ -421,10 +421,10 @@ export function WrapUpForm({
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder={
-            disposition === CALLBACK
-              ? 'What to remember: who you spoke to, what they asked for, why to call back'
-              : disposition === REFERRAL
-                ? 'Who they referred you to and why, the best way to reach them, whether to mention their name'
+            disposition === REFERRAL
+              ? undefined
+              : disposition === CALLBACK
+                ? 'What to remember: who you spoke to, what they asked for, why to call back'
                 : 'What happened on the call?'
           }
         />
