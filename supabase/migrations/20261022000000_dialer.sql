@@ -1363,3 +1363,64 @@ alter table public.dialer_calls add column if not exists client_audio jsonb;
 -- retry or an edit never makes the sublead twice. Referrals count as leads in the stats (disposition list above and
 -- dialer_call_stats / dialer_performance_stats / dialer_activity_trend updated in place).
 alter table public.dialer_calls add column if not exists airtable_sublead_id text;
+
+-- AI call insights (21 Nov 2026). Admin-only, always: reps never see these tables. An admin runs the analysis from a
+-- campaign; each human pickup with a transcript gets one row (a summary, what went well, what hurt the chance of a
+-- booking), made once, using the client's context pack from MaronlyOS (dialer_client_context_packs). Later "AI campaign
+-- insights" will read this table.
+create table if not exists public.dialer_ai_call_insights (
+  call_id uuid primary key references public.dialer_calls(id) on delete cascade,
+  summary text not null,
+  positives text not null default '',
+  negatives text not null default '',
+  -- Which model and which version of the client's context pack produced it.
+  model text not null,
+  context_version text,
+  created_at timestamptz not null default now()
+);
+alter table public.dialer_ai_call_insights enable row level security;
+drop policy if exists dialer_ai_call_insights_admin_read on public.dialer_ai_call_insights;
+create policy dialer_ai_call_insights_admin_read on public.dialer_ai_call_insights for select to authenticated using (public.is_dialer_admin());
+
+-- The latest analysis run per campaign: progress for the admin's screen and a guard against two runs at once. Only the
+-- server reads and writes it (no policies).
+create table if not exists public.dialer_ai_insight_runs (
+  campaign_id uuid primary key references public.dialer_campaigns(id) on delete cascade,
+  started_by uuid,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  total int not null default 0,
+  done int not null default 0,
+  failed int not null default 0,
+  error text
+);
+alter table public.dialer_ai_insight_runs enable row level security;
+
+-- A campaign's human pickups: whether each has a transcript yet and whether it's been analysed. Server only.
+create or replace function public.dialer_ai_insight_queue(p_campaign_id uuid)
+returns table (call_id uuid, has_transcript boolean, analysed boolean)
+language sql stable security definer set search_path = public as $$
+  select c.id,
+         (c.transcript is not null or c.transcript_json is not null),
+         exists (select 1 from dialer_ai_call_insights i where i.call_id = c.id)
+  from dialer_calls c
+  where c.campaign_id = p_campaign_id and c.direction = 'outbound' and c.pickup_status = 'Human Pickup'
+  order by c.started_at
+$$;
+revoke execute on function public.dialer_ai_insight_queue(uuid) from public, anon, authenticated;
+grant execute on function public.dialer_ai_insight_queue(uuid) to service_role;
+
+-- Starts a run unless one is already going (a run that hasn't finished within 16 minutes is treated as dead: the
+-- background job stops itself before then). Returns whether this call started it. Server only.
+create or replace function public.dialer_ai_insight_start_run(p_campaign_id uuid, p_user_id uuid, p_total int)
+returns boolean language plpgsql security definer set search_path = public as $$
+begin
+  insert into dialer_ai_insight_runs as r (campaign_id, started_by, started_at, finished_at, total, done, failed, error)
+  values (p_campaign_id, p_user_id, now(), null, p_total, 0, 0, null)
+  on conflict (campaign_id) do update
+    set started_by = excluded.started_by, started_at = now(), finished_at = null, total = excluded.total, done = 0, failed = 0, error = null
+    where r.finished_at is not null or r.started_at < now() - interval '16 minutes';
+  return found;
+end $$;
+revoke execute on function public.dialer_ai_insight_start_run(uuid, uuid, int) from public, anon, authenticated;
+grant execute on function public.dialer_ai_insight_start_run(uuid, uuid, int) to service_role;

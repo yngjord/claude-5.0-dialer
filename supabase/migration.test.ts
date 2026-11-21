@@ -670,3 +670,33 @@ describe('click-to-call', () => {
     await expect(as(TEAM1, () => pg.query('select dialer_start_oneoff_call($1, $2, $3, $4, $5, $6, $7)', [id, TEAM1, 'x', 'x', 'x', 'x', 'x']))).rejects.toThrow(/permission denied/);
   });
 });
+
+describe('AI call insights', () => {
+  it('only admins can read them; only the server can queue and start runs', async () => {
+    const [call] = await rows<{ id: string }>(
+      `insert into dialer_calls (campaign_id, user_id, twilio_status, pickup_status, pickup_source, transcript) values ($1, $2, 'completed', 'Human Pickup', 'agent', 'Kai: Hi') returning id`,
+      [CAMPAIGN, TEAM1],
+    );
+    await rows(`insert into dialer_calls (campaign_id, user_id, twilio_status, pickup_status, pickup_source) values ($1, $2, 'completed', 'Human Pickup', 'agent')`, [CAMPAIGN, TEAM1]);
+    const queue = () => asServer(() => rows<{ call_id: string; has_transcript: boolean; analysed: boolean }>('select * from dialer_ai_insight_queue($1)', [CAMPAIGN]));
+    const before = await queue();
+    expect(before.filter((q) => q.has_transcript && !q.analysed).map((q) => q.call_id)).toContain(call.id);
+
+    // Written by the server (service role, which bypasses RLS in Supabase; the stub role here doesn't, so insert directly).
+    await pg.query(`insert into dialer_ai_call_insights (call_id, summary, positives, negatives, model) values ($1, 'S', '- good', '- bad', 'm')`, [call.id]);
+    expect((await queue()).find((q) => q.call_id === call.id)?.analysed).toBe(true);
+    expect(await as(ADMIN, () => rows('select summary from dialer_ai_call_insights where call_id = $1', [call.id]))).toEqual([{ summary: 'S' }]);
+    expect(await as(TEAM1, () => rows('select * from dialer_ai_call_insights'))).toEqual([]);
+    await expect(as(ADMIN, () => pg.query(`update dialer_ai_call_insights set summary = 'x'`))).resolves.toMatchObject({ affectedRows: 0 });
+    expect(await as(ADMIN, () => rows('select * from dialer_ai_insight_runs'))).toEqual([]);
+    await expect(as(ADMIN, () => pg.query('select dialer_ai_insight_queue($1)', [CAMPAIGN]))).rejects.toThrow(/permission denied/);
+
+    // One run at a time per campaign.
+    const start = () => asServer(async () => (await rows<{ ok: boolean }>('select dialer_ai_insight_start_run($1, $2, 3) as ok', [CAMPAIGN, ADMIN]))[0].ok);
+    expect(await start()).toBe(true);
+    expect(await start()).toBe(false);
+    await pg.query(`update dialer_ai_insight_runs set finished_at = now() where campaign_id = $1`, [CAMPAIGN]);
+    expect(await start()).toBe(true);
+    await expect(as(ADMIN, () => pg.query('select dialer_ai_insight_start_run($1, $2, 1)', [CAMPAIGN, ADMIN]))).rejects.toThrow(/permission denied/);
+  });
+});

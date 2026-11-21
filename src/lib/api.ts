@@ -13,6 +13,11 @@ export function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return track(request<T>(path, init));
 }
 
+/** As api(), without the page's loading bar: for background polling. */
+export function apiQuiet<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return request<T>(path, init);
+}
+
 async function request<T>(path: string, init: RequestInit): Promise<T> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;

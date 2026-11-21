@@ -1,6 +1,8 @@
-import { Check, CheckCircle2, Copy } from 'lucide-react';
+import { Check, CheckCircle2, Copy, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { bulletItems, type AiCallInsight } from '../../shared/aiInsights';
 import { formatPhone } from '../../shared/phone';
+import { useAuth } from '../auth/AuthProvider';
 import type { CallMediaResponse, CallRow } from '../../shared/types';
 import { api, must, useLoad } from '../lib/api';
 import { formatDateTime, formatDuration, withProtocol } from '../lib/format';
@@ -16,6 +18,12 @@ import { ErrorState } from './ui/States';
 export function CallDetail({ callId }: { callId: string }) {
   const call = useLoad(async () => must(await supabase.from('dialer_calls').select('*').eq('id', callId).maybeSingle()) as CallRow | null, [callId]);
   const media = useLoad(() => api<CallMediaResponse>(`call-media?id=${encodeURIComponent(callId)}`), [callId]);
+  // The AI review: admins only, always (the database returns nothing to reps either).
+  const { isAdmin } = useAuth();
+  const insight = useLoad(
+    async () => (isAdmin ? (must(await supabase.from('dialer_ai_call_insights').select('*').eq('call_id', callId).maybeSingle()) as AiCallInsight | null) : null),
+    [callId, isAdmin],
+  );
 
   const row = call.data;
   const [copied, setCopied] = useState(false);
@@ -78,6 +86,8 @@ export function CallDetail({ callId }: { callId: string }) {
         )}
       </div>
 
+      {insight.data && <InsightCard insight={insight.data} />}
+
       {row.notes && (
         <div>
           <h3 className="mb-1 font-display text-[13px] font-medium text-ink-muted">Notes</h3>
@@ -125,6 +135,46 @@ export function CallDetail({ callId }: { callId: string }) {
             {media.data?.transcriptStatus === 'pending' ? 'Transcribing…' : media.data?.transcriptStatus === 'failed' ? 'Transcription failed.' : 'No transcript for this call.'}
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** The AI review of a call (admins only): summary, what went well, what hurt the chance of a booking. */
+function InsightCard({ insight }: { insight: AiCallInsight }) {
+  const positives = bulletItems(insight.positives);
+  const negatives = bulletItems(insight.negatives);
+  return (
+    <div className="rounded-2xl border border-brand/15 bg-brand-tint/40 p-4">
+      <h3 className="mb-2 flex items-center gap-1.5 font-display text-[13px] font-medium text-brand">
+        <Sparkles size={14} /> AI call insights <span className="font-sans text-xs font-normal text-ink-faint">· admins only</span>
+      </h3>
+      <p className="text-[15px]">{insight.summary}</p>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+        <div>
+          <p className="mb-1 text-sm font-medium text-emerald-700">What went well</p>
+          {positives.length ? (
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              {positives.map((p, i) => (
+                <li key={i}>{p}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-ink-faint">Nothing stood out.</p>
+          )}
+        </div>
+        <div>
+          <p className="mb-1 text-sm font-medium text-amber-800">What didn’t work</p>
+          {negatives.length ? (
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              {negatives.map((p, i) => (
+                <li key={i}>{p}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-ink-faint">Nothing stood out.</p>
+          )}
+        </div>
       </div>
     </div>
   );

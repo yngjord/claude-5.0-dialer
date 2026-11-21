@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { formatPhone } from '../../shared/phone';
 import type { Campaign, CampaignStats, Contact, DialerUser } from '../../shared/types';
 import { useAuth } from '../auth/AuthProvider';
+import { AiInsightsPanel } from '../components/AiInsightsPanel';
 import { ImportModal } from '../components/ImportModal';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -247,6 +248,9 @@ export default function CampaignPage() {
           loading={head.loading}
         />
       </div>
+
+      {/* AI insights are admin-only, always. */}
+      {isAdmin && campaign && <AiInsightsPanel campaignId={campaign.id} />}
 
       <section className="card animate-appear p-4 sm:p-6">
         <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
