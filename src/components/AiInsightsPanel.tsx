@@ -1,6 +1,7 @@
-import { AlertTriangle, Sparkles } from 'lucide-react';
+import { AlertTriangle, ExternalLink, FileText, Sparkles, Table2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { AiInsightsStatus } from '../../shared/aiInsights';
+import type { ClayLinkStatus } from '../../shared/clay';
 import { api, apiQuiet, must, useLoad } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { supabase } from '../lib/supabase';
@@ -85,12 +86,13 @@ export function AiInsightsPanel({ campaignId }: { campaignId: string }) {
     }
   };
 
+  // Analysis needs the Claude key, the client's context and a checked Clay table; the steps below show which is missing.
   const blocked = useMemo(() => {
     if (!status) return null;
     if (!status.configured) return 'The Claude API key isn’t set up on this site yet (ANTHROPIC_API_KEY in Netlify).';
-    if (!status.contextReady) return `Upload ${status.clientName}’s context in MaronlyOS first. The analysis uses it to judge each call.`;
     return null;
   }, [status]);
+  const ready = !!status && !blocked && status.contextReady && !!status.clay?.valid;
 
   const run = status?.lastRun;
   const list = reviews.data ?? [];
@@ -115,13 +117,22 @@ export function AiInsightsPanel({ campaignId }: { campaignId: string }) {
               : statusError ?? 'Loading…'}
           </p>
         </div>
-        <Button onClick={start} disabled={!status || running || starting || !!blocked || !status.toAnalyse} className="shrink-0">
+        <Button onClick={start} disabled={!status || running || starting || !ready || !status.toAnalyse} className="shrink-0">
           {running || starting ? <Spinner /> : <Sparkles size={15} />}
           {running ? 'Analysing…' : status?.toAnalyse ? `Analyse ${status.toAnalyse} new conversation${status.toAnalyse === 1 ? '' : 's'}` : 'Analyse new conversations'}
         </Button>
       </div>
 
       {blocked && <p className="mt-4 rounded-2xl bg-brand-tint px-4 py-3 text-sm text-brand">{blocked}</p>}
+
+      {status && (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <Step done={status.contextReady} icon={<FileText size={16} />} title="Client context">
+            {status.contextReady ? `${status.clientName}’s context from MaronlyOS is ready.` : `Upload ${status.clientName}’s context in MaronlyOS. The analysis uses it to judge each call.`}
+          </Step>
+          <ClayStep campaignId={campaignId} status={status} onChecked={(clay) => setStatus((s) => (s ? { ...s, clay } : s))} />
+        </div>
+      )}
 
       {running && run && (
         <div className="mt-4">
@@ -168,5 +179,134 @@ export function AiInsightsPanel({ campaignId }: { campaignId: string }) {
 
       {open && <CallDetailModal callId={open} onClose={() => setOpen(null)} />}
     </section>
+  );
+}
+
+/** One setup step for analysis, ticked when done. */
+function Step({ done, icon, title, children }: { done: boolean; icon: React.ReactNode; title: string; children: React.ReactNode }) {
+  return (
+    <div className={`rounded-2xl border p-4 ${done ? 'border-emerald-200 bg-emerald-50/50' : 'border-black/10 bg-neutral-50'}`}>
+      <p className="flex items-center gap-2 text-sm font-medium">
+        <span className={`flex h-6 w-6 items-center justify-center rounded-full ${done ? 'bg-emerald-600 text-white' : 'bg-white text-ink-muted ring-1 ring-black/10'}`}>
+          {done ? <Tick /> : icon}
+        </span>
+        {title}
+      </p>
+      <div className="mt-2 text-sm text-ink-soft">{children}</div>
+    </div>
+  );
+}
+
+/** A check mark that draws itself in. */
+function Tick() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" pathLength={1} className="animate-draw" />
+    </svg>
+  );
+}
+
+/**
+ * The campaign's Clay table: paste its URL, and the dialer reads it through Clay's API and counts how many of the
+ * campaign's contacts it finds. Analysis needs at least half of them found.
+ */
+function ClayStep({ campaignId, status, onChecked }: { campaignId: string; status: AiInsightsStatus; onChecked: (clay: ClayLinkStatus) => void }) {
+  const clay = status.clay;
+  const [editing, setEditing] = useState(!clay);
+  const [url, setUrl] = useState(clay?.tableUrl ?? '');
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [justChecked, setJustChecked] = useState(false);
+
+  const check = async (tableUrl: string) => {
+    setChecking(true);
+    setError(null);
+    setJustChecked(false);
+    try {
+      const result = await api<ClayLinkStatus>('admin/ai-insights/clay', { method: 'POST', body: JSON.stringify({ campaignId, url: tableUrl }) });
+      onChecked(result);
+      setEditing(false);
+      setJustChecked(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not check the table.');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const done = !!clay?.valid && !editing && !checking;
+  return (
+    <Step done={done} icon={<Table2 size={16} />} title="Clay table">
+      {!status.clayConfigured ? (
+        <p>The Clay API key isn’t set up on this site yet (CLAY_API_KEY in Netlify).</p>
+      ) : checking ? (
+        <div className="animate-fade-in">
+          <p className="flex items-center gap-2">
+            <Spinner /> Reading the table in Clay and finding this campaign’s contacts…
+          </p>
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/5">
+            <div className="h-full w-1/3 animate-loading-bar rounded-full bg-brand" />
+          </div>
+        </div>
+      ) : editing || !clay ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (url.trim()) check(url);
+          }}
+          className="space-y-2"
+        >
+          <p>Paste the URL of the Clay table this campaign’s leads came from. Several campaigns can share one table.</p>
+          <div className="flex gap-2">
+            <input
+              aria-label="Clay table URL"
+              className="field !py-2 text-sm"
+              placeholder="https://app.clay.com/workspaces/…/tables/t_…"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+            <Button type="submit" disabled={!url.trim()} className="shrink-0">
+              Check
+            </Button>
+          </div>
+          {clay && (
+            <button type="button" onClick={() => setEditing(false)} className="text-xs text-ink-muted hover:underline">
+              Cancel
+            </button>
+          )}
+        </form>
+      ) : (
+        <div className={justChecked ? 'animate-appear' : undefined}>
+          <p className={clay.valid ? 'text-emerald-800' : 'text-amber-800'}>
+            {clay.valid ? 'Found ' : 'Only found '}
+            <span className="font-medium tabular-nums">
+              {clay.contactsMatched.toLocaleString()} of {clay.contactsTotal.toLocaleString()}
+            </span>{' '}
+            of this campaign’s contacts in the table
+            {clay.valid ? '.' : '. Check it’s the right table (analysis needs at least half).'}
+          </p>
+          <p className="mt-1 text-xs text-ink-muted">
+            {clay.rowsRead.toLocaleString()} rows read{clay.tableComplete ? '' : ' (the table is bigger: only the first part was checked)'} · checked{' '}
+            {formatDateTime(clay.checkedAt)}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-3 text-xs">
+            <a href={clay.tableUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-brand hover:underline">
+              Open in Clay <ExternalLink size={12} />
+            </a>
+            <button onClick={() => check(clay.tableUrl)} className="text-brand hover:underline">
+              Check again
+            </button>
+            <button onClick={() => setEditing(true)} className="text-brand hover:underline">
+              Change table
+            </button>
+          </div>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 flex items-start gap-1.5 text-sm text-red-700">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0" /> {error}
+        </p>
+      )}
+    </Step>
   );
 }

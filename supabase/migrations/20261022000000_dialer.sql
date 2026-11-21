@@ -1424,3 +1424,22 @@ begin
 end $$;
 revoke execute on function public.dialer_ai_insight_start_run(uuid, uuid, int) from public, anon, authenticated;
 grant execute on function public.dialer_ai_insight_start_run(uuid, uuid, int) to service_role;
+
+-- A campaign's Clay table, for analysis (21 Nov 2026). Admin-only like the rest of the AI insights: only the server
+-- reads and writes it (no policies). Running a campaign never needs it; the analysis does, together with the client's
+-- context. The check reads the table through Clay's Public API and counts how many of the campaign's contacts it finds
+-- (by LinkedIn profile, else first name + company domain). Several campaigns can point at the same table.
+create table if not exists public.dialer_campaign_clay (
+  campaign_id uuid primary key references public.dialer_campaigns(id) on delete cascade,
+  table_id text not null,
+  table_url text not null,
+  -- Result of the latest check.
+  checked_at timestamptz not null default now(),
+  checked_by uuid,
+  rows_read int not null default 0,
+  table_complete boolean not null default true,
+  contacts_total int not null default 0,
+  contacts_matched int not null default 0,
+  columns jsonb not null default '[]'
+);
+alter table public.dialer_campaign_clay enable row level security;

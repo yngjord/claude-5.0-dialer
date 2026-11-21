@@ -1,3 +1,5 @@
+import type { ClayLinkStatus } from './clay';
+
 /**
  * AI call insights: admin-only, always. Each human pickup in a campaign gets one review (summary, what went well, what
  * hurt the chance of a booking), written by Claude using the client's context pack from MaronlyOS.
@@ -21,6 +23,10 @@ export interface AiInsightsStatus {
   clientName: string;
   /** The client's context pack is built in MaronlyOS. Runs are blocked until it is. */
   contextReady: boolean;
+  /** The Clay API key is set on this site. */
+  clayConfigured: boolean;
+  /** The campaign's Clay table and its latest check. Runs are blocked until it finds enough of the contacts. */
+  clay: ClayLinkStatus | null;
   /** Human pickups with a transcript, not reviewed yet: what a run would do. */
   toAnalyse: number;
   analysed: number;
