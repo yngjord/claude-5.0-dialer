@@ -1,8 +1,8 @@
 import type { Config } from '@netlify/functions';
-import { clayStatus, clayTableId, findsContact, indexRows, keyColumns, type MatchableContact } from '../../shared/clay';
+import { clayStatus, clayTableId, findsContact, indexRows, keyColumns, lookupFilters, type MatchableContact } from '../../shared/clay';
 import { loadCampaign } from './_lib/aiInsights';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
-import { clayColumns, clayConfigured, clayRows } from './_lib/clay';
+import { clayColumns, clayConfigured, clayFind } from './_lib/clay';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json, readJson } from './_lib/http';
 
@@ -31,7 +31,11 @@ export default handler(async (req) => {
     throw new HttpError(400, 'This table has no LinkedIn profile column (or first name and domain columns), so its people can’t be matched to contacts.');
   }
   const wanted = Object.fromEntries(Object.entries(keys).filter(([, v]) => v)) as Record<string, string>;
-  const [{ rows, complete }, contacts] = await Promise.all([clayRows(tableId, wanted), campaignContacts(campaign.id)]);
+  // Looks the campaign's contacts up in the table (a few per request) rather than reading every row: works the same
+  // on a 200-row table as on a 20,000-row one.
+  const contacts = await campaignContacts(campaign.id);
+  const rows = await clayFind(tableId, wanted, lookupFilters(contacts, keys));
+  const complete = true;
 
   const index = indexRows(rows.map((r) => ({ linkedin: r.linkedin ?? null, firstName: r.firstName ?? null, domain: r.domain ?? null })));
   const matched = contacts.filter((c) => findsContact(index, c)).length;

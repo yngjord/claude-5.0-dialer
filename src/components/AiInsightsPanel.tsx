@@ -285,10 +285,13 @@ function ClayStep({ campaignId, status, onChecked }: { campaignId: string; statu
             of this campaign’s contacts in the table
             {clay.valid ? '.' : '. Check it’s the right table (analysis needs at least half).'}
           </p>
-          <p className="mt-1 text-xs text-ink-muted">
-            {clay.rowsRead.toLocaleString()} rows read{clay.tableComplete ? '' : ' (the table is bigger: only the first part was checked)'} · checked{' '}
-            {formatDateTime(clay.checkedAt)}
-          </p>
+          {!clay.valid && (
+            <p className="mt-1 text-xs text-ink-muted">
+              If you only just switched on sync (ClayQL) for this table, Clay may still be copying it, which can take a while for big tables. Check again
+              later.
+            </p>
+          )}
+          <p className="mt-1 text-xs text-ink-muted">Checked {formatDateTime(clay.checkedAt)}</p>
           <div className="mt-2 flex flex-wrap gap-3 text-xs">
             <a href={clay.tableUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-brand hover:underline">
               Open in Clay <ExternalLink size={12} />

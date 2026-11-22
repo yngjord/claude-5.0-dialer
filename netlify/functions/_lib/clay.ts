@@ -31,20 +31,26 @@ export async function clayColumns(tableId: string): Promise<string[]> {
 }
 
 /**
- * Reads the chosen columns of every row, 100 at a time, until the table ends or the time budget runs out (a request
- * must finish within Netlify's 60 seconds; about 10,000 rows fit).
+ * The rows matching each filter (lookupFilters: a few contacts per filter), reading only the chosen columns. Three
+ * requests at a time keeps well inside Clay's 300 a minute.
  */
-export async function clayRows(tableId: string, columns: Record<string, string>, budgetMs = 40_000) {
+export async function clayFind(tableId: string, columns: Record<string, string>, filters: unknown[]) {
   const select = Object.entries(columns).map(([as, field]) => ({ field, as }));
-  const until = Date.now() + budgetMs;
   const rows: Record<string, string | null>[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await query({ query: { tables: [{ id: tableId }], field_mode: 'names', select }, limit: 100, ...(cursor ? { cursor } : {}) });
-    for (const r of page.data ?? []) {
-      rows.push(Object.fromEntries(Object.keys(columns).map((k) => [k, typeof r[k]?.value === 'string' ? (r[k].value as string) : null])));
+  let next = 0;
+  const worker = async () => {
+    while (next < filters.length) {
+      const filter = filters[next++];
+      let cursor: string | undefined;
+      do {
+        const page = await query({ query: { tables: [{ id: tableId }], field_mode: 'names', select, filter }, limit: 100, ...(cursor ? { cursor } : {}) });
+        for (const r of page.data ?? []) {
+          rows.push(Object.fromEntries(Object.keys(columns).map((k) => [k, typeof r[k]?.value === 'string' ? (r[k].value as string) : null])));
+        }
+        cursor = page.data?.length ? page.cursor : undefined;
+      } while (cursor);
     }
-    cursor = page.data?.length ? page.cursor : undefined;
-  } while (cursor && Date.now() < until);
-  return { rows, complete: !cursor };
+  };
+  await Promise.all(Array.from({ length: Math.min(3, filters.length) }, worker));
+  return rows;
 }

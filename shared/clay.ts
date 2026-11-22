@@ -86,6 +86,43 @@ export function findsContact(index: ReturnType<typeof indexRows>, c: MatchableCo
   return !!fn && !!d && index.byNameDomain.has(`${fn}|${d}`);
 }
 
+type Predicate = { field: string; op: string; value: string };
+export type ClayFilter = Predicate | { or: ClayFilter[] } | { and: ClayFilter[] };
+
+/** A LinkedIn handle as written in the contact's URL (original case), for a case-sensitive "contains" filter. */
+function rawHandle(url: string | null | undefined): string | null {
+  const m = (url ?? '').match(/linkedin\.com\/in\/([^/?#\s]+)/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Clay filters that look these contacts up directly instead of reading the whole table: first by LinkedIn profile
+ * (the handle as written and lower-cased, as Clay may compare case-sensitively), five people per request; then, for
+ * contacts without a profile, first name + company domain, ten per request. Clay allows up to 10 conditions per "or".
+ */
+export function lookupFilters(contacts: MatchableContact[], cols: ClayKeyColumns): ClayFilter[] {
+  const filters: ClayFilter[] = [];
+  const chunk = <T,>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
+  if (cols.linkedin) {
+    const handles = [...new Set(contacts.map((c) => rawHandle(c.linkedin)).filter((h): h is string => !!h))];
+    for (const group of chunk(handles, 5)) {
+      const preds = group.flatMap((h) => [...new Set([h, h.toLowerCase()])].map((v) => ({ field: cols.linkedin!, op: 'contains', value: `/in/${v}` })));
+      filters.push(preds.length === 1 ? preds[0] : { or: preds });
+    }
+  }
+  if (cols.firstName && cols.domain) {
+    const pairs = contacts
+      .filter((c) => !rawHandle(c.linkedin) || !cols.linkedin)
+      .map((c) => ({ fn: (c.first_name || c.full_name?.split(/\s+/)[0] || '').trim(), d: websiteDomain(c.website) ?? websiteDomain(c.email?.split('@')[1]) }))
+      .filter((x): x is { fn: string; d: string } => !!x.fn && !!x.d);
+    for (const group of chunk(pairs, 10)) {
+      const preds: ClayFilter[] = group.map((x) => ({ and: [{ field: cols.firstName!, op: '=', value: x.fn }, { field: cols.domain!, op: 'contains', value: x.d }] }));
+      filters.push(preds.length === 1 ? preds[0] : { or: preds });
+    }
+  }
+  return filters;
+}
+
 /** The analysis needs most of the campaign's contacts to be in the table. */
 export const CLAY_MIN_MATCH = 0.5;
 

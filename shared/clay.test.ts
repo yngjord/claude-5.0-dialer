@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clayLinkValid, clayTableId, findsContact, indexRows, keyColumns, linkedinHandle, websiteDomain } from './clay';
+import { clayLinkValid, clayTableId, findsContact, indexRows, keyColumns, linkedinHandle, lookupFilters, websiteDomain, type ClayFilter } from './clay';
 
 describe('Clay tables', () => {
   it('reads the table id from a Clay URL or a bare id', () => {
@@ -46,5 +46,36 @@ describe('Clay tables', () => {
     expect(clayLinkValid(50, 100)).toBe(true);
     expect(clayLinkValid(49, 100)).toBe(false);
     expect(clayLinkValid(0, 0)).toBe(false);
+  });
+
+  it('looks contacts up a few at a time instead of reading the whole table', () => {
+    const cols = { linkedin: 'LinkedIn URL', firstName: 'First Name', domain: 'Company Website' };
+    const base = { first_name: null, full_name: null, website: null, email: null };
+    const contacts = [
+      ...Array.from({ length: 12 }, (_, i) => ({ ...base, linkedin: `https://www.linkedin.com/in/person-${i}/` })),
+      { ...base, linkedin: 'https://linkedin.com/in/NeilDundon' },
+      { ...base, linkedin: null, first_name: 'Julie', website: 'https://www.enticott.com.au' },
+      { ...base, linkedin: null, full_name: 'Sam Lee', email: 'sam@acme.io' },
+      { ...base, linkedin: null }, // nothing to look up by
+    ];
+    const f = lookupFilters(contacts, cols);
+    // 13 profiles in batches of 5 (3 requests), then the 2 name + domain contacts in one.
+    expect(f).toHaveLength(4);
+    const ors = f.map((x) => ('or' in x ? x.or : [x]));
+    for (const o of ors) expect(o.length).toBeLessThanOrEqual(10);
+    expect(ors[2]).toEqual([
+      { field: 'LinkedIn URL', op: 'contains', value: '/in/person-10' },
+      { field: 'LinkedIn URL', op: 'contains', value: '/in/person-11' },
+      { field: 'LinkedIn URL', op: 'contains', value: '/in/NeilDundon' },
+      { field: 'LinkedIn URL', op: 'contains', value: '/in/neildundon' },
+    ]);
+    expect(f[3]).toEqual({
+      or: [
+        { and: [{ field: 'First Name', op: '=', value: 'Julie' }, { field: 'Company Website', op: 'contains', value: 'enticott.com.au' }] },
+        { and: [{ field: 'First Name', op: '=', value: 'Sam' }, { field: 'Company Website', op: 'contains', value: 'acme.io' }] },
+      ],
+    } satisfies ClayFilter);
+    // No LinkedIn column: everyone with a name and domain is looked up that way.
+    expect(lookupFilters(contacts, { ...cols, linkedin: null })).toHaveLength(1);
   });
 });
