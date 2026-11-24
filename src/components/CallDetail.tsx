@@ -1,4 +1,4 @@
-import { Check, CheckCircle2, Copy, Sparkles } from 'lucide-react';
+import { Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { bulletItems, type AiCallInsight } from '../../shared/aiInsights';
 import { formatPhone } from '../../shared/phone';
@@ -180,11 +180,60 @@ function InsightCard({ insight }: { insight: AiCallInsight }) {
   );
 }
 
-export function CallDetailModal({ callId, onClose }: { callId: string; onClose: () => void }) {
+/** Moving through the list the popup was opened from (its order and filters): the neighbours, if any, and where we are. */
+export interface CallNav {
+  index: number;
+  total: number;
+  onPrev: (() => void) | null;
+  onNext: (() => void) | null;
+}
+
+export function CallDetailModal({ callId, onClose, nav }: { callId: string; onClose: () => void; nav?: CallNav }) {
+  // ← / → move to the previous / next call, unless typing or using the audio player (where arrows seek).
+  useEffect(() => {
+    if (!nav) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement;
+      if (el.closest('input, textarea, select, audio, [contenteditable="true"]')) return;
+      if (e.key === 'ArrowLeft' && nav.onPrev) {
+        e.preventDefault();
+        nav.onPrev();
+      } else if (e.key === 'ArrowRight' && nav.onNext) {
+        e.preventDefault();
+        nav.onNext();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [nav]);
+
   return (
     <Modal title="Call details" onClose={onClose} size="lg">
-      <CallDetail callId={callId} />
+      {nav && nav.total > 1 && (
+        <div className="-mt-1 mb-4 flex items-center justify-between gap-3 rounded-full bg-neutral-50 p-1 text-sm">
+          <button
+            onClick={() => nav.onPrev?.()}
+            disabled={!nav.onPrev}
+            className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-ink-soft transition hover:bg-white hover:shadow-sm disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none"
+            title="Previous call (←)"
+          >
+            <ChevronLeft size={16} /> Previous
+          </button>
+          <span className="tabular-nums text-ink-muted">
+            {nav.index + 1} of {nav.total}
+          </span>
+          <button
+            onClick={() => nav.onNext?.()}
+            disabled={!nav.onNext}
+            className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-ink-soft transition hover:bg-white hover:shadow-sm disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none"
+            title="Next call (→)"
+          >
+            Next <ChevronRight size={16} />
+          </button>
+        </div>
+      )}
+      <CallDetail key={callId} callId={callId} />
     </Modal>
   );
 }
-

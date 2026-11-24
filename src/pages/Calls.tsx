@@ -6,7 +6,7 @@ import { DateRangeFilter } from '../components/DateRangeFilter';
 import { MultiSelect } from '../components/ui/MultiSelect';
 import { formatPhone } from '../../shared/phone';
 import type { CallRow, Campaign, DialerUser } from '../../shared/types';
-import { CallDetailModal } from '../components/CallDetail';
+import { CallDetailModal, type CallNav } from '../components/CallDetail';
 import { Badge } from '../components/ui/Badge';
 import { SearchInput } from '../components/ui/SearchInput';
 import { ScrollSync } from '../components/ui/ScrollSync';
@@ -273,7 +273,19 @@ export default function Calls() {
         )}
       </section>
 
-      {open && <CallDetailModal callId={open} onClose={() => setOpen(null)} />}
+      {open && <CallDetailModal callId={open} onClose={() => setOpen(null)} nav={callNav(list.data?.calls ?? [], open, setOpen)} />}
     </>
   );
+}
+
+/** Previous / next within the calls shown (this page, with its filters and order). */
+function callNav(calls: { id: string }[], open: string, setOpen: (id: string) => void): CallNav | undefined {
+  const index = calls.findIndex((c) => c.id === open);
+  if (index < 0) return undefined;
+  return {
+    index,
+    total: calls.length,
+    onPrev: index > 0 ? () => setOpen(calls[index - 1].id) : null,
+    onNext: index < calls.length - 1 ? () => setOpen(calls[index + 1].id) : null,
+  };
 }
