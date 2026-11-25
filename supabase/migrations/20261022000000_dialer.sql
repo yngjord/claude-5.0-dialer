@@ -1528,3 +1528,6 @@ begin
 end $$;
 revoke execute on function public.dialer_pick_caller(uuid, text) from public, anon, authenticated;
 grant execute on function public.dialer_pick_caller(uuid, text) to service_role;
+
+-- Job title of the person called, for calls with no contact record (imported JustCall history). Dialer calls read it from dialer_contacts.
+alter table public.dialer_calls add column if not exists title text;
