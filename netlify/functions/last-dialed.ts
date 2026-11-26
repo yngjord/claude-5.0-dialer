@@ -4,13 +4,13 @@ import { daysSince, linkedinPattern, parseLastDialedRequest, type LastDialedResp
 import { db, must } from './_lib/db';
 import { env, handler, HttpError, json } from './_lib/http';
 
-/** Constant-time check of the x-api-key header. Shares the key Clay already uses for /api/inbound/lead. */
+/** Constant-time check of the x-api-key header. Its own key (LOOKUP_API_KEY), separate from the inbound-lead one. */
 function authorised(req: Request): boolean {
-  if (!process.env.INBOUND_LEADS_API_KEY?.trim()) throw new HttpError(503, 'Not set up yet: INBOUND_LEADS_API_KEY is missing in Netlify.');
+  if (!process.env.LOOKUP_API_KEY?.trim()) throw new HttpError(503, 'Not set up yet: LOOKUP_API_KEY is missing in Netlify.');
   const given = createHash('sha256')
     .update(req.headers.get('x-api-key') ?? '')
     .digest();
-  const expected = createHash('sha256').update(env('INBOUND_LEADS_API_KEY')).digest();
+  const expected = createHash('sha256').update(env('LOOKUP_API_KEY')).digest();
   return timingSafeEqual(given, expected) && !!req.headers.get('x-api-key');
 }
 
