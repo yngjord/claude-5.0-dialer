@@ -36,8 +36,8 @@ export function ScriptText({ body, ctx }: { body: string; ctx: ScriptContext }) 
 }
 
 /**
- * Power dialer: the client's call script, filled in for the contact on screen. Starts on the campaign's script;
- * clients with several can switch. Admins can edit it in place: click the text, change it, click away to save.
+ * Power dialer: the client's call script, filled in for the contact on screen. Reps always see the campaign's script;
+ * admins can switch between the client's scripts and edit one in place: click the text, change it, click away to save.
  */
 export function ScriptPanel({ clientId, defaultScriptId, ctx }: { clientId: string; defaultScriptId: string | null; ctx: ScriptContext }) {
   const scripts = useLoad(
@@ -54,7 +54,7 @@ export function ScriptPanel({ clientId, defaultScriptId, ctx }: { clientId: stri
     <section className="card p-5 sm:p-6" aria-label="Call script">
       <div className="mb-4 flex items-center gap-2">
         <FileText size={17} className="shrink-0 text-brand" />
-        {list.length > 1 ? (
+        {isAdmin && list.length > 1 ? (
           <select aria-label="Script" className="field !py-1.5 text-sm" value={script?.id ?? ''} onChange={(e) => setPicked(e.target.value)}>
             {list.map((s) => (
               <option key={s.id} value={s.id}>
