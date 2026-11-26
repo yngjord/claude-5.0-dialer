@@ -8,6 +8,8 @@ import { ClientLogo } from '../components/ClientLogo';
 import { DateRangeFilter } from '../components/DateRangeFilter';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
+import { CompletionBar } from '../components/ui/CompletionBar';
+import { completion } from '../lib/completion';
 import { Metric } from '../components/ui/Metric';
 import { Tabs } from '../components/ui/Tabs';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/States';
@@ -165,9 +167,8 @@ export default function Campaigns() {
                   </EmptyRow>
                 ) : (
                   shown.map(({ campaign: c, stats: s, period }) => {
-                    const total = s?.contacts_total ?? 0;
-                    const completed = total - (s?.contacts_remaining ?? 0);
-                    const done = c.status === 'completed' || (total > 0 && completed === total);
+                    const { total, dialled, skipped, complete } = completion(s);
+                    const done = c.status === 'completed' || complete;
                     // Team members can't open paused campaigns; admins can open anything.
                     const openable = isAdmin || c.status !== 'paused';
                     // Old JustCall campaigns have no contact list: they open their calls in Call logs instead.
@@ -205,13 +206,11 @@ export default function Campaigns() {
                           <td className="td w-[150px] text-sm tabular-nums text-ink-muted">{(s?.dials_total ?? 0).toLocaleString()} dials</td>
                         ) : (
                         <td className="td w-[150px]">
-                          <p className="text-sm tabular-nums text-ink-muted">
-                            {completed.toLocaleString()} / {total.toLocaleString()}
+                          <p className="text-sm tabular-nums text-ink-muted" title={skipped ? `${skipped.toLocaleString()} skipped` : undefined}>
+                            {dialled.toLocaleString()} / {total.toLocaleString()}
                           </p>
                           <div className="mt-1.5 flex items-center gap-1.5">
-                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-100">
-                              <div className={`h-full rounded-full transition-[width] ${done ? 'bg-emerald-500' : 'bg-brand'}`} style={{ width: `${done ? 100 : total ? (completed / total) * 100 : 0}%` }} />
-                            </div>
+                            <CompletionBar className="h-1.5 flex-1" total={total} dialled={dialled} skipped={skipped} complete={done} />
                             {done && (
                               <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white" title="Completed">
                                 <Check size={11} strokeWidth={3} />

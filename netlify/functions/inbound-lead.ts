@@ -66,7 +66,7 @@ export default handler(async (req) => {
   if (existing[0]) {
     const c = existing[0];
     const sameSubmission = String(c.custom?.portal_submission_id ?? '') === lead.submissionId;
-    const requeue = !sameSubmission && (c.status === 'done' || c.status === 'bad_number');
+    const requeue = !sameSubmission && (c.status === 'done' || c.status === 'bad_number' || c.status === 'skipped');
     must(
       await db()
         .from('dialer_contacts')

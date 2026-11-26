@@ -14,6 +14,8 @@ import { EditLastCallModal } from '../components/EditLastCall';
 import LoadingBar from '../components/LoadingBar';
 import { ScriptPanel } from '../components/ScriptView';
 import { Button } from '../components/ui/Button';
+import { CompletionBar } from '../components/ui/CompletionBar';
+import { completion } from '../lib/completion';
 import { Spinner } from '../components/ui/Spinner';
 import { ErrorState } from '../components/ui/States';
 import { WrapUpForm, type WrapUpResult } from '../components/WrapUpForm';
@@ -66,11 +68,10 @@ export default function Dialer() {
   // Invites switched on but the client's calendar disconnected: warn before the rep books anything.
   const calendar = useClientCalendar(campaign?.airtable_client_id);
   const progress = useLoad(
-    async () => must(await supabase.from('dialer_campaign_stats').select('contacts_total, contacts_remaining').eq('campaign_id', id).maybeSingle()) as Pick<CampaignStats, 'contacts_total' | 'contacts_remaining'> | null,
+    async () => must(await supabase.from('dialer_campaign_stats').select('contacts_total, contacts_remaining, contacts_skipped').eq('campaign_id', id).maybeSingle()) as Pick<CampaignStats, 'contacts_total' | 'contacts_remaining' | 'contacts_skipped'> | null,
     [id],
   );
-  const total = progress.data?.contacts_total ?? 0;
-  const completed = total - (progress.data?.contacts_remaining ?? 0);
+  const { total, dialled, skipped, remaining, complete } = completion(progress.data);
 
   const [stage, setStage] = useState<Stage>('idle');
   const [contact, setContact] = useState<Contact | null>(null);
@@ -199,7 +200,9 @@ export default function Dialer() {
   };
 
   const skip = async () => {
+    // Out of the queue as skipped (a callback just goes back in): it counts towards the campaign's progress.
     if (contact) await supabase.rpc('dialer_release_contact', { p_contact_id: contact.id, p_skip: true });
+    progress.reload({ quiet: true });
     await claimNext();
   };
 
@@ -281,15 +284,16 @@ export default function Dialer() {
       toolbar={
         <>
           {total > 0 && (
-            <div className="flex items-center gap-2.5 rounded-full border border-line bg-white py-1.5 pl-3.5 pr-3 text-sm" title="Contacts called and wrapped up in this campaign, out of everyone in it">
+            <div
+              className="flex items-center gap-2.5 rounded-full border border-line bg-white py-1.5 pl-3.5 pr-3 text-sm"
+              title={`Contacts called and wrapped up in this campaign, out of everyone in it${skipped ? ` (${skipped.toLocaleString()} skipped)` : ''}`}
+            >
               <span className="text-xs text-ink-muted">Contacts</span>
               <span className="tabular-nums">
-                <b className="font-display font-medium">{completed.toLocaleString()}</b> <span className="text-ink-muted">/ {total.toLocaleString()}</span>
+                <b className="font-display font-medium">{dialled.toLocaleString()}</b> <span className="text-ink-muted">/ {total.toLocaleString()}</span>
               </span>
-              <span className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-100">
-                <span className={`block h-full rounded-full transition-[width] ${completed === total ? 'bg-emerald-500' : 'bg-brand'}`} style={{ width: `${(completed / total) * 100}%` }} />
-              </span>
-              <span className="text-xs tabular-nums text-ink-muted">{(total - completed).toLocaleString()} left</span>
+              <CompletionBar className="h-1.5 w-20" total={total} dialled={dialled} skipped={skipped} complete={complete} />
+              <span className="text-xs tabular-nums text-ink-muted">{remaining.toLocaleString()} left</span>
             </div>
           )}
           <div className="flex items-center gap-1 rounded-full border border-line bg-white py-1 pl-3.5 pr-1 text-sm" aria-label="This session">

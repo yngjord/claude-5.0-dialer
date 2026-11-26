@@ -760,7 +760,9 @@ select
   -- For the booking rate (appointments ÷ dials). Added last so the view can be replaced in place.
   (select count(*) from dialer_calls x where x.campaign_id = c.id and x.direction = 'outbound' and x.disposition = 'Interested - Appointment Set')::int as appointments_total,
   -- Contacts not called yet (evergreen campaigns: the rep's "waiting" dot). Added last, as above.
-  (select count(*) from dialer_contacts k where k.campaign_id = c.id and k.status = 'new')::int as contacts_new
+  (select count(*) from dialer_contacts k where k.campaign_id = c.id and k.status = 'new')::int as contacts_new,
+  -- Skipped by a rep: count towards completion, shown in yellow on the progress bar. Added last, as above.
+  (select count(*) from dialer_contacts k where k.campaign_id = c.id and k.status = 'skipped')::int as contacts_skipped
 from dialer_campaigns c;
 
 -- Retry rules were removed: every call takes a contact out of the queue, and admins re-run by disposition.
@@ -1531,3 +1533,89 @@ grant execute on function public.dialer_pick_caller(uuid, text) to service_role;
 
 -- Job title of the person called, for calls with no contact record (imported JustCall history). Dialer calls read it from dialer_contacts.
 alter table public.dialer_calls add column if not exists title text;
+
+-- ── Skipped contacts ─────────────────────────────────────────────────────────────────────────────────────
+-- A rep's Skip takes the contact out of the queue as 'skipped' (who and when kept), so it counts towards the
+-- campaign being complete. Skipping a callback still only puts it back in the queue: callbacks are promised.
+alter table public.dialer_contacts drop constraint if exists dialer_contacts_status_check;
+alter table public.dialer_contacts add constraint dialer_contacts_status_check
+  check (status in ('new', 'callback', 'done', 'do_not_call', 'bad_number', 'skipped'));
+alter table public.dialer_contacts add column if not exists skipped_at timestamptz, add column if not exists skipped_by uuid;
+
+create or replace function public.dialer_release_contact(p_contact_id uuid, p_skip boolean default false) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  update dialer_contacts c
+  set locked_by = null,
+      locked_at = null,
+      status = case when p_skip and c.status = 'new' then 'skipped' else c.status end,
+      skipped_at = case when p_skip and c.status = 'new' then now() else c.skipped_at end,
+      skipped_by = case when p_skip and c.status = 'new' then auth.uid() else c.skipped_by end,
+      next_attempt_at = case when p_skip and c.status = 'callback' then now() else c.next_attempt_at end
+  where c.id = p_contact_id and c.locked_by = auth.uid();
+end $$;
+
+-- Re-run offers skipped contacts as their own row ("Skipped"), alongside the last dispositions.
+create or replace function public.dialer_rerun_counts(p_campaign_id uuid) returns table (disposition text, contacts int)
+language sql stable security definer set search_path = public as $$
+  select d, count(*)::int from (
+    select case when c.status = 'skipped' then 'Skipped' else c.last_disposition end as d
+    from dialer_contacts c
+    where is_dialer_admin() and c.campaign_id = p_campaign_id
+      and (c.status = 'skipped' or (c.status in ('done', 'bad_number') and c.last_disposition is not null))
+      and not exists (select 1 from dialer_contacts k where k.phone_e164 = c.phone_e164 and k.status = 'do_not_call')
+  ) x
+  group by d
+  order by count(*) desc
+$$;
+
+create or replace function public.dialer_rerun_campaign(p_campaign_id uuid, p_dispositions text[], p_name text, p_status text default 'draft')
+returns table (campaign_id uuid, contacts int)
+language plpgsql security definer set search_path = public as $$
+declare
+  src public.dialer_campaigns;
+  new_id uuid;
+  n int;
+begin
+  if not is_dialer_admin() then
+    raise exception 'Only admins can re-run campaigns' using errcode = '42501';
+  end if;
+  if coalesce(trim(p_name), '') = '' then
+    raise exception 'Give the new campaign a name' using errcode = 'P0001';
+  end if;
+  if p_status not in ('draft', 'active') then
+    raise exception 'A new campaign starts as a draft or active' using errcode = 'P0001';
+  end if;
+  select * into src from dialer_campaigns where id = p_campaign_id;
+  if src.id is null then
+    raise exception 'Campaign not found' using errcode = 'P0002';
+  end if;
+
+  insert into dialer_campaigns (name, client_name, airtable_client_id, caller_number_id, status, created_by)
+  values (trim(p_name), src.client_name, src.airtable_client_id, src.caller_number_id, p_status, auth.uid())
+  returning id into new_id;
+  insert into dialer_campaign_numbers (campaign_id, number_id)
+  select new_id, cn.number_id from dialer_campaign_numbers cn where cn.campaign_id = p_campaign_id;
+
+  -- The team member (only one, even if the original has more from before that rule), plus any admins.
+  insert into dialer_campaign_members (campaign_id, user_id)
+  select new_id, m.user_id from dialer_campaign_members m join profiles p on p.id = m.user_id
+  where m.campaign_id = p_campaign_id
+    and (p.role::text <> 'team'
+         or m.user_id = (select m2.user_id from dialer_campaign_members m2 join profiles p2 on p2.id = m2.user_id
+                         where m2.campaign_id = p_campaign_id and p2.role::text = 'team'
+                         order by coalesce(nullif(trim(p2.display_name), ''), p2.email) limit 1));
+
+  insert into dialer_contacts (campaign_id, full_name, first_name, company, title, email, phone_e164, phone_raw, linkedin, website, custom, source)
+  select new_id, c.full_name, c.first_name, c.company, c.title, c.email, c.phone_e164, c.phone_raw, c.linkedin, c.website, c.custom, c.source
+  from dialer_contacts c
+  where c.campaign_id = p_campaign_id
+    and ((c.status in ('done', 'bad_number') and c.last_disposition = any(p_dispositions))
+         or (c.status = 'skipped' and 'Skipped' = any(p_dispositions)))
+    and not exists (select 1 from dialer_contacts d where d.phone_e164 = c.phone_e164 and d.status = 'do_not_call')
+  order by c.created_at;
+  get diagnostics n = row_count;
+
+  return query select new_id, n;
+end $$;
+

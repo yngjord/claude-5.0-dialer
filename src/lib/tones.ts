@@ -31,6 +31,7 @@ export const CONTACT_STATUS_LABELS: Record<string, { label: string; tone: Tone }
   done: { label: 'Done', tone: 'grey' },
   do_not_call: { label: 'Do not call', tone: 'redSolid' },
   bad_number: { label: 'Bad number', tone: 'dark' },
+  skipped: { label: 'Skipped', tone: 'amber' },
 };
 
 export const CAMPAIGN_STATUS: Record<CampaignStatus, { label: string; tone: Tone }> = {

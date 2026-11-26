@@ -75,6 +75,8 @@ export interface CampaignStats {
   appointments_total: number;
   /** Contacts not called yet. */
   contacts_new: number;
+  /** Contacts a rep skipped: out of the queue, counted towards completion. */
+  contacts_skipped: number;
 }
 
 export interface Contact {
@@ -102,6 +104,9 @@ export interface Contact {
   last_disposition: string | null;
   locked_by: string | null;
   locked_at: string | null;
+  /** Skipped by a rep (status 'skipped'): when, and who. */
+  skipped_at?: string | null;
+  skipped_by?: string | null;
   /** Evergreen leads: the client's note on why they're warm (from the portal), shown while dialling. */
   context: string | null;
   airtable_lead_id: string | null;

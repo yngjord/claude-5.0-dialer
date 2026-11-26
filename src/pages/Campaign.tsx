@@ -15,14 +15,15 @@ import { ServerPagination } from '../components/ui/ServerPagination';
 import { EmptyRow, ErrorState, LoadingRows, PageHeader } from '../components/ui/States';
 import { Tabs } from '../components/ui/Tabs';
 import { must, useLoad } from '../lib/api';
+import { completion } from '../lib/completion';
 import { formatDateTime, percent } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import { CAMPAIGN_STATUS, CONTACT_STATUS_LABELS, DISPOSITION_TONES } from '../lib/tones';
 
 const PER_PAGE = 50;
-type Filter = 'all' | 'queue' | 'done' | 'removed';
+type Filter = 'all' | 'queue' | 'done' | 'skipped' | 'removed';
 // Removed contacts (do not call, bad number) are admin-only; team members' "All" leaves them out.
-const FILTERS: Record<Filter, string[] | null> = { all: null, queue: ['new', 'callback'], done: ['done'], removed: ['do_not_call', 'bad_number'] };
+const FILTERS: Record<Filter, string[] | null> = { all: null, queue: ['new', 'callback'], done: ['done'], skipped: ['skipped'], removed: ['do_not_call', 'bad_number'] };
 /** A contact a rep claimed this recently may be on their screen or on a live call, so bulk delete leaves it alone. */
 const LOCK_MINUTES = 30;
 
@@ -234,8 +235,8 @@ export default function CampaignPage() {
       <div className="mb-6 grid animate-appear grid-cols-2 gap-4 sm:mb-8 lg:grid-cols-5">
         <Metric
           label="Completed"
-          value={((stats?.contacts_total ?? 0) - (stats?.contacts_remaining ?? 0)).toLocaleString()}
-          note={`of ${(stats?.contacts_total ?? 0).toLocaleString()} contacts`}
+          value={completion(stats).dialled.toLocaleString()}
+          note={`of ${(stats?.contacts_total ?? 0).toLocaleString()} contacts${stats?.contacts_skipped ? ` · ${stats.contacts_skipped.toLocaleString()} skipped` : ''}`}
           loading={head.loading}
         />
         <Metric label="Dials today" value={(stats?.dials_today ?? 0).toLocaleString()} note={`${stats?.connects_today ?? 0} connected`} loading={head.loading} />
@@ -262,6 +263,7 @@ export default function CampaignPage() {
               { value: 'all', label: 'All' },
               { value: 'queue', label: 'To call' },
               { value: 'done', label: 'Done' },
+              ...(stats?.contacts_skipped ? [{ value: 'skipped' as const, label: 'Skipped' }] : []),
               ...(isAdmin ? [{ value: 'removed' as const, label: 'Removed' }] : []),
             ]}
           />

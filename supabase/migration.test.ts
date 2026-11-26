@@ -180,14 +180,25 @@ describe('claim_next_contact', () => {
     await as(null, () => pg.exec(`update dialer_campaigns set status = 'active' where id = '${CAMPAIGN}'`));
   });
 
-  it('release with skip moves the contact to the back of the queue', async () => {
+  it('skip takes the contact out of the queue as skipped, recording who and when', async () => {
     const [c] = await as(TEAM1, () => rows<{ id: string }>('select id from dialer_claim_next_contact($1)', [CAMPAIGN]));
     await as(TEAM1, () => pg.query('select dialer_release_contact($1, true)', [c.id]));
-    const [after] = await rows<{ locked_by: string | null }>('select locked_by from dialer_contacts where id = $1', [c.id]);
-    expect(after.locked_by).toBeNull();
+    const [after] = await rows<{ locked_by: string | null; status: string; skipped_by: string | null; skipped_at: string | null }>(
+      'select locked_by, status, skipped_by, skipped_at from dialer_contacts where id = $1',
+      [c.id],
+    );
+    expect(after).toMatchObject({ locked_by: null, status: 'skipped', skipped_by: TEAM1 });
+    expect(after.skipped_at).not.toBeNull();
     const [next] = await as(TEAM1, () => rows<{ id: string }>('select id from dialer_claim_next_contact($1)', [CAMPAIGN]));
     expect(next.id).not.toBe(c.id);
-    await as(null, () => pg.exec(`update dialer_contacts set locked_by = null, locked_at = null, next_attempt_at = null`));
+    const [s] = await rows<{ contacts_skipped: number }>('select contacts_skipped from dialer_campaign_stats where campaign_id = $1', [CAMPAIGN]);
+    expect(s.contacts_skipped).toBe(1);
+    // Releasing without skip (Stop) leaves the contact in the queue.
+    await as(TEAM1, () => pg.query('select dialer_release_contact($1, false)', [next.id]));
+    expect((await rows<{ status: string }>('select status from dialer_contacts where id = $1', [next.id]))[0].status).toBe('new');
+    await as(null, () =>
+      pg.exec(`update dialer_contacts set locked_by = null, locked_at = null, next_attempt_at = null, status = 'new', skipped_at = null, skipped_by = null where status = 'skipped'`),
+    );
   });
 });
 
@@ -289,10 +300,12 @@ describe('re-run by disposition', () => {
         ('${CAMPAIGN}', 'NA2', '+61470000002', 'done', 'No Answer', 1, '{}'),
         ('${CAMPAIGN}', 'NI', '+61470000003', 'done', 'Not Interested', 1, '{}'),
         ('${CAMPAIGN}', 'NA but DNC', '+61470000004', 'done', 'No Answer', 1, '{}'),
+        ('${CAMPAIGN}', 'Skipped one', '+61470000005', 'skipped', null, 0, '{}'),
         ('${OTHER_CAMPAIGN}', 'DNC', '+61470000004', 'do_not_call', 'Do Not Call', 1, '{}');
     `);
     const counts = await as(ADMIN, () => rows<{ disposition: string; contacts: number }>('select * from dialer_rerun_counts($1)', [CAMPAIGN]));
     expect(counts).toContainEqual({ disposition: 'No Answer', contacts: 2 });
+    expect(counts).toContainEqual({ disposition: 'Skipped', contacts: 1 });
     expect(await as(TEAM1, () => rows('select * from dialer_rerun_counts($1)', [CAMPAIGN]))).toEqual([]);
     await expect(as(TEAM1, () => pg.query('select * from dialer_rerun_campaign($1, $2, $3, $4)', [CAMPAIGN, ['No Answer'], 'Again', 'active']))).rejects.toThrow(/Only admins/);
 
@@ -313,6 +326,11 @@ describe('re-run by disposition', () => {
     expect(orig.status).toBe('done');
 
     await pg.exec(`delete from dialer_campaigns where id = '${made.campaign_id}'`);
+
+    // Skipped contacts can be re-run too.
+    const [again] = await as(ADMIN, () => rows<{ campaign_id: string; contacts: number }>('select * from dialer_rerun_campaign($1, $2, $3, $4)', [CAMPAIGN, ['Skipped'], 'Skipped re-run', 'draft']));
+    expect(again.contacts).toBe(1);
+    await pg.exec(`delete from dialer_campaigns where id = '${again.campaign_id}'`);
 
     // Saved as a draft: only admins see it.
     const [draft] = await as(ADMIN, () => rows<{ campaign_id: string }>('select * from dialer_rerun_campaign($1, $2, $3)', [CAMPAIGN, ['No Answer'], 'Draft re-run']));
@@ -485,6 +503,8 @@ describe('campaign completion', () => {
     `);
     await pg.exec(`update dialer_contacts set status = 'done' where campaign_id = '${id}' and full_name = 'X'`);
     expect(await status()).toBe('active');
+    await pg.exec(`update dialer_contacts set status = 'skipped' where campaign_id = '${id}' and full_name = 'Y'`);
+    expect(await status()).toBe('completed');
     await pg.exec(`update dialer_contacts set status = 'bad_number' where campaign_id = '${id}' and full_name = 'Y'`);
     expect(await status()).toBe('completed');
     await pg.exec(`insert into dialer_contacts (campaign_id, full_name, phone_e164) values ('${id}', 'Z', '+61480000003')`);

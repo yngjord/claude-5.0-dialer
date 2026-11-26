@@ -35,7 +35,7 @@ export const LEAD_DISPOSITIONS: readonly Disposition[] = [APPOINTMENT_SET, NEEDS
 /** A call is "connected" (a real conversation) only when Pickup Status is exactly this value. Same rule as the portal. */
 export const CONNECTED_PICKUP_STATUS: PickupStatus = 'Human Pickup';
 
-export const CONTACT_STATUSES = ['new', 'callback', 'done', 'do_not_call', 'bad_number'] as const;
+export const CONTACT_STATUSES = ['new', 'callback', 'done', 'do_not_call', 'bad_number', 'skipped'] as const;
 export type ContactStatus = (typeof CONTACT_STATUSES)[number];
 
 export const isPickupStatus = (v: unknown): v is PickupStatus => PICKUP_STATUSES.includes(v as PickupStatus);
