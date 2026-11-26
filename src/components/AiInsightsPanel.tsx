@@ -1,4 +1,4 @@
-import { AlertTriangle, ExternalLink, FileText, Sparkles, Table2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ExternalLink, FileText, Sparkles, Table2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { AiInsightsStatus } from '../../shared/aiInsights';
 import type { ClayLinkStatus } from '../../shared/clay';
@@ -30,6 +30,8 @@ export function AiInsightsPanel({ campaignId }: { campaignId: string }) {
   const [startError, setStartError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  // Collapsed by default to keep the campaign page calm: the header, progress and any problem stay visible.
+  const [expanded, setExpanded] = useState(false);
 
   const reviews = useLoad(async () => {
     const rows = must(
@@ -116,6 +118,12 @@ export function AiInsightsPanel({ campaignId }: { campaignId: string }) {
                   .join(' · ')
               : statusError ?? 'Loading…'}
           </p>
+          {status && (
+            <button type="button" onClick={() => setExpanded((e) => !e)} aria-expanded={expanded} className="mt-2 inline-flex items-center gap-1 text-sm text-brand hover:underline">
+              <ChevronDown size={15} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              {expanded ? 'Hide details' : list.length ? `Show setup and ${list.length} review${list.length === 1 ? '' : 's'}` : 'Show setup'}
+            </button>
+          )}
         </div>
         <Button onClick={start} disabled={!status || running || starting || !ready || !status.toAnalyse} className="shrink-0">
           {running || starting ? <Spinner /> : <Sparkles size={15} />}
@@ -125,7 +133,8 @@ export function AiInsightsPanel({ campaignId }: { campaignId: string }) {
 
       {blocked && <p className="mt-4 rounded-2xl bg-brand-tint px-4 py-3 text-sm text-brand">{blocked}</p>}
 
-      {status && (
+      {/* Setup stays visible while something is missing, so it's clear why analysis can't run. */}
+      {status && (expanded || !ready) && (
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           <Step done={status.contextReady} icon={<FileText size={16} />} title="Client context">
             {status.contextReady ? `${status.clientName}’s context from MaronlyOS is ready.` : `Upload ${status.clientName}’s context in MaronlyOS. The analysis uses it to judge each call.`}
@@ -151,7 +160,7 @@ export function AiInsightsPanel({ campaignId }: { campaignId: string }) {
         </p>
       )}
 
-      {list.length > 0 && (
+      {expanded && list.length > 0 && (
         <ul className="mt-5 divide-y divide-black/5">
           {shown.map((r) => (
             <li key={r.call_id}>
@@ -171,7 +180,7 @@ export function AiInsightsPanel({ campaignId }: { campaignId: string }) {
           ))}
         </ul>
       )}
-      {list.length > SHOWN && (
+      {expanded && list.length > SHOWN && (
         <button onClick={() => setShowAll((s) => !s)} className="mt-2 text-sm text-brand hover:underline">
           {showAll ? 'Show fewer' : `Show all ${list.length}`}
         </button>
