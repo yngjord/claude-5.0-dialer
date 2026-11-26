@@ -1619,3 +1619,116 @@ begin
   return query select new_id, n;
 end $$;
 
+
+-- ── Row security, evaluated once per query ──────────────────────────────────────────────────────────────
+-- The role checks are wrapped in (select …) so Postgres runs them once per query instead of once per row (the advice
+-- in Supabase's RLS performance guide); admins skip the per-row campaign check. Same rules as before.
+drop policy if exists "dialer_ai_call_insights_admin_read" on public.dialer_ai_call_insights;
+create policy "dialer_ai_call_insights_admin_read" on public.dialer_ai_call_insights for select to authenticated
+  using ((select is_dialer_admin()));
+drop policy if exists "Mark own voicemails read" on public.dialer_calls;
+create policy "Mark own voicemails read" on public.dialer_calls for update to authenticated
+  using (((select is_dialer_admin()) OR ((select is_dialer_user()) AND (user_id = (select auth.uid())))))
+  with check (((select is_dialer_admin()) OR ((select is_dialer_user()) AND (user_id = (select auth.uid())))));
+drop policy if exists "Read calls" on public.dialer_calls;
+create policy "Read calls" on public.dialer_calls for select to authenticated
+  using (((select is_dialer_admin()) OR ((select is_dialer_user()) AND (user_id = (select auth.uid())))));
+drop policy if exists "Admins manage memberships" on public.dialer_campaign_members;
+create policy "Admins manage memberships" on public.dialer_campaign_members for all to authenticated
+  using ((select is_dialer_admin()))
+  with check ((select is_dialer_admin()));
+drop policy if exists "Read own memberships" on public.dialer_campaign_members;
+create policy "Read own memberships" on public.dialer_campaign_members for select to authenticated
+  using (((user_id = (select auth.uid())) OR (select is_dialer_admin())));
+drop policy if exists "dialer_campaign_numbers_admin" on public.dialer_campaign_numbers;
+create policy "dialer_campaign_numbers_admin" on public.dialer_campaign_numbers for all to authenticated
+  using ((select is_dialer_admin()))
+  with check ((select is_dialer_admin()));
+drop policy if exists "dialer_campaign_numbers_read" on public.dialer_campaign_numbers;
+create policy "dialer_campaign_numbers_read" on public.dialer_campaign_numbers for select to authenticated
+  using (((select is_dialer_admin()) or dialer_can_access_campaign(campaign_id)));
+drop policy if exists "Admins manage campaigns" on public.dialer_campaigns;
+create policy "Admins manage campaigns" on public.dialer_campaigns for all to authenticated
+  using ((select is_dialer_admin()))
+  with check ((select is_dialer_admin()));
+drop policy if exists "Members read campaigns" on public.dialer_campaigns;
+create policy "Members read campaigns" on public.dialer_campaigns for select to authenticated
+  using (((select is_dialer_admin()) or dialer_can_access_campaign(id)));
+drop policy if exists "Admins add calendar settings" on public.dialer_client_calendars;
+create policy "Admins add calendar settings" on public.dialer_client_calendars for insert to authenticated
+  with check ((select is_dialer_admin()));
+drop policy if exists "Admins edit calendar settings" on public.dialer_client_calendars;
+create policy "Admins edit calendar settings" on public.dialer_client_calendars for update to authenticated
+  using ((select is_dialer_admin()))
+  with check ((select is_dialer_admin()));
+drop policy if exists "Reps read their clients' calendar settings" on public.dialer_client_calendars;
+create policy "Reps read their clients' calendar settings" on public.dialer_client_calendars for select to authenticated
+  using (((select is_dialer_admin()) OR (EXISTS ( SELECT 1 FROM dialer_campaigns c WHERE ((c.airtable_client_id = dialer_client_calendars.airtable_client_id) AND dialer_can_access_campaign(c.id))))));
+drop policy if exists "Dialer users read client logos" on public.dialer_client_logos;
+create policy "Dialer users read client logos" on public.dialer_client_logos for select to authenticated
+  using ((select is_dialer_user()));
+drop policy if exists "Admins add contacts" on public.dialer_contacts;
+create policy "Admins add contacts" on public.dialer_contacts for insert to authenticated
+  with check ((select is_dialer_admin()));
+drop policy if exists "Admins delete contacts" on public.dialer_contacts;
+create policy "Admins delete contacts" on public.dialer_contacts for delete to authenticated
+  using ((select is_dialer_admin()));
+drop policy if exists "Admins edit contacts" on public.dialer_contacts;
+create policy "Admins edit contacts" on public.dialer_contacts for update to authenticated
+  using ((select is_dialer_admin()))
+  with check ((select is_dialer_admin()));
+drop policy if exists "Members read contacts" on public.dialer_contacts;
+create policy "Members read contacts" on public.dialer_contacts for select to authenticated
+  using (((select is_dialer_admin()) or dialer_can_access_campaign(campaign_id)));
+drop policy if exists "Admins manage custom fields" on public.dialer_custom_fields;
+create policy "Admins manage custom fields" on public.dialer_custom_fields for all to authenticated
+  using ((select is_dialer_admin()))
+  with check ((select is_dialer_admin()));
+drop policy if exists "Dialer users read custom fields" on public.dialer_custom_fields;
+create policy "Dialer users read custom fields" on public.dialer_custom_fields for select to authenticated
+  using ((select is_dialer_user()));
+drop policy if exists "Admins manage numbers" on public.dialer_phone_numbers;
+create policy "Admins manage numbers" on public.dialer_phone_numbers for all to authenticated
+  using ((select is_dialer_admin()))
+  with check ((select is_dialer_admin()));
+drop policy if exists "Admins read numbers" on public.dialer_phone_numbers;
+create policy "Admins read numbers" on public.dialer_phone_numbers for select to authenticated
+  using ((select is_dialer_admin()));
+drop policy if exists "Admins manage scripts" on public.dialer_scripts;
+create policy "Admins manage scripts" on public.dialer_scripts for all to authenticated
+  using ((select is_dialer_admin()))
+  with check ((select is_dialer_admin()));
+drop policy if exists "Reps read their clients' scripts" on public.dialer_scripts;
+create policy "Reps read their clients' scripts" on public.dialer_scripts for select to authenticated
+  using (((select is_dialer_admin()) OR (EXISTS ( SELECT 1 FROM dialer_campaigns c WHERE ((c.airtable_client_id = dialer_scripts.airtable_client_id) AND dialer_can_access_campaign(c.id))))));
+drop policy if exists "Mark own messages read" on public.dialer_sms_messages;
+create policy "Mark own messages read" on public.dialer_sms_messages for update to authenticated
+  using (((select is_dialer_admin()) OR ((select is_dialer_user()) AND (user_id = (select auth.uid())))))
+  with check (((select is_dialer_admin()) OR ((select is_dialer_user()) AND (user_id = (select auth.uid())))));
+drop policy if exists "Read messages" on public.dialer_sms_messages;
+create policy "Read messages" on public.dialer_sms_messages for select to authenticated
+  using (((select is_dialer_admin()) OR ((select is_dialer_user()) AND ((user_id = (select auth.uid())) OR (EXISTS ( SELECT 1 FROM dialer_contacts c WHERE ((c.id = dialer_sms_messages.contact_id) AND dialer_can_access_campaign(c.campaign_id))))))));
+
+-- Campaign periods: count calls per campaign first, then check access once per campaign (not once per call).
+create or replace function public.dialer_campaign_periods()
+returns table (campaign_id uuid, period_month date, half int, dials int)
+language sql stable security definer set search_path = public as $$
+  select distinct on (s.campaign_id) s.campaign_id, s.m, s.h, s.n
+  from (
+    select x.campaign_id,
+           date_trunc('month', x.started_at at time zone 'Australia/Sydney')::date as m,
+           case when extract(day from x.started_at at time zone 'Australia/Sydney') < 15 then 1 else 2 end as h,
+           count(*)::int as n
+    from dialer_calls x
+    where x.direction = 'outbound' and x.campaign_id is not null
+    group by 1, 2, 3
+  ) s
+  where (select is_dialer_admin()) or dialer_can_access_campaign(s.campaign_id)
+  order by s.campaign_id, s.n desc, s.m desc, s.h desc
+$$;
+
+-- The 10-minute sweep looks for recordings and transcripts still to finish: index just those calls.
+create index if not exists dialer_calls_media_unfinished on public.dialer_calls (updated_at)
+  where recording_sid is not null and (recording_path is null or transcript_status is null);
+create index if not exists dialer_calls_transcript_skipped on public.dialer_calls (started_at desc)
+  where transcript_status = 'skipped' and pickup_status = 'Human Pickup';

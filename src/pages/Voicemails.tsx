@@ -31,9 +31,8 @@ export default function Voicemails() {
     window.addEventListener('voicemails:changed', onChange);
     const channel = supabase
       .channel('voicemails-page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialer_calls' }, (p) => {
-        if ((p.new as { kind?: string })?.kind === 'voicemail') onChange();
-      })
+      // Only voicemail rows: listening to every call change kept the database busy during calling.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialer_calls', filter: 'kind=eq.voicemail' }, onChange)
       .subscribe();
     return () => {
       window.removeEventListener('voicemails:changed', onChange);
