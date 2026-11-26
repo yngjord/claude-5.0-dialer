@@ -16,7 +16,7 @@ import {
   validateReferral,
   type LeadInput,
 } from './leads';
-import { contactOutcome } from './outcomes';
+import { contactOutcome, pickupFor } from './outcomes';
 import { formatPhone, normalizeCallable, normalizePhone } from './phone';
 import { matchesNumberSearch, numberSearchPattern } from './numberSearch';
 import { shouldTranscribe } from './pickup';
@@ -444,5 +444,16 @@ describe('caller number warm-up', () => {
     expect(warmupLabel({ ...u, dials_today: 30 }).text).toContain('full, others take over');
     expect(warmupLabel({ ...u, first_dial_day: null })).toEqual({ text: 'New · starts at 30 calls a day', tone: 'grey' });
     expect(warmupLabel({ ...u, daily_cap: null, dials_today: 18 })).toEqual({ text: 'Ready · 18 today', tone: 'green' });
+  });
+});
+
+describe('pickup after a conversation', () => {
+  it('is a person when the outcome means the rep spoke to someone, unless the rep chose the pickup', () => {
+    expect(pickupFor('Interested - Appointment Set', 'Machine Pickup', false)).toBe('Human Pickup');
+    expect(pickupFor('Not Interested', 'Unanswered', false)).toBe('Human Pickup');
+    expect(pickupFor('Interested - Appointment Set', 'Machine Pickup', true)).toBe('Machine Pickup');
+    expect(pickupFor('No Answer', 'Machine Pickup', false)).toBe('Machine Pickup');
+    expect(pickupFor('Callback', 'Unanswered', false)).toBe('Unanswered');
+    expect(pickupFor('', 'Machine Pickup', false)).toBe('Machine Pickup');
   });
 });

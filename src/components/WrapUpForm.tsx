@@ -2,6 +2,7 @@ import { AlertTriangle, CalendarClock, CalendarPlus, CheckCircle2, Phone, UserRo
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { APPOINTMENT_SET, CALLBACK, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, REFERRAL, type Disposition, type PickupStatus } from '../../shared/constants';
 import { carrierFailure } from '../../shared/callFailure';
+import { pickupFor } from '../../shared/outcomes';
 import { invitesBroken, parseGuests, renderTemplate, sendsInvites, validateInvite, type InviteInput } from '../../shared/calendar';
 import { validateLead, validateReferral, type ReferralInput } from '../../shared/leads';
 import { zonedTimeToUtc } from '../../shared/time';
@@ -107,13 +108,13 @@ export function WrapUpForm({
 
   // Twilio's result can land a second or two after hang-up: keep following it until the rep changes it.
   useEffect(() => {
-    if (!pickupTouched && livePickup) setPickup(livePickup);
+    if (!pickupTouched && livePickup) setPickup(pickupFor(disposition, livePickup, false));
     if (!dispositionTouched && livePickup) {
       // A carrier refusal outranks the No Answer suggested before its reason arrived.
       const suggested = suggestedDisposition(livePickup, call.row);
       setDisposition((d) => (carrierFailure(call.row) ? suggested || d : d || suggested || ''));
     }
-  }, [livePickup, pickupTouched, dispositionTouched, call.row]);
+  }, [livePickup, pickupTouched, dispositionTouched, call.row, disposition]);
 
   // A lead already made from this call isn't made again (or changed), so its details aren't asked for again.
   const leadExists = !!saved?.leadCreated;
@@ -254,6 +255,8 @@ export function WrapUpForm({
           onChange={(e) => {
             setDisposition(e.target.value as Disposition);
             setDispositionTouched(true);
+            // Spoke to someone: a person picked up, even if Twilio guessed an answering machine.
+            setPickup((p) => pickupFor(e.target.value as Disposition, p, pickupTouched));
           }}
         >
           {!disposition && <option value="">Choose…</option>}
