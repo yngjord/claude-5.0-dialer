@@ -1,4 +1,4 @@
-import { ArrowLeft, PhoneOutgoing, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, PhoneOutgoing, RotateCcw, SkipForward, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { formatPhone } from '../../shared/phone';
@@ -70,6 +70,21 @@ async function deleteContacts(ids: string[], force = false): Promise<{ deleted: 
   const users = must(await supabase.rpc('dialer_users')) as DialerUser[];
   const names = [...new Set(left.map((c) => users.find((u) => u.id === c.locked_by)).map((u) => u?.display_name || u?.email || 'a rep'))];
   return { deleted, held: { ids: left.map((c) => c.id), who: names.join(', ') } };
+}
+
+/**
+ * Admins: marks these contacts skipped (only ones still to call: new or callback; called ones keep their outcome),
+ * or puts skipped ones back in the queue. Returns how many changed.
+ */
+async function setSkipped(ids: string[], skip: boolean): Promise<number> {
+  const myId = (await supabase.auth.getSession()).data.session?.user.id ?? null;
+  const values = skip ? { status: 'skipped', skipped_at: new Date().toISOString(), skipped_by: myId } : { status: 'new', skipped_at: null, skipped_by: null };
+  let changed = 0;
+  for (let i = 0; i < ids.length; i += 100) {
+    const q = supabase.from('dialer_contacts').update(values).in('id', ids.slice(i, i + 100)).in('status', skip ? ['new', 'callback'] : ['skipped']);
+    changed += (must(await q.select('id')) as { id: string }[]).length;
+  }
+  return changed;
 }
 
 export default function CampaignPage() {
@@ -172,19 +187,47 @@ export default function CampaignPage() {
     }
   };
 
+  /** The ticked contacts, or every one matching the tab and search. */
+  const selectedIds = async () => {
+    if (!allMatching) return [...selected];
+    const ids: string[] = [];
+    for (let from = 0; ; from += 1000) {
+      const rows = must(await contactsQuery(id, 'id', filter, debounced, isAdmin).order('created_at').range(from, from + 999)) as unknown as { id: string }[];
+      ids.push(...rows.map((r) => r.id));
+      if (rows.length < 1000) return ids;
+    }
+  };
+
+  const skipSelected = async (skip: boolean) => {
+    setDeleting(true);
+    setNotice(null);
+    try {
+      const ids = await selectedIds();
+      if (!ids.length) return;
+      const changed = await setSkipped(ids, skip);
+      const others = ids.length - changed;
+      const s = (n: number) => (n === 1 ? '' : 's');
+      setNotice({
+        ok: true,
+        text: skip
+          ? `Marked ${changed.toLocaleString()} contact${s(changed)} as skipped.${others ? ` ${others.toLocaleString()} already called or skipped, left as they were.` : ''}`
+          : `Put ${changed.toLocaleString()} skipped contact${s(changed)} back in the queue.${others ? ` ${others.toLocaleString()} weren't skipped, left as they were.` : ''}`,
+      });
+      clearSelection();
+      head.reload({ quiet: true });
+      list.reload({ quiet: true });
+    } catch (err) {
+      setNotice({ ok: false, text: err instanceof Error ? err.message : 'Could not update the contacts.' });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const removeSelected = async () => {
     setDeleting(true);
     setNotice(null);
     try {
-      let ids = [...selected];
-      if (allMatching) {
-        ids = [];
-        for (let from = 0; ; from += 1000) {
-          const rows = must(await contactsQuery(id, 'id', filter, debounced, isAdmin).order('created_at').range(from, from + 999)) as unknown as { id: string }[];
-          ids.push(...rows.map((r) => r.id));
-          if (rows.length < 1000) break;
-        }
-      }
+      const ids = await selectedIds();
       if (!ids.length) return;
       const n = ids.length.toLocaleString();
       if (!window.confirm(`Delete ${n} contact${ids.length === 1 ? '' : 's'} from this campaign?\n\nTheir past calls stay in Call logs. This can't be undone.`)) return;
@@ -285,7 +328,16 @@ export default function CampaignPage() {
                 <button type="button" className="text-ink-muted hover:text-ink" onClick={clearSelection} disabled={deleting}>
                   Clear
                 </button>
-                <Button variant="outline" className="ml-auto !h-9 !border-red-200 !text-red-700 hover:!border-red-400" onClick={removeSelected} disabled={deleting}>
+                {filter === 'skipped' ? (
+                  <Button variant="outline" className="ml-auto !h-9" onClick={() => skipSelected(false)} disabled={deleting}>
+                    <RotateCcw size={15} /> Back to queue
+                  </Button>
+                ) : (
+                  <Button variant="outline" className="ml-auto !h-9 !border-amber-200 !text-amber-800 hover:!border-amber-400" onClick={() => skipSelected(true)} disabled={deleting}>
+                    <SkipForward size={15} /> Mark as skipped
+                  </Button>
+                )}
+                <Button variant="outline" className="!h-9 !border-red-200 !text-red-700 hover:!border-red-400" onClick={removeSelected} disabled={deleting}>
                   {deleting ? <Spinner /> : <Trash2 size={15} />} Delete
                 </Button>
               </div>
