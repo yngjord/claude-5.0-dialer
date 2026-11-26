@@ -84,7 +84,8 @@ export default function Campaigns() {
   // The client picked above the metrics also narrows the campaign list (and its tab counts).
   const [clientName, setClientName] = useState('');
   const forClient = data?.filter((d) => !clientName || d.campaign.client_name === clientName);
-  const inTab = (t: Tab, d: { campaign: CampaignRow }) => TAB_STATUSES[t].includes(d.campaign.status) && (t !== 'evergreen' || d.campaign.is_evergreen);
+  // Evergreen campaigns only appear on their own tab, so All, Active and the rest list regular campaigns.
+  const inTab = (t: Tab, d: { campaign: CampaignRow }) => TAB_STATUSES[t].includes(d.campaign.status) && (t === 'evergreen') === !!d.campaign.is_evergreen;
   const count = (t: Tab) => forClient?.filter((d) => inTab(t, d)).length ?? 0;
   const shown = forClient?.filter((d) => inTab(tab, d)) ?? [];
   // Evergreen campaigns this user is assigned to that have warm leads nobody has called yet: a dot on the tab.
