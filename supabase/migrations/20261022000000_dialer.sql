@@ -789,7 +789,7 @@ language sql stable security invoker set search_path = public as $$
          count(*) filter (where x.disposition in ('Interested - Needs Follow-Up', 'Referral'))::int as follow_ups,
          coalesce(sum(x.duration_s) filter (where x.pickup_status = 'Human Pickup'), 0)::int as talk_seconds
   from dialer_calls x
-  where x.direction = 'outbound' and x.source = 'dialer'
+  where x.direction = 'outbound' and x.source = 'dialer' and x.campaign_id is not null
     and x.started_at >= p_from and x.started_at < p_to
     and (p_campaign_id is null or x.campaign_id = p_campaign_id)
     and (p_client_name is null or x.client_name = p_client_name)
@@ -816,7 +816,7 @@ language sql stable security invoker set search_path = public as $$
          coalesce(sum(x.duration_s) filter (where x.pickup_status = 'Human Pickup'), 0)::int as talk_seconds,
          max(x.started_at) as last_call_at
   from dialer_calls x
-  where x.direction = 'outbound' and x.source = 'dialer'
+  where x.direction = 'outbound' and x.source = 'dialer' and x.campaign_id is not null
     and x.started_at >= p_from and x.started_at < p_to
     and (p_client_name is null or x.client_name = p_client_name)
     and (p_campaign_id is null or x.campaign_id = p_campaign_id)
@@ -836,7 +836,7 @@ language sql stable security invoker set search_path = public as $$
            coalesce(x.ended_at, x.started_at + make_interval(secs => coalesce(x.duration_s, 0))) as ended_at
     from dialer_calls x
     where is_dialer_admin()
-      and x.direction = 'outbound' and x.source = 'dialer' and x.user_id is not null
+      and x.direction = 'outbound' and x.source = 'dialer' and x.campaign_id is not null and x.user_id is not null
       and x.started_at >= p_from and x.started_at < p_to
       and (p_client_name is null or x.client_name = p_client_name)
       and (p_campaign_id is null or x.campaign_id = p_campaign_id)
@@ -1321,7 +1321,7 @@ language sql stable security invoker set search_path = public as $$
          count(*) filter (where x.disposition in ('Interested - Needs Follow-Up', 'Interested - Appointment Set', 'Referral'))::int as leads,
          count(*) filter (where x.disposition = 'Interested - Appointment Set')::int as appointments
   from dialer_calls x
-  where x.direction = 'outbound' and x.source = 'dialer'
+  where x.direction = 'outbound' and x.source = 'dialer' and x.campaign_id is not null
     and x.started_at >= p_from and x.started_at < p_to
     and (p_client_name is null or x.client_name = p_client_name)
     and (p_user_id is null or x.user_id = p_user_id)
@@ -1340,7 +1340,7 @@ language sql stable security invoker set search_path = public as $$
          count(*) filter (where x.pickup_status = 'Human Pickup')::int as human
   from dialer_calls x
   where is_dialer_admin()
-    and x.direction = 'outbound' and x.source = 'dialer' and x.pickup_status is distinct from 'Failed'
+    and x.direction = 'outbound' and x.source = 'dialer' and x.campaign_id is not null and x.pickup_status is distinct from 'Failed'
     and x.started_at >= p_from and x.started_at < p_to
     and (p_client_name is null or x.client_name = p_client_name)
     and (p_user_id is null or x.user_id = p_user_id)
