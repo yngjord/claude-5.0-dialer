@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
 import { Spinner } from './ui/Spinner';
+import { TimeSelect } from './ui/TimeSelect';
 
 const Label = ({ htmlFor, children, required = false }: { htmlFor: string; children: React.ReactNode; required?: boolean }) => (
   <label htmlFor={htmlFor} className="mb-2 block text-sm font-medium text-ink-soft">
@@ -142,7 +143,7 @@ export function NewLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
             <Label htmlFor="nl-time" required>
               Time booked for
             </Label>
-            <input id="nl-time" type="time" className="field" value={time} onChange={(e) => setTime(e.target.value)} />
+            <TimeSelect id="nl-time" value={time} onChange={setTime} />
           </div>
           <div className="sm:col-span-2">
             <Label htmlFor="nl-tz" required>

@@ -306,7 +306,7 @@ export function WrapUpForm({
                     Time booked for <span className="text-red-600">*</span>
                   </label>
                   <div className="flex gap-2">
-                    <input id="lead-time" type="time" className="field" value={time} onChange={(e) => setTime(e.target.value)} />
+                    <TimeSelect id="lead-time" className="flex-1" value={time} onChange={setTime} />
                     <select aria-label="Time zone" className="field !w-auto" value={tz} onChange={(e) => setTz(e.target.value)}>
                       {ZONES.map((z) => (
                         <option key={z.tz} value={z.tz}>
