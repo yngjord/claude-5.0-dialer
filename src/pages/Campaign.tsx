@@ -1,6 +1,6 @@
 import { ArrowLeft, PhoneOutgoing, RotateCcw, SkipForward, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { formatPhone } from '../../shared/phone';
 import type { Campaign, CampaignStats, Contact, DialerUser } from '../../shared/types';
 import { useAuth } from '../auth/AuthProvider';
@@ -92,8 +92,10 @@ export default function CampaignPage() {
   const { id = '' } = useParams();
   const [importing, setImporting] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
-  const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
+  // ?q= (e.g. from the Inbox): open on that contact.
+  const [params] = useSearchParams();
+  const [query, setQuery] = useState(params.get('q') ?? '');
+  const [debounced, setDebounced] = useState(params.get('q') ?? '');
   const [page, setPage] = useState(0);
   // Admin bulk delete: ticked rows (kept across pages), or every contact matching the tab and search.
   const [selected, setSelected] = useState<Set<string>>(new Set());

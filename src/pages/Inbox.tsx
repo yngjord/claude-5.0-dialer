@@ -1,4 +1,5 @@
-import { MessageSquare, PhoneMissed, Voicemail } from 'lucide-react';
+import { MessageSquare, PhoneCall, PhoneMissed, Voicemail } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { formatPhone } from '../../shared/phone';
 import type { CallRow, DialerUser, SmsMessage } from '../../shared/types';
@@ -11,7 +12,9 @@ import { formatDateTime, formatDuration } from '../lib/format';
 import { supabase } from '../lib/supabase';
 
 type Tab = 'texts' | 'voicemails';
-type TextRow = SmsMessage & { contact: { full_name: string | null; company: string | null; campaign_id: string | null } | null };
+type TextRow = SmsMessage & {
+  contact: { full_name: string | null; company: string | null; campaign_id: string | null; campaign: { name: string } | null } | null;
+};
 
 /** One conversation: everyone who has texted us, newest first, with how many of their texts haven't been read. */
 interface Conversation {
@@ -19,9 +22,30 @@ interface Conversation {
   name: string | null;
   company: string | null;
   contactId: string | null;
+  campaignId: string | null;
+  campaignName: string | null;
   last: SmsMessage;
   unread: number;
   repId: string | null;
+}
+
+/** The contact's campaign (opened on them) and our last call to them. Clicks here don't open the row. */
+function ContactLinks({ phone, campaignId, campaignName, lastCallId }: { phone: string; campaignId: string | null; campaignName: string | null; lastCallId?: string }) {
+  if (!campaignId && !lastCallId) return <span className="text-ink-faint">—</span>;
+  return (
+    <span className="flex flex-col items-start gap-0.5" onClick={(e) => e.stopPropagation()}>
+      {campaignId && (
+        <Link to={`/campaigns/${campaignId}?q=${encodeURIComponent(phone.replace(/^\+61/, '0'))}`} className="max-w-[220px] truncate text-brand hover:underline" title="Open their contact in this campaign">
+          {campaignName ?? 'Campaign'}
+        </Link>
+      )}
+      {lastCallId && (
+        <Link to={`/calls/${lastCallId}`} className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-brand hover:underline">
+          <PhoneCall size={12} /> Last call
+        </Link>
+      )}
+    </span>
+  );
 }
 
 function conversations(rows: TextRow[]): Conversation[] {
@@ -29,7 +53,7 @@ function conversations(rows: TextRow[]): Conversation[] {
   for (const m of rows) {
     let c = byPhone.get(m.phone_e164);
     if (!c) {
-      c = { phone: m.phone_e164, name: null, company: null, contactId: null, last: m, unread: 0, repId: null };
+      c = { phone: m.phone_e164, name: null, company: null, contactId: null, campaignId: null, campaignName: null, last: m, unread: 0, repId: null };
       byPhone.set(m.phone_e164, c);
     }
     if (m.created_at > c.last.created_at) c.last = m;
@@ -37,6 +61,8 @@ function conversations(rows: TextRow[]): Conversation[] {
     c.name ??= m.contact?.full_name ?? null;
     c.company ??= m.contact?.company ?? null;
     c.contactId ??= m.contact_id;
+    c.campaignId ??= m.contact?.campaign_id ?? null;
+    c.campaignName ??= m.contact?.campaign?.name ?? null;
     c.repId ??= m.user_id;
   }
   // Only numbers that have texted us: a text we sent with no reply isn't something to act on.
@@ -61,7 +87,7 @@ export default function Inbox() {
       must(
         await supabase
           .from('dialer_sms_messages')
-          .select('*, contact:dialer_contacts(full_name, company, campaign_id)')
+          .select('*, contact:dialer_contacts(full_name, company, campaign_id, campaign:dialer_campaigns(name))')
           .order('created_at', { ascending: false })
           .limit(1000),
       ) as unknown as TextRow[],
@@ -72,6 +98,22 @@ export default function Inbox() {
     [],
   );
   const threads = useMemo(() => conversations(texts.data ?? []), [texts.data]);
+
+  // The most recent call we made to each number in the inbox, so each row links to it.
+  const phones = useMemo(
+    () => [...new Set([...threads.map((c) => c.phone), ...(voicemails.data ?? []).map((v) => v.phone_e164).filter((x): x is string => !!x)])].sort(),
+    [threads, voicemails.data],
+  );
+  const lastCalls = useLoad(async () => {
+    const out = new Map<string, string>();
+    for (let i = 0; i < phones.length; i += 100) {
+      const rows = must(
+        await supabase.from('dialer_calls').select('id, phone_e164').eq('direction', 'outbound').in('phone_e164', phones.slice(i, i + 100)).order('started_at', { ascending: false }).limit(2000),
+      ) as { id: string; phone_e164: string }[];
+      for (const r of rows) if (!out.has(r.phone_e164)) out.set(r.phone_e164, r.id);
+    }
+    return out;
+  }, [phones.join(',')]);
   const unreadTexts = threads.reduce((n, c) => n + c.unread, 0);
   const unreadVoicemails = (voicemails.data ?? []).filter((v) => !v.read_at).length;
 
@@ -141,12 +183,13 @@ export default function Inbox() {
                       <th className="th">From</th>
                       <th className="th">To</th>
                       <th className="th">Last called by</th>
+                      <th className="th">Campaign</th>
                       <th className="th text-right">Last message</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
                     {!threads.length ? (
-                      <EmptyRow colSpan={5}>No texts yet. When someone texts one of our numbers, it shows here.</EmptyRow>
+                      <EmptyRow colSpan={6}>No texts yet. When someone texts one of our numbers, it shows here.</EmptyRow>
                     ) : (
                       threads.map((c) => {
                         const unread = c.unread > 0;
@@ -168,6 +211,9 @@ export default function Inbox() {
                             </td>
                             <td className="td whitespace-nowrap tabular-nums text-ink-muted">{formatPhone(c.last.our_number)}</td>
                             <td className="td whitespace-nowrap text-ink-muted">{repName(c.repId)}</td>
+                            <td className="td text-sm">
+                              <ContactLinks phone={c.phone} campaignId={c.campaignId} campaignName={c.campaignName} lastCallId={lastCalls.data?.get(c.phone)} />
+                            </td>
                             <td className="td whitespace-nowrap text-right tabular-nums text-ink-muted">{formatDateTime(c.last.created_at)}</td>
                           </tr>
                         );
@@ -221,7 +267,13 @@ export default function Inbox() {
                           </td>
                           <td className="td whitespace-nowrap tabular-nums text-ink-muted">{v.to_number ? formatPhone(v.to_number) : '—'}</td>
                           <td className="td whitespace-nowrap text-ink-muted">{repName(v.user_id)}</td>
-                          <td className="td max-w-[220px] truncate text-ink-muted">{v.campaign_name ?? ''}</td>
+                          <td className="td text-sm">
+                            {v.phone_e164 ? (
+                              <ContactLinks phone={v.phone_e164} campaignId={v.campaign_id} campaignName={v.campaign_name} lastCallId={lastCalls.data?.get(v.phone_e164)} />
+                            ) : (
+                              <span className="text-ink-faint">—</span>
+                            )}
+                          </td>
                           <td className="td whitespace-nowrap text-right tabular-nums text-ink-muted">
                             {formatDateTime(v.started_at)}
                             {v.recording_duration_s ? ` · ${formatDuration(v.recording_duration_s)}` : ''}
