@@ -13,6 +13,7 @@ import { timeBookedText, ZONES } from '../lib/bookingTime';
 import type { ActiveCall } from '../voice/VoiceProvider';
 import { Button } from './ui/Button';
 import { Spinner } from './ui/Spinner';
+import { TimeSelect } from './ui/TimeSelect';
 
 /** Disposition that fits the pickup when the rep hasn't picked one: saves a click on the many unanswered dials. */
 function suggestedDisposition(pickup: PickupStatus | null, row?: ActiveCall['row']): Disposition | null {
@@ -398,7 +399,7 @@ export function WrapUpForm({
           </div>
           <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
             <input aria-label="Callback date" type="date" className="field" value={cbDate} onChange={(e) => setCbDate(e.target.value)} />
-            <input aria-label="Callback time" type="time" className="field" value={cbTime} onChange={(e) => setCbTime(e.target.value)} />
+            <TimeSelect ariaLabel="Callback time" value={cbTime} onChange={setCbTime} />
             <select aria-label="Time zone" className="field !w-auto" value={tz} onChange={(e) => setTz(e.target.value)}>
               {ZONES.map((z) => (
                 <option key={z.tz} value={z.tz}>
@@ -525,43 +526,18 @@ function todaySydneyDate(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date());
 }
 
-/** YYYY-MM-DD, `months` months after `from` (the last day of the month when the day doesn't exist, e.g. 31 Aug + 6). */
-function addMonths(from: string, months: number): string {
-  const [y, m, d] = from.split('-').map(Number);
-  const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
-  return new Date(Date.UTC(y, m - 1 + months, Math.min(d, last))).toISOString().slice(0, 10);
-}
-
 /**
  * Needs Follow-Up: the lead's Next Follow-up date. Nothing happens with the lead until then, including the post-call
  * email, so it stays today unless they asked us to wait.
  */
 function FollowUpDate({ value, today, onChange }: { value: string; today: string; onChange: (v: string) => void }) {
-  const presets: [string, string][] = [
-    ['Today', today],
-    ['1 month', addMonths(today, 1)],
-    ['3 months', addMonths(today, 3)],
-    ['6 months', addMonths(today, 6)],
-  ];
   const later = value > today;
   return (
     <div>
       <label htmlFor="lead-follow-up" className="mb-2 block text-sm font-medium text-ink-soft">
         Follow up from
       </label>
-      <div className="flex flex-wrap items-center gap-2">
-        <input id="lead-follow-up" type="date" className="field !w-auto" min={today} value={value} onChange={(e) => onChange(e.target.value || today)} />
-        {presets.map(([label, date]) => (
-          <button
-            key={label}
-            type="button"
-            onClick={() => onChange(date)}
-            className={`rounded-full border px-3 py-1.5 text-sm transition ${value === date ? 'border-brand bg-brand text-white' : 'border-line-strong bg-white text-ink-soft hover:border-brand hover:text-brand'}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <input id="lead-follow-up" type="date" className="field !w-auto" min={today} value={value} onChange={(e) => onChange(e.target.value || today)} />
       <p className={`mt-2 text-xs ${later ? 'font-medium text-amber-800' : 'text-ink-muted'}`}>
         {later
           ? `Nothing will happen with this lead until ${formatDay(value)}, not even the post-call email. Only choose a later date if they asked us to get back to them then.`
