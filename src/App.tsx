@@ -8,7 +8,7 @@ import { ViewAsBanner } from './components/ViewAs';
 import { Button } from './components/ui/Button';
 import Callbacks from './pages/Callbacks';
 import Leads from './pages/Leads';
-import Voicemails from './pages/Voicemails';
+import Inbox from './pages/Inbox';
 import Calendars from './pages/admin/Calendars';
 import Numbers from './pages/admin/Numbers';
 import Performance from './pages/admin/Performance';
@@ -90,7 +90,9 @@ export default function App() {
           <Route path="/calls" element={<Calls />} />
           <Route path="/leads" element={<Leads />} />
           <Route path="/callbacks" element={<Callbacks />} />
-          {isAdmin && <Route path="/voicemails" element={<Voicemails />} />}
+          {isAdmin && <Route path="/inbox" element={<Inbox />} />}
+          {/* Voicemails became part of the Inbox. */}
+          <Route path="/voicemails" element={<Navigate to="/inbox" replace />} />
           <Route path="/calls/:id" element={<CallDetailPage />} />
           {/* Campaign management moved onto the Campaigns page. */}
           <Route path="/admin/campaigns" element={<Navigate to="/campaigns" replace />} />
