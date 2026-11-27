@@ -43,7 +43,10 @@ export function SmsThread({ phone, contactId }: { phone: string; contactId?: str
     supabase.from('dialer_sms_messages').update({ read_at: new Date().toISOString() }).in('id', unreadKey.split(',')).then(() => window.dispatchEvent(new Event('inbox:changed')));
   }, [unreadKey]);
 
-  useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [data?.length]);
+  // Braces matter: newer browsers return a Promise from scrollIntoView, and React would try to run it as the cleanup.
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ block: 'end' });
+  }, [data?.length]);
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
