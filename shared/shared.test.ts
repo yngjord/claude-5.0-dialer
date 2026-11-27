@@ -98,6 +98,14 @@ describe('leads', () => {
     });
   });
 
+  it('uses the follow-up date the rep chose, never one in the past', () => {
+    const due = (nextFollowUp: string | null) => buildLeadFields('Interested - Needs Follow-Up', { ...lead, nextFollowUp }, ctx)[F.nextFollowUp];
+    expect(due('2027-04-22')).toBe('2027-04-22');
+    expect(due(null)).toBe('2026-10-22');
+    expect(due('2026-10-01')).toBe('2026-10-22');
+    expect(validateLead('Interested - Needs Follow-Up', { ...lead, nextFollowUp: 'next year' })).toContain('Follow-up date looks wrong.');
+  });
+
   it('builds the parent lead for a Referral: the person called, with the recording, noting who they referred us to', () => {
     const fields = buildLeadFields('Referral', lead, { ...ctx, referredName: ' Sam Lee ' });
     expect(fields).toMatchObject({

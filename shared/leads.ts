@@ -10,6 +10,11 @@ export interface LeadInput {
   bookedFor?: string | null;
   /** Free text, e.g. "2:30pm AEDT". Appointment Set only (required). */
   timeBookedFor?: string | null;
+  /**
+   * YYYY-MM-DD. Needs Follow-Up only: the lead's Next Follow-up. Nothing is done with the lead (not even the
+   * post-call email) until then. Empty, or a date before today, means today.
+   */
+  nextFollowUp?: string | null;
 }
 
 /** Referral: the person the prospect referred us to. Becomes a sublead of the call's lead. */
@@ -77,6 +82,7 @@ export function validateLead(disposition: Disposition, lead: LeadInput): string[
     if (!lead.bookedFor || !DATE.test(lead.bookedFor)) errors.push('Booked for date is required.');
     if (!lead.timeBookedFor?.trim()) errors.push('Time booked for is required.');
   }
+  if (lead.nextFollowUp && !DATE.test(lead.nextFollowUp)) errors.push('Follow-up date looks wrong.');
   return errors;
 }
 
@@ -155,9 +161,9 @@ export function buildLeadFields(
     fields[F.timeBookedFor] = lead.timeBookedFor?.trim() ?? '';
     fields[F.dateBookingMade] = ctx.todaySydney;
   } else {
-    // Needs Follow-Up leads are always due for follow-up from today.
+    // Needs Follow-Up: due from the date the rep chose (today unless they want us to wait), never in the past.
     fields[F.stage] = 'Nurture';
-    fields[F.nextFollowUp] = ctx.todaySydney;
+    fields[F.nextFollowUp] = lead.nextFollowUp && lead.nextFollowUp > ctx.todaySydney ? lead.nextFollowUp : ctx.todaySydney;
   }
 
   return Object.fromEntries(Object.entries(fields).filter(([, v]) => (Array.isArray(v) ? v.length > 0 : v !== '' && v != null)));

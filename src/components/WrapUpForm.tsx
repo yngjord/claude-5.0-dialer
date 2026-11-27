@@ -1,6 +1,6 @@
 import { AlertTriangle, CalendarClock, CalendarPlus, CheckCircle2, Phone, UserRoundPlus } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { APPOINTMENT_SET, CALLBACK, DISPOSITIONS, LEAD_DISPOSITIONS, PICKUP_STATUSES, REFERRAL, type Disposition, type PickupStatus } from '../../shared/constants';
+import { APPOINTMENT_SET, CALLBACK, DISPOSITIONS, LEAD_DISPOSITIONS, NEEDS_FOLLOW_UP, PICKUP_STATUSES, REFERRAL, type Disposition, type PickupStatus } from '../../shared/constants';
 import { carrierFailure } from '../../shared/callFailure';
 import { pickupFor } from '../../shared/outcomes';
 import { invitesBroken, parseGuests, renderTemplate, sendsInvites, validateInvite, type InviteInput } from '../../shared/calendar';
@@ -81,6 +81,9 @@ export function WrapUpForm({
   const [referral, setReferral] = useState<ReferralInput>({ fullName: '', email: '', phone: '', linkedin: '' });
   const setRef = (key: keyof ReferralInput) => (v: string) => setReferral((r) => ({ ...r, [key]: v }));
   const [bookedFor, setBookedFor] = useState('');
+  // Needs Follow-Up: when the lead is next due (the CRM's Next Follow-up). Today unless they asked us to wait.
+  const today = todaySydneyDate();
+  const [followUp, setFollowUp] = useState(today);
   const [time, setTime] = useState('');
   const [tz, setTz] = useState(call.contact.phone_e164.startsWith('+64') ? 'Pacific/Auckland' : 'Australia/Sydney');
   const [submitting, setSubmitting] = useState(false);
@@ -156,8 +159,9 @@ export function WrapUpForm({
       notes,
       bookedFor: disposition === APPOINTMENT_SET ? bookedFor || null : null,
       timeBookedFor: disposition === APPOINTMENT_SET ? timeBookedText(bookedFor, time, tz) : null,
+      nextFollowUp: disposition === NEEDS_FOLLOW_UP ? followUp || null : null,
     }),
-    [fullName, email, phone, notes, disposition, bookedFor, time, tz],
+    [fullName, email, phone, notes, disposition, bookedFor, time, tz, followUp],
   );
 
   const submit = async (e?: FormEvent, next = dialNext) => {
@@ -315,6 +319,7 @@ export function WrapUpForm({
               </>
             )}
           </div>
+          {disposition === NEEDS_FOLLOW_UP && <FollowUpDate value={followUp} today={today} onChange={setFollowUp} />}
           {needsLead && disposition === APPOINTMENT_SET && invitesBroken(calendar) && (
             <p role="alert" className="flex items-start gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" /> The client’s Google Calendar is disconnected, so no invite will be sent. The lead and booking request are
@@ -513,4 +518,59 @@ function Field({
       <input id={id} type={type} className="field" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
+}
+
+/** Today in Sydney, YYYY-MM-DD (the CRM's dates are Sydney dates). */
+function todaySydneyDate(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date());
+}
+
+/** YYYY-MM-DD, `months` months after `from` (the last day of the month when the day doesn't exist, e.g. 31 Aug + 6). */
+function addMonths(from: string, months: number): string {
+  const [y, m, d] = from.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - 1 + months, Math.min(d, last))).toISOString().slice(0, 10);
+}
+
+/**
+ * Needs Follow-Up: the lead's Next Follow-up date. Nothing happens with the lead until then, including the post-call
+ * email, so it stays today unless they asked us to wait.
+ */
+function FollowUpDate({ value, today, onChange }: { value: string; today: string; onChange: (v: string) => void }) {
+  const presets: [string, string][] = [
+    ['Today', today],
+    ['1 month', addMonths(today, 1)],
+    ['3 months', addMonths(today, 3)],
+    ['6 months', addMonths(today, 6)],
+  ];
+  const later = value > today;
+  return (
+    <div>
+      <label htmlFor="lead-follow-up" className="mb-2 block text-sm font-medium text-ink-soft">
+        Follow up from
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        <input id="lead-follow-up" type="date" className="field !w-auto" min={today} value={value} onChange={(e) => onChange(e.target.value || today)} />
+        {presets.map(([label, date]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => onChange(date)}
+            className={`rounded-full border px-3 py-1.5 text-sm transition ${value === date ? 'border-brand bg-brand text-white' : 'border-line-strong bg-white text-ink-soft hover:border-brand hover:text-brand'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className={`mt-2 text-xs ${later ? 'font-medium text-amber-800' : 'text-ink-muted'}`}>
+        {later
+          ? `Nothing will happen with this lead until ${formatDay(value)}, not even the post-call email. Only choose a later date if they asked us to get back to them then.`
+          : 'Sets the lead’s follow-up date. Nothing happens with the lead (not even the post-call email) until this date, so keep it as today if they want an email now, even if they also asked for a call in a few months.'}
+      </p>
+    </div>
+  );
+}
+
+function formatDay(date: string): string {
+  return new Date(`${date}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
