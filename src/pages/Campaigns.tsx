@@ -2,6 +2,7 @@ import { ArrowRight, Check, Info, Pencil, PhoneOutgoing, Plus, RotateCcw, Users 
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { CallStatsRow, Campaign, CampaignStats, DialerUser, PhoneNumber } from '../../shared/types';
+import { clayLinkValid } from '../../shared/clay';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar } from '../components/Avatar';
 import { ClientLogo } from '../components/ClientLogo';
@@ -49,19 +50,34 @@ function periodLabel(p: CampaignPeriod): string {
   return `${month} ${p.half}/2`;
 }
 
+type ClayLink = { campaign_id: string; contacts_total: number; contacts_matched: number };
+
+/** Admins: the campaign's Clay table is connected; green once it matches enough contacts for analysis. */
+function ClayBadge({ link }: { link: ClayLink }) {
+  const ok = clayLinkValid(link.contacts_matched, link.contacts_total);
+  return (
+    <span title={`Clay table connected: ${link.contacts_matched.toLocaleString()} of ${link.contacts_total.toLocaleString()} contacts matched${ok ? '' : ' (not enough for analysis)'}`}>
+      <Badge tone={ok ? 'green' : 'amber'}>Clay</Badge>
+    </span>
+  );
+}
+
 export default function Campaigns() {
   const { isAdmin, me } = useAuth();
   const logos = useClientLogos();
   const [tab, setTab] = useState<Tab>('all');
   const { data, error, loading, reload } = useLoad(async () => {
-    const [campaigns, stats, periods] = await Promise.all([
+    const [campaigns, stats, periods, clay] = await Promise.all([
       supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false }),
       supabase.from('dialer_campaign_stats').select('*'),
       supabase.rpc('dialer_campaign_periods'),
+      // Admins only (by RLS): which campaigns have a Clay table connected, and how many of their contacts it matched.
+      supabase.from('dialer_campaign_clay').select('campaign_id, contacts_total, contacts_matched'),
     ]);
+    const clayById = new Map(((clay.data ?? []) as ClayLink[]).map((l) => [l.campaign_id, l]));
     const byId = new Map((must(stats) as CampaignStats[]).map((s) => [s.campaign_id, s]));
     const periodById = new Map((must(periods) as CampaignPeriod[]).map((p) => [p.campaign_id, periodLabel(p)]));
-    return (must(campaigns) as CampaignRow[]).map((c) => ({ campaign: c, stats: byId.get(c.id), period: periodById.get(c.id) ?? null }));
+    return (must(campaigns) as CampaignRow[]).map((c) => ({ campaign: c, stats: byId.get(c.id), period: periodById.get(c.id) ?? null, clay: clayById.get(c.id) ?? null }));
   }, []);
 
   // Admin tools: create/edit, team member, re-run.
@@ -167,7 +183,7 @@ export default function Campaigns() {
                           : "You aren't assigned any campaigns yet."}
                   </EmptyRow>
                 ) : (
-                  shown.map(({ campaign: c, stats: s, period }) => {
+                  shown.map(({ campaign: c, stats: s, period, clay }) => {
                     const { total, dialled, skipped, complete } = completion(s);
                     const done = c.status === 'completed' || complete;
                     // Team members can't open paused campaigns; admins can open anything.
@@ -195,6 +211,7 @@ export default function Campaigns() {
                                 <Badge tone="grey">JustCall</Badge>
                               </span>
                             )}
+                            {clay && <ClayBadge link={clay} />}
                             {c.is_evergreen && (
                               <span title="Warm leads this client submits in the portal land here">
                                 <Badge tone="green">Evergreen</Badge>

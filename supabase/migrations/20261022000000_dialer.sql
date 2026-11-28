@@ -1888,3 +1888,8 @@ grant execute on function public.dialer_claim_companies(int) to service_role;
 update public.dialer_custom_fields
 set aliases = array(select distinct unnest(aliases || array['employeecount', 'employees', 'headcount', 'companyheadcount', 'companysize', 'numberofemployees', 'employeecountrange', 'employeerange', 'staffcount']))
 where key = 'company_headcount';
+
+-- Admins read Clay table links (the Campaigns list shows which campaigns have one connected and matched).
+drop policy if exists "Admins read Clay links" on public.dialer_campaign_clay;
+create policy "Admins read Clay links" on public.dialer_campaign_clay for select to authenticated using ((select is_dialer_admin()));
+grant select on public.dialer_campaign_clay to authenticated;
