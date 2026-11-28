@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Info, Pencil, PhoneOutgoing, Plus, RotateCcw, Users } from 'lucide-react';
+import { ArrowRight, Check, Info, Pencil, PhoneOutgoing, Plus, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { CallStatsRow, Campaign, CampaignStats, DialerUser, PhoneNumber } from '../../shared/types';
@@ -242,7 +242,7 @@ export default function Campaigns() {
                             <button
                               onClick={() => setMembers(c)}
                               className="inline-flex items-center gap-1.5 text-sm text-brand hover:underline"
-                              title={c.campaign_members.map((m) => nameOf(m.user_id)).join(', ') || 'Assign a team member'}
+                              title={c.campaign_members.map((m) => nameOf(m.user_id)).join(', ') || 'Just you (no team member yet). Click to assign one.'}
                             >
                               {c.campaign_members.length ? (
                                 <span className="flex -space-x-2">
@@ -251,9 +251,8 @@ export default function Campaigns() {
                                   ))}
                                 </span>
                               ) : (
-                                <>
-                                  <Users size={15} /> Assign
-                                </>
+                                // No team member: it's yours (admins see every campaign), so it shows your picture.
+                                <Avatar url={me ? avatars.get(me.userId) : undefined} name={me ? nameOf(me.userId) : 'You'} />
                               )}
                             </button>
                           </td>
