@@ -93,7 +93,8 @@ export interface ClayCompanyColumns {
 }
 
 export function companyColumns(names: string[]): ClayCompanyColumns {
-  const pick = (test: (n: string) => boolean) => names.find((n) => test(n.toLowerCase().trim())) ?? null;
+  // "Company Linked In" and "Company LinkedIn" are the same column.
+  const pick = (test: (n: string) => boolean) => names.find((n) => test(n.toLowerCase().trim().replace(/linked\s+in/g, 'linkedin'))) ?? null;
   // Enrichment and check columns ("Find …", "… Data Accuracy", "… growth") aren't the value itself.
   const helper = (n: string) => /(find|check|accuracy|confirmation|scrape|activity|data|growth|percent|normali[sz]e|extract)/.test(n);
   return {

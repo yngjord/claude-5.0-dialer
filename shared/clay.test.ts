@@ -83,6 +83,7 @@ describe('Clay tables', () => {
     expect(companyColumns(['LinkedIn URL', 'Company Website', 'Company LinkedIn', 'Company Size', 'LinkedIn Profile Data Accuracy'])).toEqual({ companyLinkedin: 'Company LinkedIn', headcount: 'Company Size' });
     expect(companyColumns(['Company Linkedin URL', 'Find company headcount growth', 'Employee Count', 'Percent Employee Growth Over Last 12 Months'])).toEqual({ companyLinkedin: 'Company Linkedin URL', headcount: 'Employee Count' });
     expect(companyColumns(['LinkedIn Profile', 'Domain', 'Find Mobile Number from LinkedIn'])).toEqual({ companyLinkedin: null, headcount: null });
+    expect(companyColumns(['Person LinkedIn URL', 'Company Linked In']).companyLinkedin).toBe('Company Linked In');
   });
 
   it('finds the row for a contact', () => {
