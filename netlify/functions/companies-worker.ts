@@ -9,9 +9,9 @@ const CONCURRENCY = 5;
 const BATCH = 20;
 /**
  * Spending guard: at most this many companies are sent for labelling in any 24 hours (COMPANY_LABEL_DAILY_CAP).
- * About $0.0005 each, so the default 500 is roughly 25 cents a day at most. The rest wait for the next run.
+ * About $0.0005 each, so the default 5,000 is roughly $2.50 a day at most. The rest wait for the next run.
  */
-const DAILY_CAP = Number(process.env.COMPANY_LABEL_DAILY_CAP) || 500;
+const DAILY_CAP = Number(process.env.COMPANY_LABEL_DAILY_CAP) || 5000;
 
 /** Companies tried in the last 24 hours (labelled, no data, or failed): what counts against the cap. */
 async function triedToday(): Promise<number> {
