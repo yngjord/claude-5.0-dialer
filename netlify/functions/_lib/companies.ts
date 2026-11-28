@@ -31,6 +31,9 @@ export interface CompanyRow {
   linkedin_url: string | null;
   linkedin_slug: string | null;
   name: string | null;
+  /** From the headcount job (Icypeas): the LinkedIn page's own description and industry. */
+  linkedin_description?: string | null;
+  linkedin_industry?: string | null;
 }
 
 export type CompanyResult =
@@ -69,7 +72,10 @@ export async function companyPages(c: CompanyRow): Promise<{ source: string; tex
       if (page) pages.push({ source: 'website About page', text: pageText(page.html, 4000) });
     }
   }
-  if (c.linkedin_slug) {
+  if (c.linkedin_description?.trim()) {
+    // Already fetched by the headcount job: better than LinkedIn's public page, which usually needs a sign-in.
+    pages.push({ source: 'LinkedIn description', text: [c.linkedin_industry && `Industry: ${c.linkedin_industry}`, c.linkedin_description.trim()].filter(Boolean).join('\n') });
+  } else if (c.linkedin_slug) {
     const li = await fetchHtml(`https://www.linkedin.com/company/${c.linkedin_slug}/`);
     // Usually a sign-in wall; its text is only useful when it carries the company's own description.
     const text = li ? pageText(li.html, 3000) : '';

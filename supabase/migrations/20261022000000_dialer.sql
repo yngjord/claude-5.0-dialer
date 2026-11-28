@@ -1893,3 +1893,82 @@ where key = 'company_headcount';
 drop policy if exists "Admins read Clay links" on public.dialer_campaign_clay;
 create policy "Admins read Clay links" on public.dialer_campaign_clay for select to authenticated using ((select is_dialer_admin()));
 grant select on public.dialer_campaign_clay to authenticated;
+
+-- ── Company headcount from LinkedIn (Icypeas) ────────────────────────────────────────────────────────────────
+-- Companies with a LinkedIn page and no headcount get one from Icypeas's company scraper, which also returns the
+-- page's description and industry (used to label companies whose website couldn't be read). A headcount from an
+-- upload or a Clay table always wins: headcount_source says where it came from, and Icypeas only fills a blank.
+alter table public.dialer_companies
+  add column if not exists headcount_source text,
+  add column if not exists icypeas_status text check (icypeas_status in ('working', 'found', 'not_found', 'error')),
+  add column if not exists icypeas_at timestamptz,
+  add column if not exists linkedin_description text,
+  add column if not exists linkedin_industry text;
+update public.dialer_companies set headcount_source = 'upload' where headcount_raw is not null and headcount_source is null;
+
+-- Uploaded (or Clay) headcounts are marked as such; the rest of the function is unchanged.
+create or replace function public.dialer_company_for(p_website text, p_linkedin text, p_name text, p_headcount text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  d text := dialer_domain(p_website);
+  s text := dialer_linkedin_slug(p_linkedin);
+  c public.dialer_companies;
+begin
+  if d is null and s is null then return null; end if;
+  for attempt in 1..2 loop
+    select * into c from dialer_companies where domain = d limit 1;
+    if c.id is null then select * into c from dialer_companies where linkedin_slug = s limit 1; end if;
+    if c.id is null then
+      begin
+        insert into dialer_companies (domain, linkedin_slug, linkedin_url, name, headcount_raw, headcount_source)
+        values (d, s, case when s is not null then trim(p_linkedin) end, nullif(trim(p_name), ''), nullif(trim(p_headcount), ''),
+                case when nullif(trim(p_headcount), '') is not null then 'upload' end)
+        returning * into c;
+        return c.id;
+      exception when unique_violation then
+        c := null;
+      end;
+    else
+      exit;
+    end if;
+  end loop;
+  if c.id is null then return null; end if;
+
+  update dialer_companies set
+    domain = case when domain is null and d is not null and not exists (select 1 from dialer_companies where domain = d) then d else domain end,
+    linkedin_slug = case when linkedin_slug is null and s is not null and not exists (select 1 from dialer_companies where linkedin_slug = s) then s else linkedin_slug end,
+    linkedin_url = case when linkedin_slug is null and s is not null and not exists (select 1 from dialer_companies where linkedin_slug = s) then trim(p_linkedin) else linkedin_url end,
+    name = coalesce(name, nullif(trim(p_name), '')),
+    headcount_raw = coalesce(nullif(trim(p_headcount), ''), headcount_raw),
+    headcount_source = case when nullif(trim(p_headcount), '') is not null then 'upload' else headcount_source end,
+    ai_status = case when ai_status = 'no_data' and ((domain is null and d is not null) or (linkedin_slug is null and s is not null)) then 'pending' else ai_status end
+  where id = c.id
+    and (   (domain is null and d is not null) or (linkedin_slug is null and s is not null) or (name is null and nullif(trim(p_name), '') is not null)
+         or (nullif(trim(p_headcount), '') is not null and headcount_raw is distinct from nullif(trim(p_headcount), '')));
+  return c.id;
+end $$;
+revoke execute on function public.dialer_company_for(text, text, text, text) from public, anon, authenticated;
+
+-- The headcount job takes companies with a LinkedIn page and no headcount that Icypeas hasn't looked up yet (or
+-- that failed over a day ago, or a run left over 20 minutes ago). Server only.
+create or replace function public.dialer_claim_headcount(p_limit int) returns setof public.dialer_companies
+language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Server only' using errcode = '42501';
+  end if;
+  return query
+    update dialer_companies c set icypeas_status = 'working', icypeas_at = now()
+    where c.id in (
+      select id from dialer_companies
+      where linkedin_slug is not null and headcount_raw is null
+        and (icypeas_status is null
+             or (icypeas_status = 'error' and icypeas_at < now() - interval '1 day')
+             or (icypeas_status = 'working' and icypeas_at < now() - interval '20 minutes'))
+      order by created_at
+      limit p_limit
+      for update skip locked)
+    returning c.*;
+end $$;
+revoke execute on function public.dialer_claim_headcount(int) from public, anon, authenticated;
+grant execute on function public.dialer_claim_headcount(int) to service_role;

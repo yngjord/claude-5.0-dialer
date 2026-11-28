@@ -827,3 +827,23 @@ describe('companies', () => {
     await pg.exec(`delete from dialer_contacts where full_name like 'Co %'; update dialer_companies set ai_status = 'pending';`);
   });
 });
+
+describe('company headcount', () => {
+  it('marks uploaded headcounts, and the headcount job only takes LinkedIn companies without one (server only)', async () => {
+    await pg.exec(`
+      insert into dialer_contacts (campaign_id, full_name, phone_e164, company, website, custom) values
+        ('${CAMPAIGN}', 'Hc A', '+61491000001', 'Alpha', 'alpha.io', '{"company_linkedin_url":"https://linkedin.com/company/alpha","company_headcount":"12"}'),
+        ('${CAMPAIGN}', 'Hc B', '+61491000002', 'Beta', 'beta.io', '{"company_linkedin_url":"https://linkedin.com/company/beta"}'),
+        ('${CAMPAIGN}', 'Hc C', '+61491000003', 'Gamma', 'gamma.io', '{}');
+    `);
+    const src = await rows<{ domain: string; headcount_source: string | null }>(`select domain, headcount_source from dialer_companies where domain in ('alpha.io','beta.io') order by domain`);
+    expect(src).toEqual([{ domain: 'alpha.io', headcount_source: 'upload' }, { domain: 'beta.io', headcount_source: null }]);
+    await expect(as(ADMIN, () => pg.query('select * from dialer_claim_headcount(5)'))).rejects.toThrow();
+    const claimed = await asServer(() => rows<{ domain: string }>('select domain from dialer_claim_headcount(50)'));
+    expect(claimed.map((c) => c.domain)).toContain('beta.io');
+    expect(claimed.map((c) => c.domain)).not.toContain('alpha.io');
+    expect(claimed.map((c) => c.domain)).not.toContain('gamma.io');
+    expect(await asServer(() => rows('select * from dialer_claim_headcount(50)'))).toEqual([]);
+    await pg.exec(`delete from dialer_contacts where full_name like 'Hc %'`);
+  });
+});
