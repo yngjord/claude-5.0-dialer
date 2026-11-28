@@ -1732,3 +1732,159 @@ create index if not exists dialer_calls_media_unfinished on public.dialer_calls 
   where recording_sid is not null and (recording_path is null or transcript_status is null);
 create index if not exists dialer_calls_transcript_skipped on public.dialer_calls (started_at desc)
   where transcript_status = 'skipped' and pickup_status = 'Human Pickup';
+
+-- ── Companies ────────────────────────────────────────────────────────────────────────────────────────────────
+-- One row per company, shared across clients, for analysis (backend only: admins can read it, only the server writes).
+-- Contacts link to theirs by website domain, else company LinkedIn page, set on every insert or change. The AI labels
+-- (company type, industry served, business model, a short summary) are filled in by the companies worker from the
+-- website and LinkedIn page; size_bracket is worked out from whatever headcount was uploaded or enriched.
+
+-- "https://www.Acme.com.au/about" → "acme.com.au"; null when there's no usable domain.
+create or replace function public.dialer_domain(p_url text) returns text language sql immutable as $$
+  select nullif(d, '') from (
+    select regexp_replace(regexp_replace(regexp_replace(lower(trim(coalesce(p_url, ''))), '^[a-z]+://', ''), '^www\.', ''), '[/?#:].*$', '') as d
+  ) x where d ~ '^[a-z0-9-]+(\.[a-z0-9-]+)+$'
+$$;
+
+-- "https://www.linkedin.com/company/Acme-Co/about" → "acme-co"; null when it isn't a company page.
+create or replace function public.dialer_linkedin_slug(p_url text) returns text language sql immutable as $$
+  select nullif(lower((regexp_match(coalesce(p_url, ''), 'linkedin\.com/(?:company|school|showcase)/([^/?#\s]+)', 'i'))[1]), '')
+$$;
+
+-- LinkedIn's size brackets from an uploaded or enriched headcount: a count ("54", "1,200") or a range ("51-200",
+-- "11 to 50 employees", "10,001+"). A range that isn't one of the brackets goes by its middle. Null when unreadable.
+create or replace function public.dialer_size_bracket(p_raw text) returns text language plpgsql immutable as $$
+declare
+  s text := regexp_replace(lower(coalesce(p_raw, '')), '(\d),(\d{3})', '\1\2', 'g');
+  m text[];
+  n numeric;
+begin
+  m := regexp_match(s, '(\d+(?:\.\d+)?)\s*k?\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)');
+  if m is not null then
+    n := (m[1]::numeric + m[2]::numeric) / 2;
+  else
+    m := regexp_match(s, '(\d+(?:\.\d+)?)\s*(k)?');
+    if m is null then return null; end if;
+    n := m[1]::numeric * case when m[2] = 'k' then 1000 else 1 end;
+  end if;
+  return case when n < 1 then null
+              when n <= 10 then '1-10' when n <= 50 then '11-50' when n <= 200 then '51-200' when n <= 500 then '201-500'
+              when n <= 1000 then '501-1000' when n <= 5000 then '1001-5000' when n <= 10000 then '5001-10000' else '10001+' end;
+end $$;
+
+create table if not exists public.dialer_companies (
+  id uuid primary key default gen_random_uuid(),
+  domain text unique,
+  linkedin_slug text unique,
+  linkedin_url text,
+  name text,
+  -- As uploaded or enriched; size_bracket follows it.
+  headcount_raw text,
+  size_bracket text generated always as (public.dialer_size_bracket(headcount_raw)) stored,
+  company_type text,
+  industry_served text,
+  business_model text,
+  summary text,
+  ai_status text not null default 'pending' check (ai_status in ('pending', 'working', 'done', 'no_data', 'error')),
+  ai_attempts int not null default 0,
+  ai_error text,
+  ai_model text,
+  ai_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (domain is not null or linkedin_slug is not null)
+);
+create index if not exists dialer_companies_ai_queue on public.dialer_companies (ai_status, ai_at) where ai_status in ('pending', 'working', 'error');
+drop trigger if exists dialer_companies_updated_at on public.dialer_companies;
+create trigger dialer_companies_updated_at before update on public.dialer_companies for each row execute function public.dialer_set_updated_at();
+alter table public.dialer_companies enable row level security;
+drop policy if exists "Admins read companies" on public.dialer_companies;
+create policy "Admins read companies" on public.dialer_companies for select to authenticated using ((select is_dialer_admin()));
+revoke insert, update, delete on public.dialer_companies from anon, authenticated;
+
+alter table public.dialer_contacts add column if not exists company_id uuid references public.dialer_companies (id) on delete set null;
+create index if not exists dialer_contacts_company on public.dialer_contacts (company_id);
+
+-- The company for these details, made if new. Fills in what an existing row is missing (a domain, LinkedIn page, name);
+-- an uploaded headcount replaces an older one. A company that gains a domain or LinkedIn page is labelled again.
+create or replace function public.dialer_company_for(p_website text, p_linkedin text, p_name text, p_headcount text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  d text := dialer_domain(p_website);
+  s text := dialer_linkedin_slug(p_linkedin);
+  c public.dialer_companies;
+begin
+  if d is null and s is null then return null; end if;
+  for attempt in 1..2 loop
+    select * into c from dialer_companies where domain = d limit 1;
+    if c.id is null then select * into c from dialer_companies where linkedin_slug = s limit 1; end if;
+    if c.id is null then
+      begin
+        insert into dialer_companies (domain, linkedin_slug, linkedin_url, name, headcount_raw)
+        values (d, s, case when s is not null then trim(p_linkedin) end, nullif(trim(p_name), ''), nullif(trim(p_headcount), ''))
+        returning * into c;
+        return c.id;
+      exception when unique_violation then
+        c := null; -- someone else just added it: look again
+      end;
+    else
+      exit;
+    end if;
+  end loop;
+  if c.id is null then return null; end if;
+
+  update dialer_companies set
+    domain = case when domain is null and d is not null and not exists (select 1 from dialer_companies where domain = d) then d else domain end,
+    linkedin_slug = case when linkedin_slug is null and s is not null and not exists (select 1 from dialer_companies where linkedin_slug = s) then s else linkedin_slug end,
+    linkedin_url = case when linkedin_slug is null and s is not null and not exists (select 1 from dialer_companies where linkedin_slug = s) then trim(p_linkedin) else linkedin_url end,
+    name = coalesce(name, nullif(trim(p_name), '')),
+    headcount_raw = coalesce(nullif(trim(p_headcount), ''), headcount_raw),
+    ai_status = case when ai_status = 'no_data' and ((domain is null and d is not null) or (linkedin_slug is null and s is not null)) then 'pending' else ai_status end
+  where id = c.id
+    and (   (domain is null and d is not null) or (linkedin_slug is null and s is not null) or (name is null and nullif(trim(p_name), '') is not null)
+         or (nullif(trim(p_headcount), '') is not null and headcount_raw is distinct from nullif(trim(p_headcount), '')));
+  return c.id;
+end $$;
+revoke execute on function public.dialer_company_for(text, text, text, text) from public, anon, authenticated;
+
+-- Every contact links to its company when added, and again when its website, company or extra fields change.
+create or replace function public.dialer_contact_company() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  new.company_id := coalesce(
+    dialer_company_for(new.website, coalesce(new.custom->>'company_linkedin_url', new.custom->>'company_linkedin'), new.company, new.custom->>'company_headcount'),
+    case when tg_op = 'UPDATE' then old.company_id end);
+  return new;
+end $$;
+revoke execute on function public.dialer_contact_company() from public, anon, authenticated;
+drop trigger if exists dialer_contacts_company on public.dialer_contacts;
+create trigger dialer_contacts_company before insert or update of website, company, custom on public.dialer_contacts
+  for each row execute function public.dialer_contact_company();
+
+-- The companies worker takes a batch to label: new ones, ones another run left over 20 minutes ago, and failed ones
+-- (up to 3 tries, an hour apart). Server only.
+create or replace function public.dialer_claim_companies(p_limit int) returns setof public.dialer_companies
+language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Server only' using errcode = '42501';
+  end if;
+  return query
+    update dialer_companies c set ai_status = 'working', ai_at = now()
+    where c.id in (
+      select id from dialer_companies
+      where ai_status = 'pending'
+         or (ai_status = 'working' and ai_at < now() - interval '20 minutes')
+         or (ai_status = 'error' and ai_attempts < 3 and ai_at < now() - interval '1 hour')
+      order by created_at
+      limit p_limit
+      for update skip locked)
+    returning c.*;
+end $$;
+revoke execute on function public.dialer_claim_companies(int) from public, anon, authenticated;
+grant execute on function public.dialer_claim_companies(int) to service_role;
+
+-- Uploads match a headcount column by more of its usual names.
+update public.dialer_custom_fields
+set aliases = array(select distinct unnest(aliases || array['employeecount', 'employees', 'headcount', 'companyheadcount', 'companysize', 'numberofemployees', 'employeecountrange', 'employeerange', 'staffcount']))
+where key = 'company_headcount';

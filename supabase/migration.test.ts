@@ -778,3 +778,52 @@ describe('caller numbers: rotation and warm-up', () => {
     expect((await rows<{ c: number | null }>('select dialer_warmup_cap(22) as c'))[0].c).toBeNull();
   });
 });
+
+describe('companies', () => {
+  const one = async <T>(sql: string, params: unknown[] = []) => (await rows<T>(sql, params))[0];
+
+  it('reads domains, LinkedIn pages and headcounts', async () => {
+    const r = await one<Record<string, string | null>>(`select
+      dialer_domain('https://www.Acme.com.au/about?x=1') a, dialer_domain('acme.io') b, dialer_domain('not a site') c,
+      dialer_linkedin_slug('https://www.linkedin.com/company/Acme-Co/about/') d, dialer_linkedin_slug('linkedin.com/in/jane') e`);
+    expect(r).toEqual({ a: 'acme.com.au', b: 'acme.io', c: null, d: 'acme-co', e: null });
+    const brackets = await one<{ b: (string | null)[] }>(`select array[
+      dialer_size_bracket('7'), dialer_size_bracket('54'), dialer_size_bracket('1,200'), dialer_size_bracket('51-200'),
+      dialer_size_bracket('11 to 50 employees'), dialer_size_bracket('10,001+'), dialer_size_bracket('50-100'),
+      dialer_size_bracket('2.5k'), dialer_size_bracket('unknown'), dialer_size_bracket(null)] as b`);
+    expect(brackets.b).toEqual(['1-10', '51-200', '1001-5000', '51-200', '11-50', '10001+', '51-200', '1001-5000', null, null]);
+  });
+
+  it('links contacts to one shared company by domain, else LinkedIn page, and keeps uploaded headcount', async () => {
+    await pg.exec(`
+      insert into dialer_contacts (campaign_id, full_name, phone_e164, company, website, custom) values
+        ('${CAMPAIGN}', 'Co A', '+61490000001', 'Acme', 'https://www.acme.com.au', '{"company_linkedin_url":"https://linkedin.com/company/acme","company_headcount":"54"}'),
+        ('${OTHER_CAMPAIGN}', 'Co B', '+61490000002', 'Acme Pty Ltd', 'acme.com.au/contact', '{}'),
+        ('${CAMPAIGN}', 'Co C', '+61490000003', 'Acme', null, '{"company_linkedin":"https://www.linkedin.com/company/acme/"}'),
+        ('${CAMPAIGN}', 'Co D', '+61490000004', 'Nobody', null, '{}');
+    `);
+    const linked = await rows<{ full_name: string; company_id: string | null }>(`select full_name, company_id from dialer_contacts where full_name like 'Co %' order by full_name`);
+    expect(linked[0].company_id).not.toBeNull();
+    expect(linked[1].company_id).toBe(linked[0].company_id);
+    expect(linked[2].company_id).toBe(linked[0].company_id);
+    expect(linked[3].company_id).toBeNull();
+    const co = await one<Record<string, unknown>>('select domain, linkedin_slug, name, headcount_raw, size_bracket, ai_status from dialer_companies where id = $1', [linked[0].company_id]);
+    expect(co).toEqual({ domain: 'acme.com.au', linkedin_slug: 'acme', name: 'Acme', headcount_raw: '54', size_bracket: '51-200', ai_status: 'pending' });
+
+    // A later upload with a range replaces the headcount.
+    await pg.exec(`update dialer_contacts set custom = '{"company_headcount":"11-50"}' where full_name = 'Co B'`);
+    expect((await one<{ s: string }>('select size_bracket s from dialer_companies where id = $1', [linked[0].company_id])).s).toBe('11-50');
+  });
+
+  it('only the server takes companies to label, and admins alone can read them', async () => {
+    await expect(as(ADMIN, () => pg.query('select * from dialer_claim_companies(5)'))).rejects.toThrow();
+    const claimed = await asServer(() => rows<{ domain: string; ai_status: string }>('select domain, ai_status from dialer_claim_companies(50)'));
+    expect(claimed).toContainEqual({ domain: 'acme.com.au', ai_status: 'working' });
+    expect(claimed.every((c) => c.ai_status === 'working')).toBe(true);
+    // Taken companies aren't handed out again (until a run has held them 20 minutes).
+    expect(await asServer(() => rows('select * from dialer_claim_companies(50)'))).toEqual([]);
+    expect((await as(ADMIN, () => rows('select id from dialer_companies'))).length).toBe(claimed.length);
+    expect(await as(TEAM1, () => rows('select id from dialer_companies'))).toEqual([]);
+    await pg.exec(`delete from dialer_contacts where full_name like 'Co %'; update dialer_companies set ai_status = 'pending';`);
+  });
+});
