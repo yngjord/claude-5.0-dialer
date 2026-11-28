@@ -1,4 +1,4 @@
-import { FileUp } from 'lucide-react';
+import { AlertTriangle, FileUp } from 'lucide-react';
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import {
   buildImport,
@@ -92,6 +92,10 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
   const toImport = preview ? (dedupe ? preview.unique : preview.valid) : null;
   const newFields = new Set(mapping.flatMap((t) => (t.kind === 'new' ? [columnCustomKey(t)!] : [])).filter((k) => !customFields.some((f) => f.key === k)));
   const blankNewField = mapping.some((t) => t.kind === 'new' && !t.label.trim());
+  // Not required, but the companies table (AI labels, size) is built from these: say when the file doesn't map them.
+  const hasWebsite = mapping.some((t) => t.kind === 'field' && t.field === 'website');
+  const hasCompanyLinkedin = mapping.some((t) => ['company_linkedin_url', 'company_linkedin'].includes(columnCustomKey(t) ?? ''));
+  const missingCompany = [!hasWebsite && 'Website / domain', !hasCompanyLinkedin && 'Company LinkedIn URL'].filter(Boolean) as string[];
   const setTarget = (col: number, t: ColumnTarget) => setMapping((m) => m.map((v, i) => (i === col ? t : v)));
 
   const onFile = async (file: File) => {
@@ -262,6 +266,16 @@ export function ImportModal({ campaignId, onClose, onImported }: { campaignId: s
           {newFields.size > 0 && (
             <p className="text-sm text-ink-muted">
               {newFields.size} new custom field{newFields.size === 1 ? '' : 's'} will be saved and matched automatically next time.
+            </p>
+          )}
+
+          {missingCompany.length > 0 && (
+            <p role="status" className="flex items-start gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>
+                No <b className="font-medium">{missingCompany.join(' or ')}</b> column is mapped. You can still import, but each contact's company is matched and
+                labelled (type, industry, size) from {missingCompany.length === 2 ? 'these' : 'this'}, so include {missingCompany.length === 2 ? 'them' : 'it'} if the file has {missingCompany.length === 2 ? 'them' : 'it'}.
+              </span>
             </p>
           )}
 

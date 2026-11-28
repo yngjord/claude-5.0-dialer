@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clayLinkValid, clayTableId, findsContact, indexRows, keyColumns, linkedinHandle, lookupFilters, websiteDomain, type ClayFilter } from './clay';
+import { clayLinkValid, clayTableId, companyColumns, findsContact, indexRows, keyColumns, linkedinHandle, lookupFilters, rowIndex, websiteDomain, type ClayFilter } from './clay';
 
 describe('Clay tables', () => {
   it('reads the table id from a Clay URL or a bare id', () => {
@@ -77,5 +77,22 @@ describe('Clay tables', () => {
     } satisfies ClayFilter);
     // No LinkedIn column: everyone with a name and domain is looked up that way.
     expect(lookupFilters(contacts, { ...cols, linkedin: null })).toHaveLength(1);
+  });
+
+  it('finds company columns, leaving out enrichment and check columns', () => {
+    expect(companyColumns(['LinkedIn URL', 'Company Website', 'Company LinkedIn', 'Company Size', 'LinkedIn Profile Data Accuracy'])).toEqual({ companyLinkedin: 'Company LinkedIn', headcount: 'Company Size' });
+    expect(companyColumns(['Company Linkedin URL', 'Find company headcount growth', 'Employee Count', 'Percent Employee Growth Over Last 12 Months'])).toEqual({ companyLinkedin: 'Company Linkedin URL', headcount: 'Employee Count' });
+    expect(companyColumns(['LinkedIn Profile', 'Domain', 'Find Mobile Number from LinkedIn'])).toEqual({ companyLinkedin: null, headcount: null });
+  });
+
+  it('finds the row for a contact', () => {
+    const idx = rowIndex([
+      { linkedin: 'https://linkedin.com/in/neil', firstName: 'Neil', domain: 'a.com', companyLinkedin: 'x' },
+      { linkedin: null, firstName: 'Julie', domain: 'enticott.com.au', companyLinkedin: 'y' },
+    ]);
+    const c = { first_name: null, full_name: null, linkedin: null, website: null, email: null };
+    expect(idx.find({ ...c, linkedin: 'https://www.linkedin.com/in/Neil/' })?.companyLinkedin).toBe('x');
+    expect(idx.find({ ...c, full_name: 'Julie E', email: 'julie@enticott.com.au' })?.companyLinkedin).toBe('y');
+    expect(idx.find(c)).toBeNull();
   });
 });

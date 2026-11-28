@@ -21,6 +21,7 @@ import { defaultRange, rangeBounds, type DateRange } from '../lib/dateRange';
 import { formatTalkTime, percent } from '../lib/format';
 import { useClientLogos } from '../lib/clientLogos';
 import { supabase } from '../lib/supabase';
+import { useSessionState } from '../lib/useSessionState';
 import { CAMPAIGN_STATUS } from '../lib/tones';
 import { CampaignForm, MembersModal, RerunModal } from './admin/CampaignModals';
 
@@ -52,20 +53,18 @@ function periodLabel(p: CampaignPeriod): string {
 
 type ClayLink = { campaign_id: string; contacts_total: number; contacts_matched: number };
 
-/** Admins: the campaign's Clay table is connected; green once it matches enough contacts for analysis. */
-function ClayBadge({ link }: { link: ClayLink }) {
+/** Admins: a small dot when the campaign has a Clay table connected; green once it matches enough contacts. */
+function ClayDot({ link }: { link: ClayLink }) {
   const ok = clayLinkValid(link.contacts_matched, link.contacts_total);
-  return (
-    <span title={`Clay table connected: ${link.contacts_matched.toLocaleString()} of ${link.contacts_total.toLocaleString()} contacts matched${ok ? '' : ' (not enough for analysis)'}`}>
-      <Badge tone={ok ? 'green' : 'amber'}>Clay</Badge>
-    </span>
-  );
+  const label = `Clay table connected: ${link.contacts_matched.toLocaleString()} of ${link.contacts_total.toLocaleString()} contacts matched${ok ? '' : ' (not enough for analysis)'}`;
+  return <span className={`h-2 w-2 shrink-0 rounded-full ${ok ? 'bg-emerald-500' : 'bg-amber-400'}`} title={label} aria-label={label} role="img" />;
 }
 
 export default function Campaigns() {
   const { isAdmin, me } = useAuth();
   const logos = useClientLogos();
-  const [tab, setTab] = useState<Tab>('all');
+  // Filters are kept for this browser tab, so they're still set after opening a campaign and coming back.
+  const [tab, setTab] = useSessionState<Tab>('campaigns:tab', 'all');
   const { data, error, loading, reload } = useLoad(async () => {
     const [campaigns, stats, periods, clay] = await Promise.all([
       supabase.from('dialer_campaigns').select('*, campaign_members:dialer_campaign_members(user_id)').order('created_at', { ascending: false }),
@@ -98,7 +97,7 @@ export default function Campaigns() {
   };
 
   // The client picked above the metrics also narrows the campaign list (and its tab counts).
-  const [clientName, setClientName] = useState('');
+  const [clientName, setClientName] = useSessionState('campaigns:client', '');
   const forClient = data?.filter((d) => !clientName || d.campaign.client_name === clientName);
   // Evergreen campaigns only appear on their own tab, so All, Active and the rest list regular campaigns.
   const inTab = (t: Tab, d: { campaign: CampaignRow }) => TAB_STATUSES[t].includes(d.campaign.status) && (t === 'evergreen') === !!d.campaign.is_evergreen;
@@ -198,6 +197,8 @@ export default function Campaigns() {
                         </td>
                         <td className="td">
                           <span className="inline-flex items-center gap-2">
+                            {/* Admins: Clay table dot, with a blank of the same width so names stay lined up. */}
+                            {isAdmin && (clay ? <ClayDot link={clay} /> : <span className="w-2 shrink-0" aria-hidden />)}
                             {openable ? (
                               <Link to={href} className="font-medium hover:text-brand">
                                 {c.name}
@@ -211,7 +212,6 @@ export default function Campaigns() {
                                 <Badge tone="grey">JustCall</Badge>
                               </span>
                             )}
-                            {clay && <ClayBadge link={clay} />}
                             {c.is_evergreen && (
                               <span title="Warm leads this client submits in the portal land here">
                                 <Badge tone="green">Evergreen</Badge>
@@ -325,8 +325,8 @@ function CallMetrics({
   clientName: string;
   onClientChange: (name: string) => void;
 }) {
-  const [range, setRange] = useState<DateRange>(() => defaultRange('month'));
-  const [campaignId, setCampaignId] = useState('');
+  const [range, setRange] = useSessionState<DateRange>('campaigns:range', () => defaultRange('month'));
+  const [campaignId, setCampaignId] = useSessionState('campaigns:campaign', '');
   // Split by client only when the user has campaigns for more than one.
   const clients = [...new Set(campaigns.map((c) => c.client_name))].sort((a, b) => a.localeCompare(b));
   const campaignOptions = clientName ? campaigns.filter((c) => c.client_name === clientName) : campaigns;

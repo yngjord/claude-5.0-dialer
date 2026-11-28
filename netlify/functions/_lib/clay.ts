@@ -45,7 +45,14 @@ export async function clayFind(tableId: string, columns: Record<string, string>,
       do {
         const page = await query({ query: { tables: [{ id: tableId }], field_mode: 'names', select, filter }, limit: 100, ...(cursor ? { cursor } : {}) });
         for (const r of page.data ?? []) {
-          rows.push(Object.fromEntries(Object.keys(columns).map((k) => [k, typeof r[k]?.value === 'string' ? (r[k].value as string) : null])));
+          rows.push(
+            Object.fromEntries(
+              Object.keys(columns).map((k) => {
+                const v = r[k]?.value;
+                return [k, typeof v === 'string' ? v : typeof v === 'number' ? String(v) : null];
+              }),
+            ),
+          );
         }
         cursor = page.data?.length ? page.cursor : undefined;
       } while (cursor);

@@ -86,6 +86,46 @@ export function findsContact(index: ReturnType<typeof indexRows>, c: MatchableCo
   return !!fn && !!d && index.byNameDomain.has(`${fn}|${d}`);
 }
 
+/** Company columns a table may also have: its LinkedIn page and headcount (for the companies table). */
+export interface ClayCompanyColumns {
+  companyLinkedin: string | null;
+  headcount: string | null;
+}
+
+export function companyColumns(names: string[]): ClayCompanyColumns {
+  const pick = (test: (n: string) => boolean) => names.find((n) => test(n.toLowerCase().trim())) ?? null;
+  // Enrichment and check columns ("Find …", "… Data Accuracy", "… growth") aren't the value itself.
+  const helper = (n: string) => /(find|check|accuracy|confirmation|scrape|activity|data|growth|percent|normali[sz]e|extract)/.test(n);
+  return {
+    companyLinkedin: pick((n) => /linkedin/.test(n) && /company/.test(n) && !helper(n)),
+    headcount:
+      pick((n) => /^(employee count|employees|# ?employees|headcount|company headcount)$/.test(n)) ??
+      pick((n) => /(company size|employee size|employee count|headcount|employees)/.test(n) && !helper(n)),
+  };
+}
+
+/** Rows by LinkedIn handle and by first name + domain, to find the table's row for a contact. */
+export function rowIndex<T extends ClayKeyRow>(rows: T[]) {
+  const byHandle = new Map<string, T>();
+  const byNameDomain = new Map<string, T>();
+  for (const r of rows) {
+    const h = linkedinHandle(r.linkedin);
+    if (h && !byHandle.has(h)) byHandle.set(h, r);
+    const fn = r.firstName?.trim().toLowerCase();
+    const d = websiteDomain(r.domain);
+    if (fn && d && !byNameDomain.has(`${fn}|${d}`)) byNameDomain.set(`${fn}|${d}`, r);
+  }
+  return {
+    find(c: MatchableContact): T | null {
+      const h = linkedinHandle(c.linkedin);
+      if (h && byHandle.has(h)) return byHandle.get(h)!;
+      const fn = (c.first_name || c.full_name?.split(/\s+/)[0] || '').trim().toLowerCase();
+      const d = websiteDomain(c.website) ?? websiteDomain(c.email?.split('@')[1]);
+      return (fn && d && byNameDomain.get(`${fn}|${d}`)) || null;
+    },
+  };
+}
+
 type Predicate = { field: string; op: string; value: string };
 export type ClayFilter = Predicate | { or: ClayFilter[] } | { and: ClayFilter[] };
 

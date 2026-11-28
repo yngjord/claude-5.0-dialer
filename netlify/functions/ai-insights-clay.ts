@@ -3,6 +3,7 @@ import { clayStatus, clayTableId, findsContact, indexRows, keyColumns, lookupFil
 import { loadCampaign } from './_lib/aiInsights';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
 import { clayColumns, clayConfigured, clayFind } from './_lib/clay';
+import { backfillFromClay } from './_lib/companyClay';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json, readJson } from './_lib/http';
 
@@ -14,7 +15,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * people) and counts how many of the campaign's contacts it has, by LinkedIn profile, else first name + company domain.
  * Saved either way, so the admin sees the result; the analysis needs at least half the contacts found.
  */
-export default handler(async (req) => {
+export default handler(async (req, context) => {
   const me = await requireDialerUser(req);
   requireAdmin(me);
   const body = await readJson<{ campaignId?: string; url?: string }>(req);
@@ -53,6 +54,8 @@ export default handler(async (req) => {
     columns,
   };
   must(await db().from('dialer_campaign_clay').upsert(saved, { onConflict: 'campaign_id' }));
+  // While we're here: copy the table's company LinkedIn pages, headcounts and websites onto contacts missing them.
+  context.waitUntil(backfillFromClay(campaign.id).catch((err) => console.error('Clay company backfill failed', campaign.id, err)));
   return json(clayStatus(saved));
 });
 
