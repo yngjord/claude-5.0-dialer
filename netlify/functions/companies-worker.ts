@@ -1,28 +1,36 @@
 import type { Config } from '@netlify/functions';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { labelCompany, type CompanyRow } from './_lib/companies';
+import { internalAuthorised } from './_lib/companyJobs';
 import { db, must } from './_lib/db';
 
 /** 12 minutes: the platform ends background jobs at 15; what's left is picked up by the next run. */
 const DEADLINE_MS = 12 * 60_000;
 const CONCURRENCY = 5;
 const BATCH = 20;
+/**
+ * Spending guard: at most this many companies are sent for labelling in any 24 hours (COMPANY_LABEL_DAILY_CAP).
+ * About $0.0005 each, so the default 500 is roughly 25 cents a day at most. The rest wait for the next run.
+ */
+const DAILY_CAP = Number(process.env.COMPANY_LABEL_DAILY_CAP) || 500;
 
-/** The x-internal-key header against INTERNAL_JOB_KEY (constant time): only our own scheduled sweep starts this. */
-function authorised(req: Request): boolean {
-  const key = process.env.INTERNAL_JOB_KEY?.trim();
-  const given = req.headers.get('x-internal-key') ?? '';
-  if (!key || !given) return false;
-  return timingSafeEqual(createHash('sha256').update(given).digest(), createHash('sha256').update(key).digest());
+/** Companies tried in the last 24 hours (labelled, no data, or failed): what counts against the cap. */
+async function triedToday(): Promise<number> {
+  const { count, error } = await db()
+    .from('dialer_companies')
+    .select('id', { count: 'exact', head: true })
+    .in('ai_status', ['done', 'no_data', 'error'])
+    .gte('ai_at', new Date(Date.now() - 24 * 3600_000).toISOString());
+  if (error) throw error;
+  return count ?? 0;
 }
 
 /**
- * Background job, started by the companies sweep: labels companies (type, industry served, business model, summary)
+ * Background job, started when companies are added (upload, Clay check, inbound lead, headcount run): labels companies (type, industry served, business model, summary)
  * from their website and LinkedIn page, five at a time, saving each as it finishes. Companies with nothing readable
  * are marked no_data; API errors are retried by later runs (up to 3 tries). Never throws: Netlify would rerun it.
  */
 export default async (req: Request) => {
-  if (!authorised(req)) return;
+  if (!internalAuthorised(req)) return;
   // { max } labels at most that many (for a test run); otherwise it works through the queue until the deadline.
   const max = Number(((await req.json().catch(() => ({}))) as { max?: number }).max) || Infinity;
   const deadline = Date.now() + DEADLINE_MS;
@@ -31,7 +39,12 @@ export default async (req: Request) => {
   let failed = 0;
   try {
     while (Date.now() < deadline && done + empty + failed < max) {
-      const batch = must(await db().rpc('dialer_claim_companies', { p_limit: Math.min(BATCH, max - done - empty - failed) })) as (CompanyRow & { ai_attempts: number })[];
+      const allowed = DAILY_CAP - (await triedToday());
+      if (allowed <= 0) {
+        console.warn(`Companies worker: daily cap of ${DAILY_CAP} reached; the rest wait for the next run.`);
+        break;
+      }
+      const batch = must(await db().rpc('dialer_claim_companies', { p_limit: Math.min(BATCH, allowed, max - done - empty - failed) })) as (CompanyRow & { ai_attempts: number })[];
       if (!batch.length) break;
       let next = 0;
       const worker = async () => {

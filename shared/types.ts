@@ -94,6 +94,9 @@ export interface Contact {
   phone_raw: string | null;
   linkedin: string | null;
   website: string | null;
+  /** The company's LinkedIn page, and its employee count as uploaded (a number or a range like "11-50"). */
+  company_linkedin?: string | null;
+  employee_count?: string | null;
   custom: Record<string, string>;
   status: ContactStatus;
   /** Callback: the rep who booked it (only they get the contact back). The time is next_attempt_at. */

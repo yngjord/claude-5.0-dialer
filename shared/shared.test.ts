@@ -226,19 +226,24 @@ describe('csv import', () => {
       f('first_name'), f('last_name'), f('phone'), f('email'), f('website'), f('company'), f('title'), f('linkedin'),
       { kind: 'skip' }, { kind: 'skip' },
     ]);
+    // Company LinkedIn and employee count are standard fields, not the person's LinkedIn, the phone or the company.
+    expect(guessMapping(['Company Linked In', 'Person LinkedIn', 'Number of Employees', 'Company Name', 'Phone'])).toEqual([
+      f('company_linkedin'), f('linkedin'), f('employee_count'), f('company'), f('phone'),
+    ]);
+    expect(guessMapping(['LinkedIn Company Page', 'Company Size', 'Headcount'])).toEqual([f('company_linkedin'), f('employee_count'), { kind: 'skip' }]);
   });
 
   it('maps saved custom fields by name, key or a header used before', () => {
     const saved = [
-      { key: 'employee_count', label: 'Employee count', aliases: ['headcount'] },
+      { key: 'revenue', label: 'Annual revenue', aliases: ['arr'] },
       { key: 'industry', label: 'Industry', aliases: [] },
     ];
-    expect(guessMapping(['Phone', 'EMPLOYEE COUNT', 'Industry'], saved).slice(1)).toEqual([
-      { kind: 'custom', key: 'employee_count' },
+    expect(guessMapping(['Phone', 'ANNUAL REVENUE', 'Industry'], saved).slice(1)).toEqual([
+      { kind: 'custom', key: 'revenue' },
       { kind: 'custom', key: 'industry' },
     ]);
-    expect(guessMapping(['Head-count'], saved)).toEqual([{ kind: 'custom', key: 'employee_count' }]);
-    expect(guessMapping(['Revenue'], saved)).toEqual([{ kind: 'skip' }]);
+    expect(guessMapping(['A.R.R.'], saved)).toEqual([{ kind: 'custom', key: 'revenue' }]);
+    expect(guessMapping(['Turnover'], saved)).toEqual([{ kind: 'skip' }]);
     expect(customFieldKey(' Annual Revenue ($) ')).toBe('annual_revenue');
   });
 

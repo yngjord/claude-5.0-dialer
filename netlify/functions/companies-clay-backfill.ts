@@ -1,14 +1,7 @@
 import type { Config } from '@netlify/functions';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { backfillFromClay } from './_lib/companyClay';
+import { internalAuthorised, startLabelling } from './_lib/companyJobs';
 import { db, must } from './_lib/db';
-
-function authorised(req: Request): boolean {
-  const key = process.env.INTERNAL_JOB_KEY?.trim();
-  const given = req.headers.get('x-internal-key') ?? '';
-  if (!key || !given) return false;
-  return timingSafeEqual(createHash('sha256').update(given).digest(), createHash('sha256').update(key).digest());
-}
 
 /**
  * Background job (our key only): for every campaign with a Clay table connected, copies the company LinkedIn page,
@@ -16,7 +9,7 @@ function authorised(req: Request): boolean {
  * enriched. Safe to run again: it only fills gaps. Never throws: Netlify would rerun it.
  */
 export default async (req: Request) => {
-  if (!authorised(req)) return;
+  if (!internalAuthorised(req)) return;
   const links = must(await db().from('dialer_campaign_clay').select('campaign_id')) as { campaign_id: string }[];
   for (const { campaign_id } of links) {
     try {
@@ -26,6 +19,7 @@ export default async (req: Request) => {
       console.error('Clay company backfill failed', campaign_id, err);
     }
   }
+  await startLabelling();
 };
 
 export const config: Config = { path: '/api/internal/companies/clay-backfill', method: 'POST', background: true };

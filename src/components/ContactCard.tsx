@@ -1,4 +1,4 @@
-import { Building2, ExternalLink, Mail, MessageSquare, Phone } from 'lucide-react';
+import { Building2, ExternalLink, Mail, MessageSquare, Phone, Users } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { INTERNAL_CUSTOM_KEYS } from '../../shared/inboundLead';
 import { formatPhone } from '../../shared/phone';
@@ -66,6 +66,16 @@ export function ContactCard({
           <a href={withProtocol(contact.website)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 hover:text-brand">
             {domainOf(contact.website)} <ExternalLink size={12} />
           </a>
+        )}
+        {contact.company_linkedin && (
+          <a href={withProtocol(contact.company_linkedin)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 hover:text-brand">
+            <span className="text-[11px] font-semibold">in</span> Company <ExternalLink size={12} />
+          </a>
+        )}
+        {contact.employee_count && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 tabular-nums">
+            <Users size={14} /> {contact.employee_count} staff
+          </span>
         )}
         {canText && (
           <button onClick={() => setSms(true)} className="inline-flex items-center gap-1.5 rounded-full border border-line-strong px-3 py-1.5 hover:border-brand hover:text-brand">

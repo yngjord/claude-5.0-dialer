@@ -796,11 +796,11 @@ describe('companies', () => {
 
   it('links contacts to one shared company by domain, else LinkedIn page, and keeps uploaded headcount', async () => {
     await pg.exec(`
-      insert into dialer_contacts (campaign_id, full_name, phone_e164, company, website, custom) values
-        ('${CAMPAIGN}', 'Co A', '+61490000001', 'Acme', 'https://www.acme.com.au', '{"company_linkedin_url":"https://linkedin.com/company/acme","company_headcount":"54"}'),
-        ('${OTHER_CAMPAIGN}', 'Co B', '+61490000002', 'Acme Pty Ltd', 'acme.com.au/contact', '{}'),
-        ('${CAMPAIGN}', 'Co C', '+61490000003', 'Acme', null, '{"company_linkedin":"https://www.linkedin.com/company/acme/"}'),
-        ('${CAMPAIGN}', 'Co D', '+61490000004', 'Nobody', null, '{}');
+      insert into dialer_contacts (campaign_id, full_name, phone_e164, company, website, company_linkedin, employee_count) values
+        ('${CAMPAIGN}', 'Co A', '+61490000001', 'Acme', 'https://www.acme.com.au', 'https://linkedin.com/company/acme', '54'),
+        ('${OTHER_CAMPAIGN}', 'Co B', '+61490000002', 'Acme Pty Ltd', 'acme.com.au/contact', null, null),
+        ('${CAMPAIGN}', 'Co C', '+61490000003', 'Acme', null, 'https://www.linkedin.com/company/acme/', null),
+        ('${CAMPAIGN}', 'Co D', '+61490000004', 'Nobody', null, null, null);
     `);
     const linked = await rows<{ full_name: string; company_id: string | null }>(`select full_name, company_id from dialer_contacts where full_name like 'Co %' order by full_name`);
     expect(linked[0].company_id).not.toBeNull();
@@ -811,7 +811,7 @@ describe('companies', () => {
     expect(co).toEqual({ domain: 'acme.com.au', linkedin_slug: 'acme', name: 'Acme', headcount_raw: '54', size_bracket: '51-200', ai_status: 'pending' });
 
     // A later upload with a range replaces the headcount.
-    await pg.exec(`update dialer_contacts set custom = '{"company_headcount":"11-50"}' where full_name = 'Co B'`);
+    await pg.exec(`update dialer_contacts set employee_count = '11-50' where full_name = 'Co B'`);
     expect((await one<{ s: string }>('select size_bracket s from dialer_companies where id = $1', [linked[0].company_id])).s).toBe('11-50');
   });
 
@@ -831,10 +831,10 @@ describe('companies', () => {
 describe('company headcount', () => {
   it('marks uploaded headcounts, and the headcount job only takes LinkedIn companies without one (server only)', async () => {
     await pg.exec(`
-      insert into dialer_contacts (campaign_id, full_name, phone_e164, company, website, custom) values
-        ('${CAMPAIGN}', 'Hc A', '+61491000001', 'Alpha', 'alpha.io', '{"company_linkedin_url":"https://linkedin.com/company/alpha","company_headcount":"12"}'),
-        ('${CAMPAIGN}', 'Hc B', '+61491000002', 'Beta', 'beta.io', '{"company_linkedin_url":"https://linkedin.com/company/beta"}'),
-        ('${CAMPAIGN}', 'Hc C', '+61491000003', 'Gamma', 'gamma.io', '{}');
+      insert into dialer_contacts (campaign_id, full_name, phone_e164, company, website, company_linkedin, employee_count) values
+        ('${CAMPAIGN}', 'Hc A', '+61491000001', 'Alpha', 'alpha.io', 'https://linkedin.com/company/alpha', '12'),
+        ('${CAMPAIGN}', 'Hc B', '+61491000002', 'Beta', 'beta.io', 'https://linkedin.com/company/beta', null),
+        ('${CAMPAIGN}', 'Hc C', '+61491000003', 'Gamma', 'gamma.io', null, null);
     `);
     const src = await rows<{ domain: string; headcount_source: string | null }>(`select domain, headcount_source from dialer_companies where domain in ('alpha.io','beta.io') order by domain`);
     expect(src).toEqual([{ domain: 'alpha.io', headcount_source: 'upload' }, { domain: 'beta.io', headcount_source: null }]);
@@ -845,5 +845,30 @@ describe('company headcount', () => {
     expect(claimed.map((c) => c.domain)).not.toContain('gamma.io');
     expect(await asServer(() => rows('select * from dialer_claim_headcount(50)'))).toEqual([]);
     await pg.exec(`delete from dialer_contacts where full_name like 'Hc %'`);
+  });
+
+  it('looks up headcounts for one campaign when asked, and reports its coverage to admins', async () => {
+    const one = async <T>(sql: string) => (await rows<T>(sql))[0];
+    const coverage = () => as(ADMIN, () => one<Record<string, number>>(`select * from dialer_company_coverage('${CAMPAIGN}')`));
+    const before = await coverage();
+    await pg.exec(`
+      insert into dialer_contacts (campaign_id, full_name, phone_e164, company, website, company_linkedin, employee_count) values
+        ('${CAMPAIGN}', 'Cv A', '+61492000001', 'Delta', 'delta.io', 'https://linkedin.com/company/delta', '40'),
+        ('${CAMPAIGN}', 'Cv B', '+61492000002', 'Echo', 'echo.io', 'https://linkedin.com/company/echo', null),
+        ('${CAMPAIGN}', 'Cv C', '+61492000003', 'Nobody', null, null, null),
+        ('${OTHER_CAMPAIGN}', 'Cv D', '+61492000004', 'Fox', 'fox.io', 'https://linkedin.com/company/fox', null);
+      update dialer_companies set ai_status = 'done', summary = 'x' where domain in ('delta.io', 'echo.io');
+      update dialer_companies set icypeas_status = null where domain in ('echo.io', 'fox.io');
+    `);
+    const after = await coverage();
+    const added = Object.fromEntries(Object.keys(after).map((k) => [k, after[k] - before[k]]));
+    expect(added).toMatchObject({ contacts: 3, contacts_with_company: 2, companies: 2, summarised: 2, sized: 1, complete: 1, headcount_lookable: 1 });
+    await expect(as(TEAM1, () => pg.query(`select * from dialer_company_coverage('${CAMPAIGN}')`))).rejects.toThrow();
+    // Only this campaign's companies are taken (not Fox, from the other campaign).
+    const claimed = await asServer(() => rows<{ domain: string }>(`select domain from dialer_claim_headcount(50, '${CAMPAIGN}')`));
+    expect(claimed.map((c) => c.domain)).toContain('echo.io');
+    expect(claimed.map((c) => c.domain)).not.toContain('fox.io');
+    expect((await coverage()).headcount_running).toBe(claimed.length);
+    await pg.exec(`delete from dialer_contacts where full_name like 'Cv %'`);
   });
 });

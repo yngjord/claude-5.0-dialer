@@ -1606,8 +1606,8 @@ begin
                          where m2.campaign_id = p_campaign_id and p2.role::text = 'team'
                          order by coalesce(nullif(trim(p2.display_name), ''), p2.email) limit 1));
 
-  insert into dialer_contacts (campaign_id, full_name, first_name, company, title, email, phone_e164, phone_raw, linkedin, website, custom, source)
-  select new_id, c.full_name, c.first_name, c.company, c.title, c.email, c.phone_e164, c.phone_raw, c.linkedin, c.website, c.custom, c.source
+  insert into dialer_contacts (campaign_id, full_name, first_name, company, title, email, phone_e164, phone_raw, linkedin, website, company_linkedin, employee_count, custom, source)
+  select new_id, c.full_name, c.first_name, c.company, c.title, c.email, c.phone_e164, c.phone_raw, c.linkedin, c.website, c.company_linkedin, c.employee_count, c.custom, c.source
   from dialer_contacts c
   where c.campaign_id = p_campaign_id
     and ((c.status in ('done', 'bad_number') and c.last_disposition = any(p_dispositions))
@@ -1972,3 +1972,81 @@ begin
 end $$;
 revoke execute on function public.dialer_claim_headcount(int) from public, anon, authenticated;
 grant execute on function public.dialer_claim_headcount(int) to service_role;
+
+-- ── Employee count and company LinkedIn: standard contact fields ─────────────────────────────────────────────
+-- They were custom fields (company_headcount; company_linkedin_url and company_linkedin, the same thing twice). Now
+-- columns every upload can map, moved across here; the custom field definitions go, as uploads match them by name.
+alter table public.dialer_contacts add column if not exists company_linkedin text, add column if not exists employee_count text;
+update public.dialer_contacts
+set company_linkedin = coalesce(company_linkedin, nullif(trim(custom->>'company_linkedin_url'), ''), nullif(trim(custom->>'company_linkedin'), '')),
+    employee_count = coalesce(employee_count, nullif(trim(custom->>'company_headcount'), '')),
+    custom = custom - 'company_linkedin_url' - 'company_linkedin' - 'company_headcount'
+where custom ?| array['company_linkedin_url', 'company_linkedin', 'company_headcount'];
+delete from public.dialer_custom_fields where key in ('company_linkedin_url', 'company_linkedin', 'company_headcount');
+
+create or replace function public.dialer_contact_company() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  new.company_id := coalesce(
+    dialer_company_for(new.website, new.company_linkedin, new.company, new.employee_count),
+    case when tg_op = 'UPDATE' then old.company_id end);
+  return new;
+end $$;
+revoke execute on function public.dialer_contact_company() from public, anon, authenticated;
+drop trigger if exists dialer_contacts_company on public.dialer_contacts;
+create trigger dialer_contacts_company before insert or update of website, company, company_linkedin, employee_count on public.dialer_contacts
+  for each row execute function public.dialer_contact_company();
+
+-- ── Company data: manual headcount per campaign, and coverage ────────────────────────────────────────────────
+-- Headcounts from LinkedIn (Icypeas, paid) are only looked up when an admin asks, for one campaign's companies. A
+-- company that failed is tried again on the next ask; one Icypeas couldn't find isn't (it would cost again for nothing).
+drop function if exists public.dialer_claim_headcount(int);
+create or replace function public.dialer_claim_headcount(p_limit int, p_campaign_id uuid default null) returns setof public.dialer_companies
+language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Server only' using errcode = '42501';
+  end if;
+  return query
+    update dialer_companies c set icypeas_status = 'working', icypeas_at = now()
+    where c.id in (
+      select co.id from dialer_companies co
+      where co.linkedin_slug is not null and co.headcount_raw is null
+        and (co.icypeas_status is null or co.icypeas_status = 'error'
+             or (co.icypeas_status = 'working' and co.icypeas_at < now() - interval '20 minutes'))
+        and (p_campaign_id is null or exists (select 1 from dialer_contacts k where k.company_id = co.id and k.campaign_id = p_campaign_id))
+      order by co.created_at
+      limit p_limit
+      for update skip locked)
+    returning c.*;
+end $$;
+revoke execute on function public.dialer_claim_headcount(int, uuid) from public, anon, authenticated;
+grant execute on function public.dialer_claim_headcount(int, uuid) to service_role;
+
+-- How complete a campaign's company data is (admins): companies, and how many have a summary, a size bracket, both;
+-- plus what's left to do (labelling waiting, headcounts Icypeas could look up) and what can't be done.
+create or replace function public.dialer_company_coverage(p_campaign_id uuid)
+returns table (contacts int, contacts_with_company int, companies int, summarised int, no_data int, labelling int, sized int, complete int,
+               headcount_lookable int, headcount_running int, headcount_not_found int)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not (select is_dialer_admin()) then
+    raise exception 'Admins only' using errcode = '42501';
+  end if;
+  return query
+    with k as (select company_id from dialer_contacts where campaign_id = p_campaign_id),
+         co as (select * from dialer_companies where id in (select company_id from k where company_id is not null))
+    select (select count(*) from k)::int,
+           (select count(*) from k where company_id is not null)::int,
+           (select count(*) from co)::int,
+           (select count(*) from co where ai_status = 'done')::int,
+           (select count(*) from co where ai_status = 'no_data')::int,
+           (select count(*) from co where ai_status = 'pending' or (ai_status = 'working' and ai_at > now() - interval '20 minutes') or (ai_status = 'error' and ai_attempts < 3))::int,
+           (select count(*) from co where size_bracket is not null)::int,
+           (select count(*) from co where ai_status = 'done' and size_bracket is not null)::int,
+           (select count(*) from co where linkedin_slug is not null and headcount_raw is null and (icypeas_status is null or icypeas_status = 'error'))::int,
+           (select count(*) from co where icypeas_status = 'working' and icypeas_at > now() - interval '20 minutes')::int,
+           (select count(*) from co where headcount_raw is null and icypeas_status = 'not_found')::int;
+end $$;
+revoke execute on function public.dialer_company_coverage(uuid) from public, anon;
+grant execute on function public.dialer_company_coverage(uuid) to authenticated;

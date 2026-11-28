@@ -2,7 +2,7 @@ import { companyColumns, keyColumns, lookupFilters, rowIndex, type MatchableCont
 import { clayColumns, clayConfigured, clayFind } from './clay';
 import { db, must } from './db';
 
-type ContactRow = MatchableContact & { id: string; custom: Record<string, string> | null };
+type ContactRow = MatchableContact & { id: string; company_linkedin: string | null; employee_count: string | null };
 
 const COMPANY_PAGE = /linkedin\.com\/(company|school|showcase)\//i;
 
@@ -27,18 +27,17 @@ export async function backfillFromClay(campaignId: string): Promise<{ contacts: 
   const contacts: ContactRow[] = [];
   for (let from = 0; ; from += 1000) {
     const page = must(
-      await db().from('dialer_contacts').select('id, first_name, full_name, linkedin, website, email, custom').eq('campaign_id', campaignId).order('id').range(from, from + 999),
+      await db().from('dialer_contacts').select('id, first_name, full_name, linkedin, website, email, company_linkedin, employee_count').eq('campaign_id', campaignId).order('id').range(from, from + 999),
     ) as ContactRow[];
     contacts.push(...page);
     if (page.length < 1000) break;
   }
   // Only contacts missing something the table could add. A "company LinkedIn" that isn't a company page (e.g. a
   // person's profile mapped into that column) counts as missing, so the table's value replaces it.
-  const hasCompanyPage = (custom: Record<string, string>) => COMPANY_PAGE.test(custom.company_linkedin_url ?? custom.company_linkedin ?? '');
-  const wanting = contacts.filter((c) => {
-    const custom = c.custom ?? {};
-    return (company.companyLinkedin && !hasCompanyPage(custom)) || (company.headcount && !custom.company_headcount) || (keys.domain && !c.website?.trim());
-  });
+  const hasCompanyPage = (c: ContactRow) => COMPANY_PAGE.test(c.company_linkedin ?? '');
+  const wanting = contacts.filter(
+    (c) => (company.companyLinkedin && !hasCompanyPage(c)) || (company.headcount && !c.employee_count?.trim()) || (keys.domain && !c.website?.trim()),
+  );
   if (!wanting.length) return { contacts: contacts.length, updated: 0 };
 
   const wanted = Object.fromEntries(
@@ -51,19 +50,11 @@ export async function backfillFromClay(campaignId: string): Promise<{ contacts: 
   for (const c of wanting) {
     const row = index.find(c);
     if (!row) continue;
-    const custom = { ...(c.custom ?? {}) };
-    const patch: { custom?: Record<string, string>; website?: string } = {};
-    if (row.companyLinkedin?.trim() && COMPANY_PAGE.test(row.companyLinkedin) && !hasCompanyPage(custom)) {
-      delete custom.company_linkedin;
-      custom.company_linkedin_url = row.companyLinkedin.trim();
-      patch.custom = custom;
-    }
-    if (row.headcount?.trim() && !custom.company_headcount) {
-      custom.company_headcount = row.headcount.trim();
-      patch.custom = custom;
-    }
+    const patch: { company_linkedin?: string; employee_count?: string; website?: string } = {};
+    if (row.companyLinkedin?.trim() && COMPANY_PAGE.test(row.companyLinkedin) && !hasCompanyPage(c)) patch.company_linkedin = row.companyLinkedin.trim();
+    if (row.headcount?.trim() && !c.employee_count?.trim()) patch.employee_count = row.headcount.trim();
     if (row.domain?.trim() && !c.website?.trim()) patch.website = row.domain.trim();
-    if (!patch.custom && !patch.website) continue;
+    if (!Object.keys(patch).length) continue;
     must(await db().from('dialer_contacts').update(patch).eq('id', c.id));
     updated++;
   }

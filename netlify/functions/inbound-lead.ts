@@ -2,6 +2,7 @@ import type { Config } from '@netlify/functions';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { mergeContext, validateInboundLead, type InboundLeadRequest, type InboundLeadResponse } from '../../shared/inboundLead';
 import { todayInSydney } from '../../shared/leads';
+import { startLabelling } from './_lib/companyJobs';
 import { db, must } from './_lib/db';
 import { env, handler, HttpError, json } from './_lib/http';
 
@@ -22,7 +23,7 @@ type ContactRow = { id: string; status: string; context: string | null; custom: 
  * - Someone already in the evergreen campaign gets the new context added and, if they'd been finished, is queued again.
  * - Refused: no evergreen campaign for the client (404), a number on Do Not Call (409), or bad data (400).
  */
-export default handler(async (req) => {
+export default handler(async (req, context) => {
   if (!authorised(req)) throw new HttpError(401, 'Missing or wrong x-api-key.');
   let body: Partial<InboundLeadRequest> | null = null;
   try {
@@ -89,6 +90,8 @@ export default handler(async (req) => {
       .select('id')
       .single(),
   ) as { id: string };
+  // A new company (by its website) gets labelled now rather than waiting for the next upload.
+  if (lead.website) context.waitUntil(startLabelling());
   return json({ status: 'created', contact_id: inserted.id, campaign_id: campaign.id, campaign_name: campaign.name } satisfies InboundLeadResponse, 201);
 });
 

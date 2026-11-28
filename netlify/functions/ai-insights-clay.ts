@@ -4,6 +4,7 @@ import { loadCampaign } from './_lib/aiInsights';
 import { requireAdmin, requireDialerUser } from './_lib/auth';
 import { clayColumns, clayConfigured, clayFind } from './_lib/clay';
 import { backfillFromClay } from './_lib/companyClay';
+import { startLabelling } from './_lib/companyJobs';
 import { db, must } from './_lib/db';
 import { handler, HttpError, json, readJson } from './_lib/http';
 
@@ -55,7 +56,11 @@ export default handler(async (req, context) => {
   };
   must(await db().from('dialer_campaign_clay').upsert(saved, { onConflict: 'campaign_id' }));
   // While we're here: copy the table's company LinkedIn pages, headcounts and websites onto contacts missing them.
-  context.waitUntil(backfillFromClay(campaign.id).catch((err) => console.error('Clay company backfill failed', campaign.id, err)));
+  context.waitUntil(
+    backfillFromClay(campaign.id)
+      .then(() => startLabelling())
+      .catch((err) => console.error('Clay company backfill failed', campaign.id, err)),
+  );
   return json(clayStatus(saved));
 });
 

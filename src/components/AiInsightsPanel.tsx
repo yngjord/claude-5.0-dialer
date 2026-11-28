@@ -7,6 +7,7 @@ import { formatDateTime } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import { DISPOSITION_TONES } from '../lib/tones';
 import { CallDetailModal } from './CallDetail';
+import { CompanyCoverage } from './CompanyCoverage';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { Spinner } from './ui/Spinner';
@@ -130,6 +131,9 @@ export function AiInsightsPanel({ campaignId }: { campaignId: string }) {
           {running ? 'Analysing…' : status?.toAnalyse ? `Analyse ${status.toAnalyse} new conversation${status.toAnalyse === 1 ? '' : 's'}` : 'Analyse new conversations'}
         </Button>
       </div>
+
+      {/* What the AI insights will know about each company: summary and size. */}
+      <CompanyCoverage campaignId={campaignId} />
 
       {blocked && <p className="mt-4 rounded-2xl bg-brand-tint px-4 py-3 text-sm text-brand">{blocked}</p>}
 

@@ -34,7 +34,7 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((v) => v.trim() !== ''));
 }
 
-export const CONTACT_FIELDS = ['full_name', 'first_name', 'last_name', 'phone', 'email', 'company', 'title', 'linkedin', 'website'] as const;
+export const CONTACT_FIELDS = ['full_name', 'first_name', 'last_name', 'phone', 'email', 'company', 'title', 'linkedin', 'website', 'company_linkedin', 'employee_count'] as const;
 export type ContactField = (typeof CONTACT_FIELDS)[number];
 
 export const CONTACT_FIELD_LABELS: Record<ContactField, string> = {
@@ -47,6 +47,8 @@ export const CONTACT_FIELD_LABELS: Record<ContactField, string> = {
   title: 'Job title',
   linkedin: 'LinkedIn URL',
   website: 'Website',
+  company_linkedin: 'Company LinkedIn URL',
+  employee_count: 'Employee count',
 };
 
 /** A saved custom field (dialer_custom_fields). Contacts store custom values under `key`. */
@@ -80,10 +82,13 @@ const GUESSES: [RegExp, ContactField][] = [
   [/^(full)?name$|^(contact|prospect|person)(full)?name$/, 'full_name'],
   [/^first(name)?$|^given(name)?$/, 'first_name'],
   [/^last(name)?$|^surname$|^family(name)?$/, 'last_name'],
+  // Employee count before phone ("Number of Employees") and company ("Company Size").
+  [/employee|headcount|staff|companysize|teamsize|^size$/, 'employee_count'],
   [/phone|mobile|^cell|number$/, 'phone'],
   [/e?mail/, 'email'],
-  // LinkedIn before website ("LinkedIn URL"), website before company ("Company Website").
-  [/linkedin/, 'linkedin'],
+  // Company LinkedIn before the person's, LinkedIn before website ("LinkedIn URL"), website before company ("Company Website").
+  [/(company|organi[sz]ation|business|account).*linkedin|linkedin.*(company|page)/, 'company_linkedin'],
+  [/^(?!.*(company|organi[sz]ation|business|account)).*linkedin/, 'linkedin'],
   [/website|domain|url|site/, 'website'],
   [/company|organi[sz]ation|account|business/, 'company'],
   [/title|role|position/, 'title'],
@@ -131,6 +136,9 @@ export interface ImportContact {
   phone_raw: string;
   linkedin: string | null;
   website: string | null;
+  company_linkedin: string | null;
+  /** As uploaded: a number ("54") or a range ("11-50"). */
+  employee_count: string | null;
   custom: Record<string, string>;
 }
 
@@ -188,6 +196,8 @@ export function buildImport(rows: string[][], mapping: ColumnMapping, existingPh
       phone_raw: rawPhone,
       linkedin: get('linkedin'),
       website: get('website'),
+      company_linkedin: get('company_linkedin'),
+      employee_count: get('employee_count'),
       custom,
     };
     preview.valid.push(contact);
