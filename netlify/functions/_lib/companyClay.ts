@@ -1,5 +1,5 @@
 import { companyColumns, keyColumns, lookupFilters, rowIndex, type MatchableContact } from '../../../shared/clay';
-import { clayConfigured, clayFind } from './clay';
+import { clayColumns, clayConfigured, clayFind } from './clay';
 import { db, must } from './db';
 
 type ContactRow = MatchableContact & { id: string; custom: Record<string, string> | null };
@@ -16,8 +16,11 @@ export async function backfillFromClay(campaignId: string): Promise<{ contacts: 
   const link = must(await db().from('dialer_campaign_clay').select('table_id, columns').eq('campaign_id', campaignId).maybeSingle()) as { table_id: string; columns: string[] } | null;
   if (!link) return { contacts: 0, updated: 0, skipped: 'no Clay table' };
 
-  const keys = keyColumns(link.columns);
-  const company = companyColumns(link.columns);
+  // The table's columns as they are now (they may have been added or fixed since the table was last checked).
+  const columns = await clayColumns(link.table_id).catch(() => link.columns);
+  if (columns.join('|') !== link.columns.join('|')) await db().from('dialer_campaign_clay').update({ columns }).eq('campaign_id', campaignId);
+  const keys = keyColumns(columns);
+  const company = companyColumns(columns);
   if (!keys.linkedin && !(keys.firstName && keys.domain)) return { contacts: 0, updated: 0, skipped: 'no columns to match contacts by' };
   if (!company.companyLinkedin && !company.headcount && !keys.domain) return { contacts: 0, updated: 0, skipped: 'no company columns' };
 
