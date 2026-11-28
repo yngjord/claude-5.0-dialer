@@ -4,6 +4,8 @@ import { db, must } from './db';
 
 type ContactRow = MatchableContact & { id: string; custom: Record<string, string> | null };
 
+const COMPANY_PAGE = /linkedin\.com\/(company|school|showcase)\//i;
+
 /**
  * Fills in what the campaign's Clay table knows about each contact's company and the contact itself doesn't have yet:
  * the company LinkedIn page, the headcount, and the website. Saving them on the contact links (or completes) its
@@ -27,10 +29,12 @@ export async function backfillFromClay(campaignId: string): Promise<{ contacts: 
     contacts.push(...page);
     if (page.length < 1000) break;
   }
-  // Only contacts missing something the table could add.
+  // Only contacts missing something the table could add. A "company LinkedIn" that isn't a company page (e.g. a
+  // person's profile mapped into that column) counts as missing, so the table's value replaces it.
+  const hasCompanyPage = (custom: Record<string, string>) => COMPANY_PAGE.test(custom.company_linkedin_url ?? custom.company_linkedin ?? '');
   const wanting = contacts.filter((c) => {
     const custom = c.custom ?? {};
-    return (company.companyLinkedin && !custom.company_linkedin_url && !custom.company_linkedin) || (company.headcount && !custom.company_headcount) || (keys.domain && !c.website?.trim());
+    return (company.companyLinkedin && !hasCompanyPage(custom)) || (company.headcount && !custom.company_headcount) || (keys.domain && !c.website?.trim());
   });
   if (!wanting.length) return { contacts: contacts.length, updated: 0 };
 
@@ -46,7 +50,8 @@ export async function backfillFromClay(campaignId: string): Promise<{ contacts: 
     if (!row) continue;
     const custom = { ...(c.custom ?? {}) };
     const patch: { custom?: Record<string, string>; website?: string } = {};
-    if (row.companyLinkedin?.trim() && /linkedin\.com\/(company|school|showcase)\//i.test(row.companyLinkedin) && !custom.company_linkedin_url && !custom.company_linkedin) {
+    if (row.companyLinkedin?.trim() && COMPANY_PAGE.test(row.companyLinkedin) && !hasCompanyPage(custom)) {
+      delete custom.company_linkedin;
       custom.company_linkedin_url = row.companyLinkedin.trim();
       patch.custom = custom;
     }
